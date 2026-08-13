@@ -1,0 +1,80 @@
+import 'package:dio/dio.dart';
+
+/// Enterprise network exception class wrapping HTTP errors and connection failures.
+class NetworkException implements Exception {
+  final String message;
+  final int? statusCode;
+  final dynamic data;
+
+  const NetworkException({
+    required this.message,
+    this.statusCode,
+    this.data,
+  });
+
+  factory NetworkException.fromDioException(DioException dioException) {
+    switch (dioException.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.connectionError:
+        return const NetworkException(
+          message: 'Connection failed. Please check your internet connection.',
+        );
+      case DioExceptionType.badResponse:
+        final response = dioException.response;
+        final statusCode = response?.statusCode;
+        final responseData = response?.data;
+        String? serverMessage;
+
+        if (responseData is Map<String, dynamic>) {
+          serverMessage = responseData['message'] as String? ??
+              responseData['error'] as String?;
+        }
+
+        switch (statusCode) {
+          case 400:
+            return NetworkException(
+              message: serverMessage ?? 'Bad request.',
+              statusCode: statusCode,
+              data: responseData,
+            );
+          case 401:
+          case 403:
+            return NetworkException(
+              message: serverMessage ?? 'Invalid email or password',
+              statusCode: statusCode,
+              data: responseData,
+            );
+          case 404:
+            return NetworkException(
+              message: serverMessage ?? 'Resource not found.',
+              statusCode: statusCode,
+              data: responseData,
+            );
+          case 422:
+            return NetworkException(
+              message: serverMessage ?? 'Validation error.',
+              statusCode: statusCode,
+              data: responseData,
+            );
+          case 500:
+          default:
+            return NetworkException(
+              message: serverMessage ?? 'Server error occurred. Please try again later.',
+              statusCode: statusCode,
+              data: responseData,
+            );
+        }
+      case DioExceptionType.cancel:
+        return const NetworkException(message: 'Request was cancelled.');
+      default:
+        return const NetworkException(
+          message: 'Unexpected network error occurred.',
+        );
+    }
+  }
+
+  @override
+  String toString() => message;
+}
