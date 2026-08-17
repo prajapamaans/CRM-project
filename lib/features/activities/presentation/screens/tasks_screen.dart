@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:provider/provider.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/models/master_dropdown_model.dart';
-import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/create_task_modal.dart';
 import 'task_details_screen.dart';
 
@@ -131,7 +133,8 @@ class _TasksScreenState extends State<TasksScreen> {
 
       List<Map<String, dynamic>> activities = [];
       try {
-        activities = await repository.getActivities(type: 'task', page: 1, limit: 25);
+        final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+        activities = await repository.getActivities(type: 'task', page: 1, limit: 25, departmentId: deptId);
       } catch (e) {
         debugPrint('[FETCH activities ERROR]: $e');
       }
@@ -724,30 +727,44 @@ class _TasksScreenState extends State<TasksScreen> {
 
                       // Task List View (Exact mockup card layout)
                       Expanded(
-                        child: _isLoadingTasks
-                            ? const Center(
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFF00A884),
-                                ),
-                              )
-                            : filteredTasks.isEmpty
-                                ? Center(
-                                    child: Text(
-                                      'No tasks found.',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: const Color(0xFF64748B),
-                                      ),
-                                    ),
-                                  )
-                                : ListView.builder(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                                    itemCount: filteredTasks.length,
-                                    itemBuilder: (context, index) {
-                                      final task = filteredTasks[index];
-                                      return _buildTaskCard(task);
-                                    },
+                        child: AppRefreshIndicator(
+                          onRefresh: () async {
+                            await _loadAllApisAndTasks();
+                          },
+                          child: _isLoadingTasks && _tasks.isEmpty
+                              ? const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Color(0xFF00A884),
                                   ),
+                                )
+                              : filteredTasks.isEmpty
+                                  ? ListView(
+                                      physics: const AlwaysScrollableScrollPhysics(
+                                          parent: BouncingScrollPhysics()),
+                                      children: [
+                                        const SizedBox(height: 120),
+                                        Center(
+                                          child: Text(
+                                            'No tasks found.',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              color: const Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : ListView.builder(
+                                      physics: const AlwaysScrollableScrollPhysics(
+                                          parent: BouncingScrollPhysics()),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                                      itemCount: filteredTasks.length,
+                                      itemBuilder: (context, index) {
+                                        final task = filteredTasks[index];
+                                        return _buildTaskCard(task);
+                                      },
+                                    ),
+                        ),
                       ),
 
                       const Divider(height: 1, color: Color(0xFFE2E8F0)),

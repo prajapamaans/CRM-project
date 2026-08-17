@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import 'follow_up_task_section.dart';
 
 class CreateEmailModal extends StatefulWidget {
   final String? contactId;
@@ -231,13 +232,6 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                     ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 18),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                  const SizedBox(width: 14),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(false),
                     icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
@@ -546,57 +540,13 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
             const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
             // 9. Follow-up Task Row
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: Colors.white,
-              child: Row(
-                children: [
-                  Checkbox(
-                    value: _createFollowUpTask,
-                    onChanged: (val) {
-                      setState(() {
-                        _createFollowUpTask = val ?? false;
-                      });
-                    },
-                    activeColor: const Color(0xFF00A884),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
-                  ),
-                  Expanded(
-                    child: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          'Create a ',
-                          style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF475569)),
-                        ),
-                        Text(
-                          'To-do ⌄ ',
-                          style: GoogleFonts.poppins(
-                              fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                        ),
-                        Text(
-                          'task to follow up ',
-                          style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF475569)),
-                        ),
-                        Text(
-                          'In 3 business days (Monday) ⌄ ',
-                          style: GoogleFonts.poppins(
-                              fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                        ),
-                        Text(
-                          'at ',
-                          style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF475569)),
-                        ),
-                        Text(
-                          '8:00 AM ⌄',
-                          style: GoogleFonts.poppins(
-                              fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            FollowUpTaskSection(
+              initialChecked: _createFollowUpTask,
+              onCheckedChanged: (val) {
+                setState(() {
+                  _createFollowUpTask = val;
+                });
+              },
             ),
             const Divider(height: 1, color: Color(0xFFE2E8F0)),
 

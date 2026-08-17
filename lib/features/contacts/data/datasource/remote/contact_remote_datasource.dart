@@ -23,6 +23,7 @@ abstract class ContactRemoteDataSource {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   });
 
@@ -47,6 +48,7 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   }) async {
     final queryParameters = <String, dynamic>{};
@@ -54,11 +56,12 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
     if (limit != null) queryParameters['limit'] = limit;
     if (search != null && search.isNotEmpty) queryParameters['search'] = search;
     if (ownerId != null && ownerId.isNotEmpty) {
-      queryParameters['ownerId'] = ownerId;
       queryParameters['owner_id'] = ownerId;
     }
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['department_id'] = departmentId;
+    }
     if (ignorePermissions == true) {
-      queryParameters['ignorePermissions'] = 'true';
       queryParameters['ignore_permissions'] = 'true';
     }
 
@@ -66,8 +69,6 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
       ApiConstants.contacts,
       queryParameters: queryParameters,
     );
-
-    debugPrint('[GET /api/contacts SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
@@ -93,21 +94,31 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
             (meta['totalCount'] as num?)?.toInt() ??
             (meta['total_count'] as num?)?.toInt() ??
             (meta['count'] as num?)?.toInt() ??
-            (meta['itemCount'] as num?)?.toInt() ??
-            0;
-        pageNum = (meta['page'] as num?)?.toInt() ?? pageNum;
-        limitNum = (meta['limit'] as num?)?.toInt() ?? limitNum;
-      }
-
-      if (total == 0) {
+            list.length;
+      } else {
         total = (rawData['total'] as num?)?.toInt() ??
-            (rawData['totalCount'] as num?)?.toInt() ??
-            (rawData['total_count'] as num?)?.toInt() ??
             (rawData['count'] as num?)?.toInt() ??
-            (rawData['totalContacts'] as num?)?.toInt() ??
-            (rawData['total_contacts'] as num?)?.toInt() ??
-            0;
+            (rawData['totalCount'] as num?)?.toInt() ??
+            list.length;
       }
+    }
+
+    final String? firstRecordDeptId = list.isNotEmpty && list.first is Map
+        ? (list.first['departmentId'] ?? list.first['department_id'] ?? list.first['department']?['id'])?.toString()
+        : null;
+
+    debugPrint('========== DEPARTMENT API TRACE ==========');
+    debugPrint('Screen: Contacts');
+    debugPrint('API: ${ApiConstants.contacts}');
+    debugPrint('Selected Department ID: $departmentId');
+    debugPrint('Request department_id: $departmentId');
+    debugPrint('Response status: ${response.statusCode}');
+    debugPrint('First returned record departmentId: $firstRecordDeptId');
+    debugPrint('==========================================');
+
+    if (firstRecordDeptId != null && departmentId != null && firstRecordDeptId != departmentId) {
+      debugPrint('REQUESTED DEPARTMENT: $departmentId');
+      debugPrint('RETURNED RECORD DEPARTMENT: $firstRecordDeptId');
     }
 
     if (total == 0 && list.isNotEmpty) {

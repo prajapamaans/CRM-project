@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/contact_tile.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
@@ -86,100 +87,107 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            _loadContactsForSegment(_selectedSegment);
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Top Search and 3-Dot Filter Bar Section
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Column(
-                  children: [
-                    SearchAndFilterBar(
-                      searchHint: 'Search contacts...',
-                      onSearchChanged: _onSearchChanged,
-                      onSegmentChanged: _onSegmentChanged,
-                      currentSort: contactProvider.sortOption,
-                      onSortChanged: (ContactSortOption option) {
-                        context.read<ContactProvider>().setSortOption(option);
-                      },
-                      isFilterActive: contactProvider.isFilterActive,
-                      isFilterExpanded: _isFilterExpanded,
-                      onToggleFilterExpanded: () {
-                        setState(() {
-                          _isFilterExpanded = !_isFilterExpanded;
-                        });
-                      },
-                      onImportTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Import contacts feature coming soon',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Top Search and 3-Dot Filter Bar Section
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Column(
+                children: [
+                  SearchAndFilterBar(
+                    searchHint: 'Search contacts...',
+                    onSearchChanged: _onSearchChanged,
+                    onSegmentChanged: _onSegmentChanged,
+                    currentSort: contactProvider.sortOption,
+                    onSortChanged: (ContactSortOption option) {
+                      context.read<ContactProvider>().setSortOption(option);
+                    },
+                    isFilterActive: contactProvider.isFilterActive,
+                    isFilterExpanded: _isFilterExpanded,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _isFilterExpanded = !_isFilterExpanded;
+                      });
+                    },
+                    onImportTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Import contacts feature coming soon',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
                             ),
-                            duration: const Duration(seconds: 2),
                           ),
-                        );
-                      },
-                      onExportTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Exporting ${contacts.length} contacts...',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    onExportTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Exporting ${contacts.length} contacts...',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
                             ),
-                            backgroundColor: const Color(0xFF00A884),
-                            duration: const Duration(seconds: 2),
                           ),
-                        );
-                      },
-                    ),
-
-                    // Inline Filter Dropdown Section (Appears right after All/Mine tab when clicking Filter)
-                    if (_isFilterExpanded) const ContactInlineFilterSection(),
-                  ],
-                ),
-              ),
-
-              // 2. Summary Count Sub-header
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                color: const Color(0xFFF8FAFC),
-                child: Text(
-                  contactProvider.isLoading && contacts.isEmpty
-                      ? 'Loading contacts...'
-                      : '${_formatCount(totalCount > 0 ? totalCount : contacts.length)} contacts',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF64748B),
+                          backgroundColor: const Color(0xFF00A884),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
                   ),
+
+                  // Inline Filter Dropdown Section (Appears right after All/Mine tab when clicking Filter)
+                  if (_isFilterExpanded) const ContactInlineFilterSection(),
+                ],
+              ),
+            ),
+
+            // 2. Summary Count Sub-header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: const Color(0xFFF8FAFC),
+              child: Text(
+                contactProvider.isLoading && contacts.isEmpty
+                    ? 'Loading contacts...'
+                    : '${_formatCount(totalCount > 0 ? totalCount : contacts.length)} contacts',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF64748B),
                 ),
               ),
+            ),
 
-              // 3. Contacts List View
-              Expanded(
+            // 3. Contacts List View
+            Expanded(
+              child: AppRefreshIndicator(
+                onRefresh: () async {
+                  _loadContactsForSegment(_selectedSegment);
+                },
                 child: contactProvider.isLoading && contacts.isEmpty
                     ? const Center(
                         child: CircularProgressIndicator(color: Color(0xFF00A884)),
                       )
                     : contacts.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No contacts found',
-                              style: GoogleFonts.poppins(
-                                  color: const Color(0xFF64748B), fontSize: 14),
-                            ),
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                                parent: BouncingScrollPhysics()),
+                            children: [
+                              const SizedBox(height: 120),
+                              Center(
+                                child: Text(
+                                  'No contacts found',
+                                  style: GoogleFonts.poppins(
+                                      color: const Color(0xFF64748B), fontSize: 14),
+                                ),
+                              ),
+                            ],
                           )
                         : ListView.builder(
                             controller: _scrollController,
@@ -290,8 +298,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             },
                           ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(

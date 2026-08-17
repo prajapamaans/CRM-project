@@ -49,4 +49,6 @@ class ApiConstants {
   static const String reportsUsers = '/reports/users';
   static const String reportsDashboards = '/reports/dashboards';
   static const String reportsDashboardsDefault = '/reports/dashboards/default';
+  // AI & Assistant Endpoints
+  static const String assistantSummarize = '/assistant/summarize';
 }

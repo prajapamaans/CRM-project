@@ -1,5 +1,80 @@
 import 'package:flutter/material.dart';
 
+class AssociatedContact {
+  final String id;
+  final String name;
+  final String email;
+  final String? msp;
+  final bool isPrimary;
+
+  AssociatedContact({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.msp,
+    required this.isPrimary,
+  });
+
+  factory AssociatedContact.fromJson(Map<String, dynamic> json) {
+    final firstName = json['contactFirstName']?.toString() ?? json['firstName']?.toString() ?? '';
+    final lastName = json['contactLastName']?.toString() ?? json['lastName']?.toString() ?? '';
+    String fullName = json['name']?.toString() ?? '$firstName $lastName'.trim();
+    if (fullName.trim().isEmpty) {
+      fullName = json['email']?.toString() ?? 'Contact';
+    }
+
+    return AssociatedContact(
+      id: json['id']?.toString() ?? '',
+      name: fullName,
+      email: json['email']?.toString() ?? json['contactEmail']?.toString() ?? '',
+      msp: json['msp']?.toString(),
+      isPrimary: json['isPrimary'] == true || json['primary'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'msp': msp,
+        'isPrimary': isPrimary,
+      };
+}
+
+class AssociatedCompany {
+  final String id;
+  final String name;
+  final String? domain;
+  final String? avatarUrl;
+  final bool isPrimary;
+
+  AssociatedCompany({
+    required this.id,
+    required this.name,
+    this.domain,
+    this.avatarUrl,
+    required this.isPrimary,
+  });
+
+  factory AssociatedCompany.fromJson(Map<String, dynamic> json) {
+    return AssociatedCompany(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? json['companyName']?.toString() ?? '',
+      domain: json['domain']?.toString() ?? json['companyDomain']?.toString(),
+      avatarUrl: json['avatarUrl']?.toString(),
+      isPrimary: json['isPrimary'] == true || json['primary'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'domain': domain,
+        'avatarUrl': avatarUrl,
+        'isPrimary': isPrimary,
+      };
+}
+
 class DealModel {
   final String id;
   final String title;
@@ -16,6 +91,11 @@ class DealModel {
   final String? ownerName;
   final String? createdAt;
   final String? priority;
+  final String? quarter;
+  final List<AssociatedCompany>? associatedCompanies;
+  final List<AssociatedContact>? associatedContacts;
+  final List<Map<String, dynamic>>? contacts;
+  final List<Map<String, dynamic>>? associatedDeals;
 
   const DealModel({
     required this.id,
@@ -33,6 +113,11 @@ class DealModel {
     this.ownerName,
     this.createdAt,
     this.priority,
+    this.quarter,
+    this.associatedCompanies,
+    this.associatedContacts,
+    this.contacts,
+    this.associatedDeals,
   });
 
   factory DealModel.fromJson(Map<String, dynamic> json) {
@@ -58,6 +143,15 @@ class DealModel {
         json['deal_name'] as String? ??
         '';
 
+    final compList = (json['associatedCompanies'] as List?)
+        ?.map((e) => AssociatedCompany.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+
+    final rawContactsList = (json['associatedContacts'] ?? json['contacts']) as List?;
+    final contList = rawContactsList
+        ?.map((e) => AssociatedContact.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+
     return DealModel(
       id: json['id']?.toString() ?? '',
       title: titleStr,
@@ -77,6 +171,15 @@ class DealModel {
       ownerName: json['ownerName'] as String? ?? json['owner_name'] as String?,
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
       priority: json['priority'] as String?,
+      quarter: json['quarter']?.toString(),
+      associatedCompanies: compList,
+      associatedContacts: contList,
+      contacts: rawContactsList
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
+      associatedDeals: (json['associatedDeals'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 

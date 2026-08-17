@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/deal_tile.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
@@ -81,101 +82,108 @@ class _DealsScreenState extends State<DealsScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            _loadDealsForSegment(_selectedSegment);
-            await context.read<DealProvider>().fetchDealStats();
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Top Search and 3-Dot Filter Bar Section
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Column(
-                  children: [
-                    SearchAndFilterBar(
-                      searchHint: 'Search deals...',
-                      onSearchChanged: _onSearchChanged,
-                      onSegmentChanged: _onSegmentChanged,
-                      currentSort: dealProvider.sortOption,
-                      onSortChanged: (ContactSortOption option) {
-                        context.read<DealProvider>().setSortOption(option);
-                      },
-                      isFilterActive: dealProvider.isFilterActive,
-                      isFilterExpanded: _isFilterExpanded,
-                      onToggleFilterExpanded: () {
-                        setState(() {
-                          _isFilterExpanded = !_isFilterExpanded;
-                        });
-                      },
-                      onImportTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Import deals feature coming soon',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Top Search and 3-Dot Filter Bar Section
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Column(
+                children: [
+                  SearchAndFilterBar(
+                    searchHint: 'Search deals...',
+                    onSearchChanged: _onSearchChanged,
+                    onSegmentChanged: _onSegmentChanged,
+                    currentSort: dealProvider.sortOption,
+                    onSortChanged: (ContactSortOption option) {
+                      context.read<DealProvider>().setSortOption(option);
+                    },
+                    isFilterActive: dealProvider.isFilterActive,
+                    isFilterExpanded: _isFilterExpanded,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _isFilterExpanded = !_isFilterExpanded;
+                      });
+                    },
+                    onImportTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Import deals feature coming soon',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
                             ),
-                            duration: const Duration(seconds: 2),
                           ),
-                        );
-                      },
-                      onExportTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Exporting ${deals.length} deals...',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    onExportTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Exporting ${deals.length} deals...',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
                             ),
-                            backgroundColor: const Color(0xFF00A884),
-                            duration: const Duration(seconds: 2),
                           ),
-                        );
-                      },
-                    ),
-
-                    // Inline Filter Dropdown Section (Appears right after All/Mine tab when clicking Filter)
-                    if (_isFilterExpanded) const DealInlineFilterSection(),
-                  ],
-                ),
-              ),
-
-              // 2. Summary Count Sub-header
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                color: const Color(0xFFF8FAFC),
-                child: Text(
-                  dealProvider.isLoading && deals.isEmpty
-                      ? 'Loading deals...'
-                      : '${_formatCount(dealProvider.totalCount > 0 ? dealProvider.totalCount : deals.length)} deals${dealProvider.stats != null ? " • Pipeline: \$${dealProvider.stats!.pipelineValue.toStringAsFixed(0)}" : ""}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF64748B),
+                          backgroundColor: const Color(0xFF00A884),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
                   ),
+
+                  // Inline Filter Dropdown Section (Appears right after All/Mine tab when clicking Filter)
+                  if (_isFilterExpanded) const DealInlineFilterSection(),
+                ],
+              ),
+            ),
+
+            // 2. Summary Count Sub-header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: const Color(0xFFF8FAFC),
+              child: Text(
+                dealProvider.isLoading && deals.isEmpty
+                    ? 'Loading deals...'
+                    : '${_formatCount(dealProvider.totalCount > 0 ? dealProvider.totalCount : deals.length)} deals${dealProvider.stats != null ? " • Pipeline: \$${dealProvider.stats!.pipelineValue.toStringAsFixed(0)}" : ""}',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF64748B),
                 ),
               ),
+            ),
 
-              // 3. Deals List View
-              Expanded(
+            // 3. Deals List View
+            Expanded(
+              child: AppRefreshIndicator(
+                onRefresh: () async {
+                  _loadDealsForSegment(_selectedSegment);
+                  await context.read<DealProvider>().fetchDealStats();
+                },
                 child: dealProvider.isLoading && deals.isEmpty
                     ? const Center(
                         child: CircularProgressIndicator(color: Color(0xFF00A884)),
                       )
                     : deals.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No deals found',
-                              style: GoogleFonts.poppins(
-                                  color: const Color(0xFF64748B), fontSize: 14),
-                            ),
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                                parent: BouncingScrollPhysics()),
+                            children: [
+                              const SizedBox(height: 120),
+                              Center(
+                                child: Text(
+                                  'No deals found',
+                                  style: GoogleFonts.poppins(
+                                      color: const Color(0xFF64748B), fontSize: 14),
+                                ),
+                              ),
+                            ],
                           )
                         : ListView.builder(
                             physics: const AlwaysScrollableScrollPhysics(
@@ -275,15 +283,14 @@ class _DealsScreenState extends State<DealsScreen> {
                                   );
                                   if (mounted) {
                                     _loadDealsForSegment(_selectedSegment);
-                                    context.read<DealProvider>().fetchDealStats();
                                   }
                                 },
                               );
                             },
                           ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(

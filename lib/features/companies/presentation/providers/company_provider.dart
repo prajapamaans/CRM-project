@@ -151,9 +151,12 @@ class CompanyProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _currentDepartmentId;
+
   Future<void> fetchCompanies({
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
     bool refresh = true,
   }) async {
@@ -163,6 +166,7 @@ class CompanyProvider extends ChangeNotifier {
       _error = null;
       if (search != null) _currentSearch = search;
       _currentOwnerId = ownerId;
+      _currentDepartmentId = departmentId;
       _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     } else {
@@ -177,6 +181,7 @@ class CompanyProvider extends ChangeNotifier {
         limit: _limit.toString(),
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
       );
 

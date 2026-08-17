@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/widgets/app_refresh_indicator.dart';
 import '../../../authentication/data/models/team_member_model.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../contacts/data/repositories/contact_repository.dart';
@@ -426,8 +427,11 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+        child: AppRefreshIndicator(
+          onRefresh: _fetchUsersAndPreferences,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -717,6 +721,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 

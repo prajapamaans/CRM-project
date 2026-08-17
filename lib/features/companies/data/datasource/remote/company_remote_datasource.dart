@@ -23,6 +23,7 @@ abstract class CompanyRemoteDataSource {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   });
 
@@ -47,6 +48,7 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   }) async {
     final queryParameters = <String, dynamic>{};
@@ -54,9 +56,11 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
     if (limit != null) queryParameters['limit'] = limit;
     if (search != null && search.isNotEmpty) queryParameters['search'] = search;
     if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['department_id'] = departmentId;
+    }
     if (ignorePermissions != null) {
       final val = ignorePermissions ? 'true' : 'false';
-      queryParameters['ignorePermissions'] = val;
       queryParameters['ignore_permissions'] = val;
     }
 
@@ -64,8 +68,6 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
       ApiConstants.companies,
       queryParameters: queryParameters,
     );
-
-    debugPrint('[GET /api/companies SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
@@ -102,10 +104,26 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
             (rawData['totalCount'] as num?)?.toInt() ??
             (rawData['total_count'] as num?)?.toInt() ??
             (rawData['count'] as num?)?.toInt() ??
-            (rawData['totalCompanies'] as num?)?.toInt() ??
-            (rawData['total_companies'] as num?)?.toInt() ??
-            0;
+            list.length;
       }
+    }
+
+    final String? firstRecordDeptId = list.isNotEmpty && list.first is Map
+        ? (list.first['departmentId'] ?? list.first['department_id'] ?? list.first['department']?['id'])?.toString()
+        : null;
+
+    debugPrint('========== DEPARTMENT API TRACE ==========');
+    debugPrint('Screen: Companies');
+    debugPrint('API: ${ApiConstants.companies}');
+    debugPrint('Selected Department ID: $departmentId');
+    debugPrint('Request department_id: $departmentId');
+    debugPrint('Response status: ${response.statusCode}');
+    debugPrint('First returned record departmentId: $firstRecordDeptId');
+    debugPrint('==========================================');
+
+    if (firstRecordDeptId != null && departmentId != null && firstRecordDeptId != departmentId) {
+      debugPrint('REQUESTED DEPARTMENT: $departmentId');
+      debugPrint('RETURNED RECORD DEPARTMENT: $firstRecordDeptId');
     }
 
     if (total == 0 && list.isNotEmpty) {

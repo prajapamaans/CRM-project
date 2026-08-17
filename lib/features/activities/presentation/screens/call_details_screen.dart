@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../widgets/log_call_modal.dart';
@@ -178,9 +179,15 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
                   ? const Center(
                       child: CircularProgressIndicator(color: Color(0xFF00A884)),
                     )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                      child: Container(
+                  : AppRefreshIndicator(
+                      onRefresh: () async {
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        if (mounted) setState(() {});
+                      },
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
@@ -508,6 +515,7 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
                         ),
                       ),
                     ),
+                  ),
             ),
           ],
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/widgets/font_size_modal.dart';
 import '../providers/navigation_provider.dart';
 
 class MoreScreen extends StatelessWidget {
@@ -241,6 +242,14 @@ class _MoreSheetContent extends StatelessWidget {
                       title: 'Bingo AI',
                       screenIndex: 5,
                     ),
+                    _buildCustomActionItem(
+                      context,
+                      icon: Icons.format_size_rounded,
+                      title: 'Font Size Settings',
+                      onTap: () {
+                        FontSizeModal.show(context);
+                      },
+                    ),
 
                     const SizedBox(height: 24),
                   ],
@@ -313,8 +322,56 @@ class _MoreSheetContent extends StatelessWidget {
           ),
           onTap: () {
             navProvider.selectScreen(screenIndex);
-            Navigator.of(context).maybePop();
+            Navigator.of(context).popUntil((route) => route.isFirst);
           },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomActionItem(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFF1F5F9)),
+        ),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFF475569),
+              size: 20,
+            ),
+          ),
+          title: Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF1E293B),
+            ),
+          ),
+          trailing: const Icon(
+            Icons.chevron_right_rounded,
+            color: Color(0xFFCBD5E1),
+            size: 20,
+          ),
+          onTap: onTap,
         ),
       ),
     );

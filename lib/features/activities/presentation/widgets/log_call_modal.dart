@@ -5,6 +5,7 @@ import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import 'follow_up_task_section.dart';
 
 class CallModel {
   final String? id;
@@ -91,10 +92,21 @@ class _LogCallModalState extends State<LogCallModal> {
   String _selectedDuration = '5 minutes';
   String _selectedDirection = 'Outbound';
   String _selectedOwner = 'Select owner';
-  String _selectedDate = 'Aug 5, 2026';
+  String _selectedDate = 'Today';
   bool _createFollowUpTask = false;
   bool _isSubmitting = false;
   List<MasterDropdownOptionModel> _apiOutcomes = [];
+  List<Map<String, dynamic>> _apiUsers = [];
+  final List<String> _customOutcomes = [];
+  final List<String> _durationsList = [
+    '1 minute',
+    '2 minutes',
+    '5 minutes',
+    '10 minutes',
+    '15 minutes',
+    '30 minutes',
+    '1 hour',
+  ];
 
   // Rich Text Formatting State
   bool _isBold = false;
@@ -166,23 +178,9 @@ class _LogCallModalState extends State<LogCallModal> {
     'Completed',
   ];
 
-  final List<String> _durations = const [
-    '5 minutes',
-    '15 minutes',
-    '30 minutes',
-    '45 minutes',
-    '1 hour',
-    '2 hours',
-  ];
-
   final List<String> _directions = const [
     'Outbound',
     'Inbound',
-  ];
-
-  final List<String> _owners = const [
-    'Admin User',
-    'Select owner',
   ];
 
   @override
@@ -229,6 +227,7 @@ class _LogCallModalState extends State<LogCallModal> {
     }
 
     _fetchCallOutcomes();
+    _fetchUsers();
   }
 
   String _formatDateHeader(String raw) {
@@ -241,6 +240,218 @@ class _LogCallModalState extends State<LogCallModal> {
       }
     } catch (_) {}
     return 'Aug 5, 2026';
+  }
+
+  Future<void> _fetchUsers() async {
+    try {
+      final resp = await ApiService().get('/users');
+      final raw = resp.data;
+      List<Map<String, dynamic>> usersList = [];
+      if (raw is List) {
+        usersList = raw.whereType<Map<String, dynamic>>().toList();
+      } else if (raw is Map<String, dynamic> && raw['data'] is List) {
+        usersList = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
+      } else if (raw is Map<String, dynamic> && raw['users'] is List) {
+        usersList = (raw['users'] as List).whereType<Map<String, dynamic>>().toList();
+      }
+      if (mounted && usersList.isNotEmpty) {
+        setState(() {
+          _apiUsers = usersList;
+        });
+      }
+    } catch (e) {
+      debugPrint('[LogCallModal fetch /users error]: $e');
+    }
+  }
+
+  Future<void> _showCustomOutcomeDialog() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Custom Outcome', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Enter call outcome...',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final val = controller.text.trim();
+              if (val.isNotEmpty) {
+                Navigator.pop(ctx, val);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A884),
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Add', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      setState(() {
+        if (!_customOutcomes.contains(result)) {
+          _customOutcomes.add(result);
+        }
+        _selectedOutcome = result;
+      });
+    }
+  }
+
+  Future<void> _showCustomDurationDialog() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Custom Duration', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            hintText: 'Enter duration in minutes (e.g. 45 minutes)',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final val = controller.text.trim();
+              if (val.isNotEmpty) {
+                final formatted = val.contains('minute') || val.contains('hour') ? val : '$val minutes';
+                Navigator.pop(ctx, formatted);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A884),
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Set', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      setState(() {
+        if (!_durationsList.contains(result)) {
+          _durationsList.add(result);
+        }
+        _selectedDuration = result;
+      });
+    }
+  }
+
+  static List<String> _generateActivityDateOptions() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    DateTime addBusinessDays(DateTime start, int days) {
+      DateTime current = start;
+      int added = 0;
+      while (added < days) {
+        current = current.add(const Duration(days: 1));
+        if (current.weekday != DateTime.saturday && current.weekday != DateTime.sunday) {
+          added++;
+        }
+      }
+      return current;
+    }
+
+    final in2Biz = addBusinessDays(today, 2);
+    final in3Biz = addBusinessDays(today, 3);
+    final in1Week = today.add(const Duration(days: 7));
+    final in2Weeks = today.add(const Duration(days: 14));
+
+    DateTime addMonths(DateTime start, int months) {
+      int year = start.year;
+      int month = start.month + months;
+      while (month > 12) {
+        month -= 12;
+        year += 1;
+      }
+      int day = start.day;
+      int daysInTargetMonth = DateUtils.getDaysInMonth(year, month);
+      if (day > daysInTargetMonth) day = daysInTargetMonth;
+      return DateTime(year, month, day);
+    }
+
+    final in1Month = addMonths(today, 1);
+    final in3Months = addMonths(today, 3);
+    final in6Months = addMonths(today, 6);
+
+    String weekdayName(int weekday) {
+      const names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      return names[weekday - 1];
+    }
+
+    String monthAbbr(int month) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return months[month - 1];
+    }
+
+    return [
+      'Today',
+      'Tomorrow',
+      'In 2 business days (${weekdayName(in2Biz.weekday)})',
+      'In 3 business days (${weekdayName(in3Biz.weekday)})',
+      'In 1 week (${monthAbbr(in1Week.month)} ${in1Week.day})',
+      'In 2 weeks (${monthAbbr(in2Weeks.month)} ${in2Weeks.day})',
+      'In 1 month (${monthAbbr(in1Month.month)} ${in1Month.day})',
+      'In 3 months (${monthAbbr(in3Months.month)} ${in3Months.day})',
+      'In 6 months (${monthAbbr(in6Months.month)} ${in6Months.day})',
+      'Custom Date',
+    ];
+  }
+
+  PopupMenuItem<String> _buildPopupMenuItem(String value, String currentValue) {
+    final isSelected = value == currentValue;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 40,
+      padding: EdgeInsets.zero,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        color: isSelected ? const Color(0xFFF1F5F9) : Colors.transparent,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                value,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: const Color(0xFF334155),
+                ),
+              ),
+            ),
+            if (isSelected)
+              const Icon(
+                Icons.check,
+                color: Color(0xFF00A884),
+                size: 16,
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _fetchCallOutcomes() async {
@@ -381,29 +592,38 @@ class _LogCallModalState extends State<LogCallModal> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          InkWell(
-                            onTap: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: DateTime.now(),
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2030),
-                              );
-                              if (picked != null) {
-                                final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                          PopupMenuButton<String>(
+                            onSelected: (val) async {
+                              if (val == 'Custom Date') {
+                                final picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime(2030),
+                                );
+                                if (picked != null && mounted) {
+                                  final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                  setState(() {
+                                    _selectedDate = '${months[picked.month - 1]} ${picked.day}, ${picked.year}';
+                                  });
+                                }
+                              } else {
                                 setState(() {
-                                  _selectedDate = '${months[picked.month - 1]} ${picked.day}, ${picked.year}';
+                                  _selectedDate = val;
                                 });
                               }
                             },
                             child: Row(
                               children: [
-                                Text(
-                                  _selectedDate,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF00A884),
+                                Flexible(
+                                  child: Text(
+                                    _selectedDate,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF00A884),
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
@@ -414,6 +634,10 @@ class _LogCallModalState extends State<LogCallModal> {
                                 ),
                               ],
                             ),
+                            itemBuilder: (context) {
+                              final options = _generateActivityDateOptions();
+                              return options.map((d) => _buildPopupMenuItem(d, _selectedDate)).toList();
+                            },
                           ),
                         ],
                       ),
@@ -459,10 +683,7 @@ class _LogCallModalState extends State<LogCallModal> {
                               ],
                             ),
                             itemBuilder: (context) => _directions
-                                .map((d) => PopupMenuItem(
-                                      value: d,
-                                      child: Text(d, style: GoogleFonts.poppins(fontSize: 13)),
-                                    ))
+                                .map((d) => _buildPopupMenuItem(d, _selectedDirection))
                                 .toList(),
                           ),
                         ],
@@ -493,9 +714,13 @@ class _LogCallModalState extends State<LogCallModal> {
                           const SizedBox(height: 4),
                           PopupMenuButton<String>(
                             onSelected: (val) {
-                              setState(() {
-                                _selectedOutcome = val;
-                              });
+                              if (val == 'Custom Outcome...') {
+                                _showCustomOutcomeDialog();
+                              } else {
+                                setState(() {
+                                  _selectedOutcome = val;
+                                });
+                              }
                             },
                             child: Row(
                               children: [
@@ -518,12 +743,19 @@ class _LogCallModalState extends State<LogCallModal> {
                                 ),
                               ],
                             ),
-                            itemBuilder: (context) => outcomes
-                                .map((o) => PopupMenuItem(
-                                      value: o,
-                                      child: Text(o, style: GoogleFonts.poppins(fontSize: 13)),
-                                    ))
-                                .toList(),
+                            itemBuilder: (context) {
+                              final outcomesList = [
+                                ...outcomes,
+                                ..._customOutcomes,
+                                if (!outcomes.contains(_selectedOutcome) && !_customOutcomes.contains(_selectedOutcome))
+                                  _selectedOutcome,
+                              ].toSet().toList();
+
+                              return [
+                                ...outcomesList.map((o) => _buildPopupMenuItem(o, _selectedOutcome)),
+                                _buildPopupMenuItem('Custom Outcome...', _selectedOutcome),
+                              ];
+                            },
                           ),
                         ],
                       ),
@@ -546,16 +778,20 @@ class _LogCallModalState extends State<LogCallModal> {
                           const SizedBox(height: 4),
                           PopupMenuButton<String>(
                             onSelected: (val) {
-                              setState(() {
-                                _selectedDuration = val;
-                              });
+                              if (val == 'Custom Duration...') {
+                                _showCustomDurationDialog();
+                              } else {
+                                setState(() {
+                                  _selectedDuration = val;
+                                });
+                              }
                             },
                             child: Row(
                               children: [
                                 const Icon(
                                   Icons.access_time_rounded,
                                   size: 15,
-                                  color: Color(0xFF64748B),
+                                  color: Color(0xFF334155),
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
@@ -569,17 +805,22 @@ class _LogCallModalState extends State<LogCallModal> {
                                 const SizedBox(width: 4),
                                 const Icon(
                                   Icons.keyboard_arrow_down_rounded,
-                                  color: Color(0xFF94A3B8),
+                                  color: Color(0xFF00A884),
                                   size: 18,
                                 ),
                               ],
                             ),
-                            itemBuilder: (context) => _durations
-                                .map((d) => PopupMenuItem(
-                                      value: d,
-                                      child: Text(d, style: GoogleFonts.poppins(fontSize: 13)),
-                                    ))
-                                .toList(),
+                            itemBuilder: (context) {
+                              final durationsList = [
+                                ..._durationsList,
+                                if (!_durationsList.contains(_selectedDuration)) _selectedDuration,
+                              ].toSet().toList();
+
+                              return [
+                                ...durationsList.map((d) => _buildPopupMenuItem(d, _selectedDuration)),
+                                _buildPopupMenuItem('Custom Duration...', _selectedDuration),
+                              ];
+                            },
                           ),
                         ],
                       ),
@@ -627,12 +868,22 @@ class _LogCallModalState extends State<LogCallModal> {
                           ),
                         ],
                       ),
-                      itemBuilder: (context) => _owners
-                          .map((o) => PopupMenuItem(
-                                value: o,
-                                child: Text(o, style: GoogleFonts.poppins(fontSize: 13)),
-                              ))
-                          .toList(),
+                      itemBuilder: (context) {
+                        final usersDisplayList = _apiUsers.isNotEmpty
+                            ? _apiUsers.map((u) {
+                                final first = u['firstName'] as String? ?? u['first_name'] as String? ?? '';
+                                final last = u['lastName'] as String? ?? u['last_name'] as String? ?? '';
+                                final name = '$first $last'.trim();
+                                return name.isNotEmpty ? name : (u['email'] as String? ?? 'User');
+                              }).toList()
+                            : const ['Admin User', 'Select owner'];
+
+                        if (!usersDisplayList.contains(_selectedOwner)) {
+                          usersDisplayList.add(_selectedOwner);
+                        }
+
+                        return usersDisplayList.map((o) => _buildPopupMenuItem(o, _selectedOwner)).toList();
+                      },
                     ),
                   ],
                 ),
@@ -748,57 +999,13 @@ class _LogCallModalState extends State<LogCallModal> {
                 const SizedBox(height: 12),
 
                 // Create To-do Follow-up Row
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  color: Colors.white,
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: _createFollowUpTask,
-                        onChanged: (val) {
-                          setState(() {
-                            _createFollowUpTask = val ?? false;
-                          });
-                        },
-                        activeColor: const Color(0xFF00A884),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                      ),
-                      Expanded(
-                        child: Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'Create a ',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF475569)),
-                            ),
-                            Text(
-                              'To-do ⌄ ',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                            ),
-                            Text(
-                              'task to follow up ',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF475569)),
-                            ),
-                            Text(
-                              'In 3 business days (Monday) ⌄ ',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                            ),
-                            Text(
-                              'at ',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF475569)),
-                            ),
-                            Text(
-                              '8:00 AM ⌄',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF00A884)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                FollowUpTaskSection(
+                  initialChecked: _createFollowUpTask,
+                  onCheckedChanged: (val) {
+                    setState(() {
+                      _createFollowUpTask = val;
+                    });
+                  },
                 ),
                 const SizedBox(height: 12),
               ],

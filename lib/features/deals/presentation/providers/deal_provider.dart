@@ -175,9 +175,11 @@ class DealProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> fetchDealStats() async {
+  String? _currentDepartmentId;
+
+  Future<void> fetchDealStats({String? departmentId}) async {
     try {
-      _stats = await _repository.getDealStats();
+      _stats = await _repository.getDealStats(departmentId: departmentId);
       notifyListeners();
     } catch (e) {
       debugPrint('[DealProvider fetchDealStats error]: $e');
@@ -187,7 +189,9 @@ class DealProvider extends ChangeNotifier {
   Future<void> fetchDeals({
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
+    int? limit,
     bool refresh = true,
   }) async {
     if (refresh) {
@@ -196,6 +200,7 @@ class DealProvider extends ChangeNotifier {
       _error = null;
       if (search != null) _currentSearch = search;
       _currentOwnerId = ownerId;
+      _currentDepartmentId = departmentId;
       _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     }
@@ -203,9 +208,10 @@ class DealProvider extends ChangeNotifier {
     try {
       final res = await _repository.getDeals(
         page: _currentPage,
-        limit: _limit,
+        limit: limit ?? _limit,
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
       );
 

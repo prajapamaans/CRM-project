@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'font_size_modal.dart';
 import '../../features/authentication/presentation/providers/auth_provider.dart';
 import '../../features/authentication/presentation/screens/login_screen.dart';
 
@@ -83,6 +84,33 @@ class UserProfileMenu extends StatelessWidget {
                 ),
               ),
               const PopupMenuDivider(height: 1),
+              // Field 0: Font Size (Before Edit Profile)
+              PopupMenuItem<int>(
+                value: 0,
+                padding: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.format_size_rounded,
+                        size: 18,
+                        color: Color(0xFF475569),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Font Size',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF334155),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const PopupMenuDivider(height: 1),
               // Field 1: Edit Profile
               PopupMenuItem<int>(
                 value: 1,
@@ -138,7 +166,9 @@ class UserProfileMenu extends StatelessWidget {
               ),
             ],
             onSelected: (value) async {
-              if (value == 1) {
+              if (value == 0) {
+                FontSizeModal.show(context);
+              } else if (value == 1) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('Edit Profile clicked for $name'),

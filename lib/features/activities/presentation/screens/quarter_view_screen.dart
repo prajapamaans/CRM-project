@@ -5,9 +5,11 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
+import '../../../companies/presentation/screens/company_details_screen.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
+import '../../../deals/presentation/screens/deal_details_screen.dart';
 
 class QuarterViewScreen extends StatefulWidget {
   const QuarterViewScreen({super.key});
@@ -22,6 +24,9 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
   bool _isQuarterExpanded = true;
   String _searchQuery = '';
 
+  final Map<String, int> _dealQuarterOverrides = {};
+  final Map<String, int> _companyQuarterOverrides = {};
+
   @override
   void initState() {
     super.initState();
@@ -29,41 +34,40 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
       final auth = context.read<AuthProvider>();
       final currentUserId = auth.currentUser?.id ?? '311fee58-ba54-42b9-8795-f3ba19255b20';
 
-      // 1. GET /api/auth/me
       auth.fetchUserProfile();
-
-      // 2. GET /api/auth/team
       auth.fetchTeamMembers();
 
-      // 3. All Master Data, Notifications, Deal Stages, Activities:
-      // - GET /api/activities/notifications
-      // - GET /api/activities/notifications?isRead=false&limit=10
-      // - GET /api/activities?ownerId=...&status=pending&limit=10&type=task
-      // - GET /api/departments
-      // - GET /api/deals/stages
-      // - GET /api/lifecycle-stages?entityType=company
-      // - GET /api/lifecycle-stages?entityType=contact
-      // - GET /api/master-dropdowns/key/company_industry?includeInactive=false
-      // - GET /api/master-dropdowns/key/company_type?includeInactive=false
-      // - GET /api/master-dropdowns/key/contact_lead_status?includeInactive=false
-      // - GET /api/msp-options
       context.read<MasterDataProvider>().fetchAllMasterData(currentUserId: currentUserId);
 
-      // 4. GET /api/companies?page=1&limit=25
       context.read<CompanyProvider>().fetchCompanies(
         ignorePermissions: true,
       );
 
-      // 5. GET /api/contacts?page=1&limit=25
       context.read<ContactProvider>().fetchContacts(
         ignorePermissions: true,
       );
 
-      // 6. GET /api/deals?page=1&limit=25 & GET /api/deals?page=1&limit=500
       context.read<DealProvider>().fetchDeals(
         ignorePermissions: true,
+        limit: 500,
       );
     });
+  }
+
+  Future<void> _refreshData() async {
+    setState(() {
+      _dealQuarterOverrides.clear();
+      _companyQuarterOverrides.clear();
+    });
+    await Future.wait([
+      context.read<DealProvider>().fetchDeals(
+            ignorePermissions: true,
+            limit: 500,
+          ),
+      context.read<CompanyProvider>().fetchCompanies(
+            ignorePermissions: true,
+          ),
+    ]);
   }
 
   @override
@@ -106,234 +110,317 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: Column(
-          children: [
-            // 1. Top Header Row: Layers Icon + "Quarter View" + Deals/Companies Toggle Pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              color: Colors.white,
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.layers_outlined,
-                    color: Color(0xFF00A884),
-                    size: 24,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Quarter View',
-                    style: GoogleFonts.poppins(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1E293B),
-                    ),
-                  ),
-                  const Spacer(),
-
-                  // Deals / Companies Segmented Pill
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildTypeSegmentButton('Deals', 0),
-                        _buildTypeSegmentButton('Companies', 1),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
-
-            // 2. Search Input Field
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-              child: Container(
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: TextField(
-                  onChanged: (val) {
-                    setState(() {
-                      _searchQuery = val;
-                    });
-                  },
-                  decoration: InputDecoration(
-                    hintText: _selectedTypeIndex == 0 ? 'Search deals...' : 'Search companies...',
-                    hintStyle: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: const Color(0xFF94A3B8),
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.search_rounded,
-                      color: Color(0xFF94A3B8),
-                      size: 20,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                ),
-              ),
-            ),
-
-            // 3. Quarter Tabs Bar Container
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
+        child: RefreshIndicator(
+          onRefresh: _refreshData,
+          color: const Color(0xFF00A884),
+          child: Column(
+            children: [
+              // 1. Top Header Row: Layers Icon + "Quarter View" + Deals/Companies Toggle Pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                color: Colors.white,
                 child: Row(
                   children: [
-                    _buildQuarterTab('Q1', 0, _selectedTypeIndex == 0 ? dealsCounts[0] : companiesCounts[0]),
-                    _buildQuarterTab('Q2', 1, _selectedTypeIndex == 0 ? dealsCounts[1] : companiesCounts[1]),
-                    _buildQuarterTab(
-                      'Q3',
-                      2,
-                      _selectedTypeIndex == 0 ? dealsCounts[2] : companiesCounts[2],
-                      showDot: true,
+                    const Icon(
+                      Icons.layers_outlined,
+                      color: Color(0xFF00A884),
+                      size: 24,
                     ),
-                    _buildQuarterTab('Q4', 3, _selectedTypeIndex == 0 ? dealsCounts[3] : companiesCounts[3]),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Quarter View',
+                      style: GoogleFonts.poppins(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF1E293B),
+                      ),
+                    ),
+                    const Spacer(),
+
+                    // Deals / Companies Segmented Pill
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildTypeSegmentButton('Deals', 0),
+                          _buildTypeSegmentButton('Companies', 1),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
 
-            // 4. Quarter Details Box Container
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+              const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+              // 2. Search Input Field
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                 child: Container(
-                  width: double.infinity,
+                  height: 42,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header Row of Box (e.g. QUARTER 3 (JUL - SEP) N <)
-                      InkWell(
-                        onTap: () {
-                          setState(() {
-                            _isQuarterExpanded = !_isQuarterExpanded;
-                          });
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    _getQuarterTitle(_selectedQuarterIndex),
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF334155),
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      _selectedTypeIndex == 0
-                                          ? currentDeals.length.toString()
-                                          : currentCompanies.length.toString(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: const Color(0xFF64748B),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              Icon(
-                                _isQuarterExpanded
-                                    ? Icons.keyboard_arrow_left_rounded
-                                    : Icons.keyboard_arrow_down_rounded,
-                                color: const Color(0xFF94A3B8),
-                                size: 20,
-                              ),
-                            ],
-                          ),
-                        ),
+                  child: TextField(
+                    onChanged: (val) {
+                      setState(() {
+                        _searchQuery = val;
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: _selectedTypeIndex == 0 ? 'Search deals...' : 'Search companies...',
+                      hintStyle: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: const Color(0xFF94A3B8),
                       ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: Color(0xFF94A3B8),
+                        size: 20,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+              ),
 
-                      if (_isQuarterExpanded)
-                        Expanded(
-                          child: _selectedTypeIndex == 0
-                              ? (currentDeals.isEmpty
-                                  ? Center(
-                                      child: Text(
-                                        'No deals in this quarter',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13,
-                                          color: const Color(0xFF64748B),
-                                        ),
-                                      ),
-                                    )
-                                  : ListView.builder(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                                      itemCount: currentDeals.length,
-                                      itemBuilder: (context, index) {
-                                        final deal = currentDeals[index];
-                                        return _buildQuarterItemCard(
-                                          title: deal.title,
-                                          owner: deal.owner,
-                                        );
-                                      },
-                                    ))
-                              : (currentCompanies.isEmpty
-                                  ? Center(
-                                      child: Text(
-                                        'No companies in this quarter',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13,
-                                          color: const Color(0xFF64748B),
-                                        ),
-                                      ),
-                                    )
-                                  : ListView.builder(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                                      itemCount: currentCompanies.length,
-                                      itemBuilder: (context, index) {
-                                        final company = currentCompanies[index];
-                                        return _buildQuarterItemCard(
-                                          title: company.name,
-                                          owner: 'Admin User',
-                                        );
-                                      },
-                                    )),
-                        ),
+              // 3. Quarter Tabs Bar Container
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      _buildQuarterTab('Q1', 0, _selectedTypeIndex == 0 ? dealsCounts[0] : companiesCounts[0]),
+                      _buildQuarterTab('Q2', 1, _selectedTypeIndex == 0 ? dealsCounts[1] : companiesCounts[1]),
+                      _buildQuarterTab(
+                        'Q3',
+                        2,
+                        _selectedTypeIndex == 0 ? dealsCounts[2] : companiesCounts[2],
+                        showDot: true,
+                      ),
+                      _buildQuarterTab('Q4', 3, _selectedTypeIndex == 0 ? dealsCounts[3] : companiesCounts[3]),
                     ],
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-          ],
+              const SizedBox(height: 12),
+
+              // 4. Quarter Details Box Container
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header Row of Box (e.g. QUARTER 3 (JUL - SEP) N <)
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _isQuarterExpanded = !_isQuarterExpanded;
+                            });
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      _getQuarterTitle(_selectedQuarterIndex),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF334155),
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        _selectedTypeIndex == 0
+                                            ? currentDeals.length.toString()
+                                            : currentCompanies.length.toString(),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Icon(
+                                  _isQuarterExpanded
+                                      ? Icons.keyboard_arrow_left_rounded
+                                      : Icons.keyboard_arrow_down_rounded,
+                                  color: const Color(0xFF94A3B8),
+                                  size: 20,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        if (_isQuarterExpanded)
+                          Expanded(
+                            child: _selectedTypeIndex == 0
+                                ? (currentDeals.isEmpty
+                                    ? ListView(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        children: [
+                                          SizedBox(
+                                            height: 180,
+                                            child: Center(
+                                              child: Text(
+                                                'No deals in this quarter',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 13,
+                                                  color: const Color(0xFF64748B),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : ListView.builder(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                                        itemCount: currentDeals.length,
+                                        itemBuilder: (context, index) {
+                                          final deal = currentDeals[index];
+                                          final currentQ = _getDealQuarter(deal);
+                                          final ownerName = deal.ownerName ?? 'Unassigned';
+                                          final assocName = deal.companyName ??
+                                              (deal.associatedCompanies?.isNotEmpty == true
+                                                  ? deal.associatedCompanies!.first.name
+                                                  : null);
+                                          return _buildQuarterItemCard(
+                                            title: deal.title,
+                                            owner: ownerName,
+                                            amount: deal.amount,
+                                            associatedName: assocName,
+                                            currentQuarterIndex: currentQ,
+                                            onTap: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) => DealDetailsScreen(deal: deal),
+                                                ),
+                                              );
+                                            },
+                                            onSelectQuarter: (targetQ) async {
+                                              final messenger = ScaffoldMessenger.of(context);
+                                              final dealProvider = context.read<DealProvider>();
+                                              setState(() {
+                                                final key = deal.id.isNotEmpty ? deal.id : deal.title;
+                                                _dealQuarterOverrides[key] = targetQ;
+                                              });
+                                              final targetQuarterStr = 'Q${targetQ + 1}';
+                                              if (deal.id.isNotEmpty) {
+                                                await dealProvider.updateDeal(deal.id, {'quarter': targetQuarterStr});
+                                              }
+                                              messenger.showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Moved "${deal.title}" to Quarter ${targetQ + 1}'),
+                                                  duration: const Duration(seconds: 2),
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ))
+                                : (currentCompanies.isEmpty
+                                    ? ListView(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        children: [
+                                          SizedBox(
+                                            height: 180,
+                                            child: Center(
+                                              child: Text(
+                                                'No companies in this quarter',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 13,
+                                                  color: const Color(0xFF64748B),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : ListView.builder(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                                        itemCount: currentCompanies.length,
+                                        itemBuilder: (context, index) {
+                                          final company = currentCompanies[index];
+                                          final currentQ = _getCompanyQuarter(company);
+                                          final ownerName = company.ownerName ?? 'Admin User';
+                                          final assocName = company.industryName;
+                                          return _buildQuarterItemCard(
+                                            title: company.name,
+                                            owner: ownerName,
+                                            amount: company.annualRevenue?.toDouble(),
+                                            associatedName: assocName,
+                                            currentQuarterIndex: currentQ,
+                                            onTap: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) => CompanyDetailsScreen(company: company),
+                                                ),
+                                              );
+                                            },
+                                            onSelectQuarter: (targetQ) {
+                                              setState(() {
+                                                final key = company.id.isNotEmpty ? company.id : company.name;
+                                                _companyQuarterOverrides[key] = targetQ;
+                                              });
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Moved "${company.name}" to Quarter ${targetQ + 1}'),
+                                                  duration: const Duration(seconds: 2),
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        },
+                                      )),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
@@ -380,14 +467,25 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
   }
 
   int _getDealQuarter(DealModel deal) {
-    int q = _getQuarterFromDate(deal.createdAt);
-    if (q != -1) return q;
-    q = _getQuarterFromDate(deal.expectedCloseDate);
-    if (q != -1) return q;
+    final key = deal.id.isNotEmpty ? deal.id : deal.title;
+    if (_dealQuarterOverrides.containsKey(key)) {
+      return _dealQuarterOverrides[key]!;
+    }
+    if (deal.quarter != null && deal.quarter!.trim().isNotEmpty) {
+      final qStr = deal.quarter!.trim().toUpperCase();
+      if (qStr == 'Q1' || qStr.contains('1')) return 0;
+      if (qStr == 'Q2' || qStr.contains('2')) return 1;
+      if (qStr == 'Q3' || qStr.contains('3')) return 2;
+      if (qStr == 'Q4' || qStr.contains('4')) return 3;
+    }
     return 2;
   }
 
   int _getCompanyQuarter(CompanyModel company) {
+    final key = company.id.isNotEmpty ? company.id : company.name;
+    if (_companyQuarterOverrides.containsKey(key)) {
+      return _companyQuarterOverrides[key]!;
+    }
     int q = _getQuarterFromDate(company.createdAt);
     if (q != -1) return q;
     return 2;
@@ -517,10 +615,20 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
   Widget _buildQuarterItemCard({
     required String title,
     required String owner,
+    double? amount,
+    String? associatedName,
+    required int currentQuarterIndex,
+    required ValueChanged<int> onSelectQuarter,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
+    final otherQuarters = [0, 1, 2, 3].where((q) => q != currentQuarterIndex).toList();
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
@@ -530,23 +638,79 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF00A884),
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF00A884),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      '⌛',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 6),
-              const Text(
-                '⌛',
-                style: TextStyle(fontSize: 13),
+              PopupMenuButton<int>(
+                icon: const Icon(
+                  Icons.more_vert,
+                  color: Color(0xFF64748B),
+                  size: 20,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onSelected: (int selectedQuarter) {
+                  onSelectQuarter(selectedQuarter);
+                },
+                itemBuilder: (BuildContext context) {
+                  return otherQuarters.map((qIndex) {
+                    return PopupMenuItem<int>(
+                      value: qIndex,
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.swap_horiz_rounded,
+                            size: 16,
+                            color: Color(0xFF00A884),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Quarter ${qIndex + 1}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF1E293B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList();
+                },
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          if (amount != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Amount: \$${amount.toStringAsFixed(2)}',
+              style: GoogleFonts.poppins(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF334155),
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
           Text(
             'Deal owner: $owner',
             style: GoogleFonts.poppins(
@@ -554,6 +718,36 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
               color: const Color(0xFF64748B),
             ),
           ),
+          if (associatedName != null && associatedName.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.business_rounded,
+                    size: 14,
+                    color: Color(0xFF94A3B8),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    associatedName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF475569),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -573,6 +767,7 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }

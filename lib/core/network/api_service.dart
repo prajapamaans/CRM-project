@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import '../models/bingo_summary_model.dart';
+import 'api_constants.dart';
 import 'dio_client.dart';
 
 /// Centralized ApiService wrapper around DioClient providing reusable HTTP methods.
@@ -6,6 +8,25 @@ class ApiService {
   final DioClient _dioClient;
 
   ApiService({DioClient? dioClient}) : _dioClient = dioClient ?? DioClient();
+
+  Future<BingoSummaryResponse> getBingoSummary({
+    required String recordType,
+    required String recordId,
+  }) async {
+    final response = await post(
+      ApiConstants.assistantSummarize,
+      data: {
+        'recordType': recordType,
+        'recordId': recordId,
+      },
+    );
+
+    final rawData = response.data;
+    if (rawData is Map) {
+      return BingoSummaryResponse.fromJson(Map<String, dynamic>.from(rawData));
+    }
+    throw Exception('Invalid response format received from server');
+  }
 
   Future<Response<T>> get<T>(
     String path, {

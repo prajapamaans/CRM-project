@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/log_call_modal.dart';
 import 'call_details_screen.dart';
 
@@ -34,7 +36,8 @@ class _CallsScreenState extends State<CallsScreen> {
     });
     try {
       final repository = MasterDataRepositoryImpl();
-      final activities = await repository.getActivities(type: 'call', page: 1, limit: 25);
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      final activities = await repository.getActivities(type: 'call', page: 1, limit: 25, departmentId: deptId);
       final loadedCalls = activities.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Call';
         
@@ -316,34 +319,48 @@ class _CallsScreenState extends State<CallsScreen> {
 
                         // Main List Content or Empty State
                         Expanded(
-                          child: _isLoadingCalls
-                              ? const Center(
-                                  child: CircularProgressIndicator(
-                                    color: Color(0xFF00A884),
-                                  ),
-                                )
-                              : filteredCalls.isEmpty
-                                  ? Center(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(24),
-                                        child: Text(
-                                          'No call logs found. Click "+ Call" to add one.',
-                                          textAlign: TextAlign.center,
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 13.5,
-                                            color: const Color(0xFF64748B),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                  : ListView.builder(
-                                      padding: const EdgeInsets.all(14),
-                                      itemCount: filteredCalls.length,
-                                      itemBuilder: (context, index) {
-                                        final c = filteredCalls[index];
-                                        return _buildCallTile(c);
-                                      },
+                          child: AppRefreshIndicator(
+                            onRefresh: () async {
+                              await _loadCalls();
+                            },
+                            child: _isLoadingCalls && _calls.isEmpty
+                                ? const Center(
+                                    child: CircularProgressIndicator(
+                                      color: Color(0xFF00A884),
                                     ),
+                                  )
+                                : filteredCalls.isEmpty
+                                    ? ListView(
+                                        physics: const AlwaysScrollableScrollPhysics(
+                                            parent: BouncingScrollPhysics()),
+                                        children: [
+                                          const SizedBox(height: 120),
+                                          Center(
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(24),
+                                              child: Text(
+                                                'No call logs found. Click "+ Call" to add one.',
+                                                textAlign: TextAlign.center,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 13.5,
+                                                  color: const Color(0xFF64748B),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : ListView.builder(
+                                        physics: const AlwaysScrollableScrollPhysics(
+                                            parent: BouncingScrollPhysics()),
+                                        padding: const EdgeInsets.all(14),
+                                        itemCount: filteredCalls.length,
+                                        itemBuilder: (context, index) {
+                                          final c = filteredCalls[index];
+                                          return _buildCallTile(c);
+                                        },
+                                      ),
+                          ),
                         ),
                         const Divider(height: 1, color: Color(0xFFE2E8F0)),
                         Padding(

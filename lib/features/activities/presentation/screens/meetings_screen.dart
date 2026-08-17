@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/log_meeting_modal.dart';
 
 class MeetingsScreen extends StatefulWidget {
@@ -59,7 +61,8 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     });
     try {
       final repository = MasterDataRepositoryImpl();
-      final activities = await repository.getActivities(type: 'meeting');
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      final activities = await repository.getActivities(type: 'meeting', departmentId: deptId);
       final loadedMeetings = activities.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Meeting';
         
@@ -320,34 +323,48 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
                       // Main List Content or Empty State
                       Expanded(
-                        child: _isLoadingMeetings
-                            ? const Center(
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFF0F766E),
-                                ),
-                              )
-                            : filteredMeetings.isEmpty
-                                ? Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(24),
-                                      child: Text(
-                                        'No meetings found. Click "Create meeting" to add one.',
-                                        textAlign: TextAlign.center,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13.5,
-                                          color: const Color(0xFF64748B),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                : ListView.builder(
-                                    padding: const EdgeInsets.all(14),
-                                    itemCount: filteredMeetings.length,
-                                    itemBuilder: (context, index) {
-                                      final m = filteredMeetings[index];
-                                      return _buildMeetingTile(m);
-                                    },
+                        child: AppRefreshIndicator(
+                          onRefresh: () async {
+                            await _loadMeetings();
+                          },
+                          child: _isLoadingMeetings && _meetings.isEmpty
+                              ? const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Color(0xFF0F766E),
                                   ),
+                                )
+                              : filteredMeetings.isEmpty
+                                  ? ListView(
+                                      physics: const AlwaysScrollableScrollPhysics(
+                                          parent: BouncingScrollPhysics()),
+                                      children: [
+                                        const SizedBox(height: 120),
+                                        Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(24),
+                                            child: Text(
+                                              'No meetings found. Click "Create meeting" to add one.',
+                                              textAlign: TextAlign.center,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 13.5,
+                                                color: const Color(0xFF64748B),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : ListView.builder(
+                                      physics: const AlwaysScrollableScrollPhysics(
+                                          parent: BouncingScrollPhysics()),
+                                      padding: const EdgeInsets.all(14),
+                                      itemCount: filteredMeetings.length,
+                                      itemBuilder: (context, index) {
+                                        final m = filteredMeetings[index];
+                                        return _buildMeetingTile(m);
+                                      },
+                                    ),
+                        ),
                       ),
                       const Divider(height: 1, color: Color(0xFFE2E8F0)),
                       Padding(

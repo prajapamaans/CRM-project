@@ -10,9 +10,11 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../contacts/data/models/contact_model.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
+import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../../data/models/activity_stats_model.dart';
 import '../providers/dashboard_provider.dart';
 
@@ -33,15 +35,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       final currentUserId = auth.currentUser?.id;
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
       
       context.read<DashboardProvider>().loadDashboardData(
         ownerId: _selectedPillIndex == 1 ? currentUserId : null,
+        departmentId: deptId,
       );
       context.read<ContactProvider>().fetchContacts();
       context.read<DealProvider>().fetchDeals();
       context.read<MasterDataProvider>().fetchAllMasterData(
         currentUserId: currentUserId,
-        departmentId: auth.currentUser?.departmentId,
+        departmentId: deptId,
       );
       auth.fetchTeamMembers();
     });
@@ -53,7 +57,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
     final auth = context.read<AuthProvider>();
     final ownerId = index == 1 ? auth.currentUser?.id : null;
-    context.read<DashboardProvider>().loadDashboardData(ownerId: ownerId);
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    context.read<DashboardProvider>().loadDashboardData(
+      ownerId: ownerId,
+      departmentId: deptId,
+    );
   }
 
   @override
@@ -63,10 +71,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final currentUser = authProvider.currentUser;
     final dashboardProvider = context.watch<DashboardProvider>();
     final contactProvider = context.watch<ContactProvider>();
+    final companyProvider = context.watch<CompanyProvider>();
     final dealProvider = context.watch<DealProvider>();
+    final deptProvider = context.watch<DepartmentProvider>();
     final stats = dashboardProvider.stats;
     final contactsList = contactProvider.contacts;
     final dealsList = dealProvider.deals;
+    final isSwitching = deptProvider.isSwitchingDepartment;
+
+    final reportsData = dashboardProvider.reportsDashboardData;
+    final Map<String, dynamic>? dataObj = reportsData != null
+        ? (reportsData['data'] is Map<String, dynamic> ? reportsData['data'] as Map<String, dynamic> : reportsData)
+        : null;
+
+    int displayContactsCount = contactProvider.totalCount;
+    int displayCompaniesCount = companyProvider.totalCount;
+    int displayDealsCount = dealProvider.totalCount;
+
+    if (dataObj != null) {
+      final dynamic rawContacts = dataObj['totalContactsOwned'] ?? dataObj['totalContacts'] ?? dataObj['contactsCount'];
+      if (rawContacts is num) displayContactsCount = rawContacts.toInt();
+
+      final dynamic rawCompanies = dataObj['totalCompaniesOwned'] ?? dataObj['totalCompanies'] ?? dataObj['companiesCount'];
+      if (rawCompanies is num) displayCompaniesCount = rawCompanies.toInt();
+
+      final dynamic rawDeals = dataObj['totalDealsOwned'] ?? dataObj['totalDeals'] ?? dataObj['dealsCount'];
+      if (rawDeals is num) displayDealsCount = rawDeals.toInt();
+    }
 
     // Check if logged in user is Admin / Super Admin
     final bool isAdmin = currentUser == null ||
@@ -82,16 +113,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: RefreshIndicator(
           onRefresh: () async {
             final ownerId = _selectedPillIndex == 1 ? currentUser?.id : null;
-            await Future.wait([
-              context.read<DashboardProvider>().loadDashboardData(ownerId: ownerId),
-              context.read<MasterDataProvider>().fetchAllMasterData(
-                currentUserId: currentUser?.id,
-                departmentId: currentUser?.departmentId,
-              ),
-              context.read<AuthProvider>().fetchTeamMembers(),
-              context.read<ContactProvider>().fetchContacts(),
-              context.read<DealProvider>().fetchDeals(),
-            ]);
+            final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+            await context.read<DashboardProvider>().loadDashboardData(
+              ownerId: ownerId,
+              departmentId: deptId,
+            );
           },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
@@ -121,7 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 const SizedBox(height: AppSpacing.lg),
 
-                if (dashboardProvider.isLoadingStats && stats == null)
+                if (isSwitching || (dashboardProvider.isLoadingStats && stats == null))
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
@@ -136,7 +162,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Expanded(
                           child: StatCard(
                             label: 'TOTAL CONTACTS',
-                            value: '${stats?.totalContacts ?? 0}',
+                            value: '$displayContactsCount',
                             badgeText: 'Contacts',
                             badgeBgColor: const Color(0xFFE6F4F1),
                             badgeTextColor: const Color(0xFF0F766E),
@@ -149,7 +175,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Expanded(
                           child: StatCard(
                             label: 'TOTAL COMPANIES',
-                            value: '${stats?.totalCompanies ?? 0}',
+                            value: '$displayCompaniesCount',
                             badgeText: 'Companies',
                             badgeBgColor: const Color(0xFFE6F4F1),
                             badgeTextColor: const Color(0xFF0F766E),
@@ -162,7 +188,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Expanded(
                           child: StatCard(
                             label: 'TOTAL DEALS',
-                            value: '${stats?.totalDeals ?? 0}',
+                            value: '$displayDealsCount',
                             badgeText: 'Active',
                             badgeBgColor: const Color(0xFFE6F4F1),
                             badgeTextColor: const Color(0xFF0F766E),
@@ -178,7 +204,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         StatCard(
                           label: 'TOTAL CONTACTS',
-                          value: '${stats?.totalContacts ?? 0}',
+                          value: '$displayContactsCount',
                           badgeText: 'Contacts',
                           badgeBgColor: const Color(0xFFE6F4F1),
                           badgeTextColor: const Color(0xFF0F766E),
@@ -189,7 +215,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: AppSpacing.md),
                         StatCard(
                           label: 'TOTAL COMPANIES',
-                          value: '${stats?.totalCompanies ?? 0}',
+                          value: '$displayCompaniesCount',
                           badgeText: 'Companies',
                           badgeBgColor: const Color(0xFFE6F4F1),
                           badgeTextColor: const Color(0xFF0F766E),
@@ -200,7 +226,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: AppSpacing.md),
                         StatCard(
                           label: 'TOTAL DEALS',
-                          value: '${stats?.totalDeals ?? 0}',
+                          value: '$displayDealsCount',
                           badgeText: 'Active',
                           badgeBgColor: const Color(0xFFE6F4F1),
                           badgeTextColor: const Color(0xFF0F766E),
@@ -372,7 +398,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(width: 8),
                         InkWell(
                           onTap: () {
-                            context.read<DashboardProvider>().loadDashboardData();
+                            final deptProvider = context.read<DepartmentProvider>();
+                            context.read<DashboardProvider>().loadDashboardData(
+                              departmentId: deptProvider.selectedDepartmentId,
+                              departmentName: deptProvider.selectedDepartmentName,
+                            );
                           },
                           borderRadius: BorderRadius.circular(20),
                           child: Container(
@@ -728,8 +758,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMeetingsBookedTable() {
+    final deptId = context.watch<DepartmentProvider>().selectedDepartmentId;
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: MasterDataRepositoryImpl().getActivities(type: 'meeting'),
+      future: MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(

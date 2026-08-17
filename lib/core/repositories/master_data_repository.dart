@@ -10,7 +10,7 @@ abstract class MasterDataRepository {
   });
   Future<List<MspOptionModel>> getMspOptions();
   Future<List<Map<String, dynamic>>> getDepartments();
-  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit});
+  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit, String? departmentId});
   Future<List<Map<String, dynamic>>> getDealStages();
   Future<List<Map<String, dynamic>>> getActivities({
     String? ownerId,
@@ -21,6 +21,7 @@ abstract class MasterDataRepository {
     String? contactId,
     String? companyId,
     String? dealId,
+    String? departmentId,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -97,9 +98,9 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit}) async {
+  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit, String? departmentId}) async {
     try {
-      return await _remoteDataSource.getNotifications(isRead: isRead, limit: limit);
+      return await _remoteDataSource.getNotifications(isRead: isRead, limit: limit, departmentId: departmentId);
     } catch (e) {
       debugPrint('[GET /api/activities/notifications ERROR]: $e');
       return [];
@@ -126,6 +127,7 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     String? contactId,
     String? companyId,
     String? dealId,
+    String? departmentId,
   }) async {
     try {
       return await _remoteDataSource.getActivities(
@@ -137,6 +139,7 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
         contactId: contactId,
         companyId: companyId,
         dealId: dealId,
+        departmentId: departmentId,
       );
     } catch (e) {
       debugPrint('[GET /api/activities ERROR]: $e');

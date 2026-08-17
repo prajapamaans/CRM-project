@@ -44,9 +44,15 @@ class DepartmentProvider extends ChangeNotifier {
     _loadInitialStoredDepartment();
   }
 
+  static final List<DepartmentModel> defaultDepartments = [
+    const DepartmentModel(id: DepartmentConstants.apacId, name: 'APAC Team'),
+    const DepartmentModel(id: DepartmentConstants.australiaId, name: 'Australia'),
+    const DepartmentModel(id: DepartmentConstants.talentAcquisitionNightId, name: 'Talent Acquisition Night'),
+  ];
+
   DepartmentState get state => _state;
   List<DepartmentModel> get departments => _departments;
-  List<DepartmentModel> get availableDepartments => _departments;
+  List<DepartmentModel> get availableDepartments => _departments.isNotEmpty ? _departments : defaultDepartments;
   bool get isLoading => _isLoading;
   bool get isSwitchingDepartment => _isSwitchingDepartment;
   String? get error => _error;
@@ -68,7 +74,7 @@ class DepartmentProvider extends ChangeNotifier {
 
   bool get isUser => !isSuperAdmin && !isAdmin;
 
-  bool get canSwitchDepartment => isSuperAdmin;
+  bool get canSwitchDepartment => true;
 
   Future<void> _loadInitialStoredDepartment() async {
     final storedDeptId = await _storageService.getSelectedDepartmentId();
@@ -109,24 +115,19 @@ class DepartmentProvider extends ChangeNotifier {
       await _storageService.saveAssignedDepartmentId(assignedId);
     }
 
-    if (!isSuperAdmin) {
-      // Non super-admins are strictly locked to assigned department
-      _selectedDepartmentId = assignedId;
-      _selectedDepartmentName = user.departmentName ??
-          (_departments.isNotEmpty ? _departments.firstWhere((d) => d.id == assignedId, orElse: () => _departments.first).name : '');
-    } else {
-      // Super admin can restore previous selection or fallback to assigned/default
-      final savedId = await _storageService.getSelectedDepartmentId();
-      final savedName = await _storageService.getSelectedDepartmentName();
+    final savedId = await _storageService.getSelectedDepartmentId();
+    final savedName = await _storageService.getSelectedDepartmentName();
 
-      if (savedId != null && savedId.isNotEmpty) {
-        _selectedDepartmentId = savedId;
-        _selectedDepartmentName = savedName ??
-            (_departments.isNotEmpty ? _departments.firstWhere((d) => d.id == savedId, orElse: () => _departments.first).name : '');
-      } else {
-        _selectedDepartmentId = assignedId;
-        _selectedDepartmentName = user.departmentName ?? (_departments.isNotEmpty ? _departments.first.name : '');
-      }
+    if (savedId != null && savedId.isNotEmpty) {
+      _selectedDepartmentId = savedId;
+      _selectedDepartmentName = savedName ??
+          (_departments.isNotEmpty ? _departments.firstWhere((d) => d.id == savedId, orElse: () => _departments.first).name : 'APAC Team');
+    } else if (assignedId.isNotEmpty) {
+      _selectedDepartmentId = assignedId;
+      _selectedDepartmentName = user.departmentName ?? (_departments.isNotEmpty ? _departments.first.name : 'APAC Team');
+    } else {
+      _selectedDepartmentId = DepartmentConstants.apacId;
+      _selectedDepartmentName = 'APAC Team';
     }
 
     await _storageService.saveSelectedDepartmentId(_selectedDepartmentId!);
@@ -225,10 +226,11 @@ class DepartmentProvider extends ChangeNotifier {
     String departmentId,
     String departmentName,
   ) async {
-    if (!canSwitchDepartment) {
-      debugPrint('[DepartmentProvider] Switching denied: User role $_userRole cannot switch departments.');
-      return;
-    }
+    debugPrint('========== DEPARTMENT SWITCH ==========');
+    debugPrint('');
+    debugPrint('Selected Department Name: $departmentName');
+    debugPrint('Selected Department ID: $departmentId');
+    debugPrint('');
 
     if (_selectedDepartmentId == departmentId && !_isSwitchingDepartment) {
       return;
@@ -280,13 +282,16 @@ class DepartmentProvider extends ChangeNotifier {
       final dealProvider = context.read<DealProvider>();
       final masterDataProvider = context.read<MasterDataProvider>();
 
+      final currentDeptId = selectedDepartmentId;
+      final currentDeptName = selectedDepartmentName;
+
       await Future.wait<void>([
-        dashboardProvider.loadDashboardData(),
-        contactProvider.fetchContacts(refresh: true),
-        companyProvider.fetchCompanies(refresh: true),
-        dealProvider.fetchDeals(refresh: true),
-        dealProvider.fetchDealStats(),
-        masterDataProvider.fetchAllMasterData(),
+        dashboardProvider.loadDashboardData(departmentId: currentDeptId, departmentName: currentDeptName),
+        contactProvider.fetchContacts(refresh: true, departmentId: currentDeptId),
+        companyProvider.fetchCompanies(refresh: true, departmentId: currentDeptId),
+        dealProvider.fetchDeals(refresh: true, departmentId: currentDeptId),
+        dealProvider.fetchDealStats(departmentId: currentDeptId),
+        masterDataProvider.fetchAllMasterData(departmentId: currentDeptId),
       ]);
     } catch (e) {
       debugPrint('[DepartmentProvider] Error reloading department data: $e');

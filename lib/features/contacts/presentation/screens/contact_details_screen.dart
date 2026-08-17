@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
+import '../../../../core/network/api_service.dart';
+import '../../../../core/models/bingo_summary_model.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/add_association_modal.dart';
 import '../../../../core/widgets/associate_msp_modal.dart';
@@ -11,7 +14,13 @@ import '../../../activities/presentation/widgets/create_email_modal.dart';
 import '../../../activities/presentation/widgets/log_call_modal.dart';
 import '../../../activities/presentation/widgets/log_meeting_modal.dart';
 import '../../data/models/contact_model.dart';
+import '../../data/repositories/contact_repository.dart';
 import '../providers/contact_provider.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
+import 'package:crmproject/features/companies/presentation/screens/company_details_screen.dart';
+import 'package:crmproject/features/companies/data/models/company_model.dart';
+import 'package:crmproject/features/deals/presentation/screens/deal_details_screen.dart';
+import 'package:crmproject/features/deals/data/models/deal_model.dart';
 
 class ContactDetailsScreen extends StatefulWidget {
   final ContactModel? contact;
@@ -59,6 +68,51 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   bool _isActivitiesCollapsed = false;
   List<Map<String, dynamic>> _activities = [];
   bool _isLoadingActivities = false;
+
+  // AI Summary State
+  BingoSummaryResponse? _bingoSummaryResponse;
+  String? _aiSummary;
+  bool _isLoadingAiSummary = false;
+
+  Future<void> _fetchAiSummary(String recordType, String recordId) async {
+    setState(() {
+      _isLoadingAiSummary = true;
+    });
+
+    try {
+      final apiService = ApiService();
+      final bingoResponse = await apiService.getBingoSummary(
+        recordType: recordType,
+        recordId: recordId,
+      );
+
+      if (mounted) {
+        setState(() {
+          _bingoSummaryResponse = bingoResponse;
+          if (bingoResponse.data.blocked) {
+            _aiSummary = 'AI summary is blocked for this record.';
+          } else if (bingoResponse.data.summary.isNotEmpty) {
+            _aiSummary = bingoResponse.data.summary;
+          } else {
+            _aiSummary = 'No summary available for this record.';
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('[ContactDetailsScreen _fetchAiSummary ERROR]: $e');
+      if (mounted) {
+        setState(() {
+          _aiSummary = 'Failed to generate AI summary. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingAiSummary = false;
+        });
+      }
+    }
+  }
 
   final List<String> _activitySubTabs = const [
     'All activities',
@@ -117,6 +171,113 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
     _fetchActivities();
     _fetchUsers();
+    _fetchContactDetails();
+  }
+
+  bool _isLoadingDetails = false;
+
+  Future<void> _fetchContactDetails() async {
+    final contactId = widget.contact?.id;
+    if (contactId == null || contactId.isEmpty) return;
+
+    setState(() {
+      _isLoadingDetails = true;
+    });
+
+    try {
+      final repo = ContactRepositoryImpl();
+      final contactModel = await repo.getContactById(contactId);
+
+      // We also extract raw associations from response if present via dio/repo
+      // raw getContactById returns associatedCompanies, deals, associatedContacts
+      if (mounted) {
+        setState(() {
+          // Update controllers if updated
+          if (contactModel.firstName != null) _firstNameController.text = contactModel.firstName!;
+          if (contactModel.lastName != null) _lastNameController.text = contactModel.lastName!;
+          if (contactModel.email.isNotEmpty) _emailController.text = contactModel.email;
+          if (contactModel.phone != null) _phoneController.text = contactModel.phone!;
+          if (contactModel.jobTitle != null) _jobTitleController.text = contactModel.jobTitle!;
+          if (contactModel.companyName != null) _companyController.text = contactModel.companyName!;
+          if (contactModel.ownerName != null) _ownerController.text = contactModel.ownerName!;
+          if (contactModel.lifecycleStage != null) _lifecycleStage = contactModel.lifecycleStage!;
+          if (contactModel.leadStatus != null) _leadStatus = contactModel.leadStatus!;
+
+          // Update associations from API response
+          _associatedCompanies.clear();
+          if (contactModel.associatedCompanies != null) {
+            for (final comp in contactModel.associatedCompanies!) {
+              _associatedCompanies.add({
+                'id': comp['id']?.toString() ?? '',
+                'name': comp['name']?.toString() ?? comp['companyName']?.toString() ?? '',
+                'subtext': comp['domain']?.toString() ?? comp['companyDomain']?.toString() ?? '',
+                'isPrimary': comp['isPrimary'] == true || comp['primary'] == true,
+              });
+            }
+          }
+
+          _associatedContacts.clear();
+          if (contactModel.associatedContacts != null) {
+            for (final cont in contactModel.associatedContacts!) {
+              final rawName = cont['name']?.toString() ?? '';
+              final firstName = cont['firstName']?.toString() ?? cont['first_name']?.toString() ?? '';
+              final lastName = cont['lastName']?.toString() ?? cont['last_name']?.toString() ?? '';
+              final fullName = rawName.isNotEmpty ? rawName : '$firstName $lastName'.trim();
+              final email = cont['email']?.toString() ?? '';
+
+              _associatedContacts.add({
+                'id': cont['id']?.toString() ?? '',
+                'name': fullName.isNotEmpty ? fullName : 'Unnamed Contact',
+                'subtext': email.isNotEmpty ? email : '-',
+                'email': email,
+                'jobTitle': cont['jobTitle']?.toString() ?? cont['job_title']?.toString() ?? '',
+                'isPrimary': cont['isPrimary'] == true || cont['primary'] == true,
+              });
+            }
+          }
+
+          _associatedDeals.clear();
+          if (contactModel.deals != null) {
+            for (final d in contactModel.deals!) {
+              final amt = d['amount'];
+              String sub = '';
+              if (d['stage'] != null && d['stage'].toString().isNotEmpty) {
+                sub += d['stage'].toString();
+              }
+              if (amt != null) {
+                if (sub.isNotEmpty) sub += ' • ';
+                sub += '\$$amt';
+              }
+              _associatedDeals.add({
+                'id': d['id']?.toString() ?? '',
+                'name': d['title']?.toString() ?? d['name']?.toString() ?? '',
+                'title': d['title']?.toString() ?? d['name']?.toString() ?? '',
+                'amount': amt,
+                'stage': d['stage']?.toString() ?? '',
+                'expectedCloseDate': d['expectedCloseDate']?.toString() ?? '',
+                'subtext': sub,
+                'isPrimary': d['isPrimary'] == true || d['primary'] == true,
+              });
+            }
+          }
+
+          if (contactModel.msp != null && contactModel.msp!.isNotEmpty) {
+            _mspController.text = contactModel.msp!;
+            _associatedMsps = [{'name': contactModel.msp!}];
+          } else {
+            _associatedMsps = [];
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('[ContactDetailsScreen _fetchContactDetails ERROR]: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingDetails = false;
+        });
+      }
+    }
   }
 
   Future<void> _fetchUsers() async {
@@ -571,28 +732,50 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
               ),
-              tabs: const [
-                Tab(text: 'Overview'),
-                Tab(text: 'Activities'),
-                Tab(text: 'Associations (0)'),
+              tabs: [
+                const Tab(text: 'Overview'),
+                const Tab(text: 'Activities'),
+                Tab(
+                  text:
+                      'Associations (${_associatedCompanies.length + _associatedContacts.length + _associatedMsps.length + _associatedDeals.length})',
+                ),
               ],
             ),
           ),
 
           // Tab Bar Views
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // 1. Overview Tab
-                _buildOverviewTab(),
+            child: AppRefreshIndicator(
+              onRefresh: () async {
+                await _fetchContactDetails();
+                await _fetchActivities();
+              },
+              child: Stack(
+                children: [
+                  TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // 1. Overview Tab
+                      _buildOverviewTab(),
 
-                // 2. Activities Tab
-                _buildActivitiesTab(),
+                      // 2. Activities Tab
+                      _buildActivitiesTab(),
 
-                // 3. Associations Tab
-                _buildAssociationsTab(),
-              ],
+                      // 3. Associations Tab
+                      _buildAssociationsTab(),
+                    ],
+                  ),
+                  if (_isLoadingDetails)
+                    Container(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF00A884),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -600,9 +783,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       bottomNavigationBar: CustomBottomNavBar(
         currentIndex: 1, // Contacts Tab
         onTap: (index) {
-          if (index != 1) {
-            Navigator.of(context).pop();
-          }
+          context.read<NavigationProvider>().selectScreen(index);
+          Navigator.of(context).popUntil((route) => route.isFirst);
         },
       ),
     );
@@ -798,7 +980,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               // Progress Bar (8 Boxes Row)
               Row(
                 children: List.generate(8, (index) {
-                  final int currentStageIndex = _lifecycleStages.indexOf(_lifecycleStage);
+                  final int currentStageIndex = _lifecycleStages.indexWhere(
+                    (s) => s.trim().toLowerCase() == _lifecycleStage.trim().toLowerCase(),
+                  );
                   final int activeIndex = currentStageIndex >= 0 ? currentStageIndex : 0;
                   final bool isCompleted = index <= activeIndex;
                   return Expanded(
@@ -1324,107 +1508,111 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                     if (type.contains('NOTE')) actIcon = Icons.description_outlined;
                     if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFE6F4F1),
-                              shape: BoxShape.circle,
+                    return InkWell(
+                      onTap: () => _showActivityDetailsModal(act),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFE6F4F1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                actIcon,
+                                color: const Color(0xFF00A884),
+                                size: 18,
+                              ),
                             ),
-                            child: Icon(
-                              actIcon,
-                              color: const Color(0xFF00A884),
-                              size: 18,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.chevron_right_rounded,
-                                      size: 18,
-                                      color: Color(0xFF64748B),
-                                    ),
-                                    const SizedBox(width: 2),
-                                    Expanded(
-                                      child: Text(
-                                        title.toString(),
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w700,
-                                          color: const Color(0xFF1E293B),
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.person_outline_rounded,
-                                      size: 14,
-                                      color: Color(0xFF64748B),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      ownerName.toString(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        color: const Color(0xFF64748B),
-                                      ),
-                                    ),
-                                    if (formattedDate.isNotEmpty) ...[
-                                      const SizedBox(width: 14),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
                                       const Icon(
-                                        Icons.access_time_rounded,
-                                        size: 14,
+                                        Icons.chevron_right_rounded,
+                                        size: 18,
                                         color: Color(0xFF64748B),
                                       ),
-                                      const SizedBox(width: 4),
+                                      const SizedBox(width: 2),
                                       Expanded(
                                         child: Text(
-                                          formattedDate,
+                                          title.toString(),
                                           style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            color: const Color(0xFF64748B),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: const Color(0xFF1E293B),
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ],
-                                  ],
-                                ),
-                                if (act['notes'] != null && act['notes'].toString().isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    act['notes'].toString(),
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      color: const Color(0xFF475569),
-                                    ),
                                   ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.person_outline_rounded,
+                                        size: 14,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        ownerName.toString(),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                      if (formattedDate.isNotEmpty) ...[
+                                        const SizedBox(width: 14),
+                                        const Icon(
+                                          Icons.access_time_rounded,
+                                          size: 14,
+                                          color: Color(0xFF64748B),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            formattedDate,
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              color: const Color(0xFF64748B),
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  if (act['notes'] != null && act['notes'].toString().isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      act['notes'].toString(),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        color: const Color(0xFF475569),
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                   }),
@@ -1434,6 +1622,144 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           ),
         ),
       ],
+    );
+  }
+
+  void _showActivityDetailsModal(Map<String, dynamic> act) {
+    final type = (act['type'] ?? act['activityType'] ?? 'Activity').toString().toUpperCase();
+    final title = act['title'] ?? act['notes'] ?? act['type'] ?? 'Activity';
+    final ownerName = act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
+    final description = act['description'] ?? act['notes'] ?? act['message'] ?? '';
+    final status = act['status'] ?? 'Completed';
+    final priority = act['priority'] ?? 'Normal';
+    final rawDate = act['createdAt'] ?? act['scheduledAt'] ?? act['activityDate'] ?? '';
+
+    String formattedDate = '';
+    if (rawDate.toString().isNotEmpty) {
+      try {
+        final dt = DateTime.parse(rawDate.toString()).toLocal();
+        final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+        final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+        final min = dt.minute.toString().padLeft(2, '0');
+        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        formattedDate = '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm';
+      } catch (_) {
+        formattedDate = rawDate.toString();
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            top: 20,
+            left: 20,
+            right: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title.toString(),
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF1E293B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const Divider(color: Color(0xFFE2E8F0)),
+              const SizedBox(height: 10),
+              _buildDetailRow('Type', type),
+              _buildDetailRow('Assigned / Created By', ownerName.toString()),
+              if (formattedDate.isNotEmpty) _buildDetailRow('Date', formattedDate),
+              _buildDetailRow('Status', status.toString()),
+              if (act['priority'] != null) _buildDetailRow('Priority', priority.toString()),
+              if (act['outcome'] != null) _buildDetailRow('Outcome', act['outcome'].toString()),
+              if (description.toString().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Details / Changes:',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF475569),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Text(
+                    description.toString(),
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: const Color(0xFF334155),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: const Color(0xFF64748B),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: const Color(0xFF1E293B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1706,15 +2032,57 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   height: 1.4,
                 ),
               ),
+              if (_aiSummary != null && _aiSummary!.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF1F2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFECDD3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _aiSummary!,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: const Color(0xFF1E293B),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: () {},
-                  icon: const Icon(Icons.auto_awesome,
-                      color: Color(0xFFE11D48), size: 16),
+                  onPressed: _isLoadingAiSummary
+                      ? null
+                      : () {
+                          final contactId = widget.contact?.id;
+                          if (contactId != null && contactId.isNotEmpty) {
+                            _fetchAiSummary('contact', contactId);
+                          }
+                        },
+                  icon: _isLoadingAiSummary
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFE11D48),
+                          ),
+                        )
+                      : const Icon(Icons.auto_awesome,
+                          color: Color(0xFFE11D48), size: 16),
                   label: Text(
-                    'Summarize',
+                    _isLoadingAiSummary ? 'Summarizing...' : 'Summarize',
                     style: GoogleFonts.poppins(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -1739,6 +2107,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           title: 'Companies',
           description: 'Track the companys associated with this record.',
           buttonText: 'Create company',
+          entityType: 'company',
           associatedItems: _associatedCompanies,
           onPressed: () async {
             final res = await AddAssociationModal.show(context, entityType: 'company');
@@ -1761,6 +2130,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           title: 'Contacts',
           description: 'Track the contacts associated with this record.',
           buttonText: 'Create contact',
+          entityType: 'contact',
           associatedItems: _associatedContacts,
           onPressed: () async {
             final res = await AddAssociationModal.show(context, entityType: 'contact');
@@ -1784,6 +2154,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           description:
               'Track the Managed Service Provider (MSP) associated with this record.',
           buttonText: 'Create msp',
+          entityType: 'msp',
           associatedItems: _associatedMsps,
           onPressed: () async {
             final res = await AssociateMspModal.show(context, initialMsp: _mspController.text.trim());
@@ -1801,6 +2172,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           title: 'Deals',
           description: 'Track the deals associated with this record.',
           buttonText: 'Create deal',
+          entityType: 'deal',
           associatedItems: _associatedDeals,
           onPressed: () async {
             final res = await AddAssociationModal.show(context, entityType: 'deal');
@@ -1823,15 +2195,20 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           title: 'Tasks',
           description: 'Track the tasks associated with this record.',
           buttonText: 'Create task',
+          entityType: 'task',
           associatedItems: _associatedTasks,
           isTeal: true,
           topActionText: '+ Add',
           onPressed: () async {
-            final res = await CreateTaskModal.show(context, contactId: widget.contact?.id);
+            final contactId = widget.contact?.id;
+            final res = await CreateTaskModal.show(context, contactId: contactId);
             if (res != null) {
               setState(() {
                 _associatedTasks.add({'name': res.title});
+                _selectedActivitySubTab = 4; // Select Tasks subtab
+                _tabController.animateTo(1); // Switch to Activities tab
               });
+              _fetchActivities();
             }
           },
         ),
@@ -1839,10 +2216,60 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     );
   }
 
+  void _navigateToEntityDetails(String entityType, Map<String, dynamic> item) {
+    final id = (item['id'] ?? '').toString();
+    final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
+    final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+
+    if (entityType == 'contact') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ContactDetailsScreen(
+            contact: ContactModel(
+              id: id,
+              firstName: name,
+              email: subtext,
+            ),
+          ),
+        ),
+      );
+    } else if (entityType == 'company') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CompanyDetailsScreen(
+            company: CompanyModel(
+              id: id,
+              name: name,
+              domain: subtext,
+            ),
+          ),
+        ),
+      );
+    } else if (entityType == 'deal') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DealDetailsScreen(
+            deal: DealModel(
+              id: id,
+              title: name,
+              amount: 0,
+              stage: '',
+              probability: 0,
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   Widget _buildAssociationCard({
     required String title,
     required String description,
     required String buttonText,
+    required String entityType,
     List<Map<String, dynamic>> associatedItems = const [],
     bool isTeal = false,
     String? topActionText,
@@ -1918,31 +2345,146 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               ),
             )
           else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: associatedItems.map((item) {
-                final name = (item['name'] ?? item['title'] ?? '').toString();
-                final sub = (item['subtext'] ?? '').toString();
-                final labelText = sub.isNotEmpty ? '$name ($sub)' : name;
+            Column(
+              children: associatedItems.asMap().entries.map((entry) {
+                final index = entry.key;
+                final item = entry.value;
+                final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
+                final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+                final initialLetter = name.isNotEmpty ? name[0] : 'W';
+                final isPrimary = item['isPrimary'] == true || item['primary'] == true;
 
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        labelText,
-                        style: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF1E293B),
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(8),
                         ),
+                        child: Center(
+                          child: Text(
+                            initialLetter,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF1E40AF),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: InkWell(
+                                    onTap: () => _navigateToEntityDetails(entityType, item),
+                                    child: Text(
+                                      name,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: const Color(0xFF00A884),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                if (isPrimary) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFF6FF),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                                    ),
+                                    child: Text(
+                                      'PRIMARY',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF1E40AF),
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (subtext.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtext,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: const Color(0xFF64748B),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(
+                          Icons.more_vert,
+                          color: Color(0xFF64748B),
+                          size: 20,
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onSelected: (value) {
+                          if (value == 'primary') {
+                            setState(() {
+                              for (var i in associatedItems) {
+                                i['isPrimary'] = false;
+                                i['primary'] = false;
+                              }
+                              item['isPrimary'] = true;
+                              item['primary'] = true;
+                            });
+                          } else if (value == 'remove') {
+                            setState(() {
+                              associatedItems.remove(item);
+                            });
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          PopupMenuItem<String>(
+                            value: 'primary',
+                            child: Text(
+                              'Set as primary',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                color: const Color(0xFF1E293B),
+                              ),
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'remove',
+                            child: Text(
+                              'Remove association',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                color: const Color(0xFFEF4444),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1966,7 +2508,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                 ),
               ),
               child: Text(
-                hasItems ? '+ Add another ${title.toLowerCase().substring(0, title.length - 1)}' : buttonText,
+                hasItems
+                    ? '+ Add another ${title.toLowerCase().substring(0, title.length - 1)}'
+                    : buttonText,
                 style: GoogleFonts.poppins(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -2036,7 +2580,21 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
     if (mounted && result != null && result != false) {
       setState(() {
-        _tabController.animateTo(1); // Switch to Activities tab only on save
+        _selectedDateFilter = 'All time';
+        _selectedAssigneeFilter = 'Activity assigned to';
+        _searchActivitiesController.clear();
+        if (type == 'Task') {
+          _selectedActivitySubTab = 4; // Tasks subtab
+        } else if (type == 'Note') {
+          _selectedActivitySubTab = 1;
+        } else if (type == 'Email') {
+          _selectedActivitySubTab = 2;
+        } else if (type == 'Call') {
+          _selectedActivitySubTab = 3;
+        } else if (type == 'Meeting') {
+          _selectedActivitySubTab = 5;
+        }
+        _tabController.animateTo(1); // Switch to Activities tab
       });
       _fetchActivities();
     }

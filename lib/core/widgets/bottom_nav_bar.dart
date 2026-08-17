@@ -115,7 +115,7 @@ class CustomBottomNavBar extends StatelessWidget {
             children: [
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? const Color(0xFFCCFBF1)
@@ -124,23 +124,25 @@ class CustomBottomNavBar extends StatelessWidget {
                 ),
                 child: Icon(
                   icon,
-                  size: 24,
+                  size: 22,
                   color: isSelected
                       ? AppColors.primaryTeal
                       : const Color(0xFF64748B),
                 ),
               ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                  color: isSelected
-                      ? AppColors.primaryTeal
-                      : const Color(0xFF64748B),
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                    color: isSelected
+                        ? AppColors.primaryTeal
+                        : const Color(0xFF64748B),
+                  ),
                 ),
               ),
             ],

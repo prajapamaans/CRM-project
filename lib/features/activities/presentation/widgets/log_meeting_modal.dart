@@ -6,6 +6,7 @@ import '../../../../core/models/master_dropdown_model.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import 'follow_up_task_section.dart';
 
 class MeetingModel {
   final String title;
@@ -81,6 +82,10 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
         _associations['Deals']!.length;
   }
 
+  int get _contactCount {
+    return _associations['Contacts']?.length ?? 0;
+  }
+
   // Active formatting state toggles
   bool _isBold = false;
   bool _isItalic = false;
@@ -138,10 +143,45 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
 
   final List<String> _durations = const [
     '15 Minutes',
+    '30 Minutes',
     '45 Minutes',
     '1 Hour',
     '2 Hours',
   ];
+
+  PopupMenuItem<String> _buildPopupMenuItem(String value, String currentValue) {
+    final isSelected = value == currentValue;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 40,
+      padding: EdgeInsets.zero,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        color: isSelected ? const Color(0xFFF1F5F9) : Colors.transparent,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                value,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: const Color(0xFF334155),
+                ),
+              ),
+            ),
+            if (isSelected)
+              const Icon(
+                Icons.check,
+                color: Color(0xFF00A884),
+                size: 16,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -156,7 +196,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     final m = now.month.toString().padLeft(2, '0');
     final y = now.year.toString();
     _startTimeController = TextEditingController(
-      text: '$d/$m/$y 6:13 PM GMT+5:30',
+      text: '$m/$d/$y 6:13 PM',
     );
   }
 
@@ -166,6 +206,36 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     _notesController.dispose();
     _startTimeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickMeetingStartDateTime() async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (pickedDate != null && mounted) {
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+      );
+      if (mounted) {
+        final month = pickedDate.month.toString().padLeft(2, '0');
+        final day = pickedDate.day.toString().padLeft(2, '0');
+        final year = pickedDate.year.toString();
+
+        if (pickedTime != null) {
+          final hour = pickedTime.hourOfPeriod == 0 ? 12 : pickedTime.hourOfPeriod;
+          final period = pickedTime.period == DayPeriod.am ? 'AM' : 'PM';
+          final minute = pickedTime.minute.toString().padLeft(2, '0');
+          _startTimeController.text = '$month/$day/$year $hour:$minute $period';
+        } else {
+          _startTimeController.text = '$month/$day/$year';
+        }
+        setState(() {});
+      }
+    }
   }
 
   @override
@@ -220,8 +290,6 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                   children: [
                     const Icon(Icons.drag_indicator_rounded, color: Colors.white70, size: 18),
                     const SizedBox(width: 14),
-                    const Icon(Icons.open_in_full_rounded, color: Colors.white, size: 18),
-                    const SizedBox(width: 14),
                     IconButton(
                       onPressed: () => Navigator.of(context).pop(null),
                       icon: const Icon(
@@ -272,9 +340,11 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 ),
                 const SizedBox(height: 8),
 
-                // ATTENDEES & MEETING OUTCOME Row
+                // ATTENDEES, MEETING OUTCOME & DURATION 3-Column Row matching reference image
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ATTENDEES
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -289,17 +359,33 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            '1 contact',
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF00A884),
+                          InkWell(
+                            onTap: () async {
+                              final result = await RecordAssociationSheet.show(
+                                context,
+                                initialAssociations: _associations,
+                              );
+                              if (result != null) {
+                                setState(() {
+                                  _associations = result;
+                                });
+                              }
+                            },
+                            child: Text(
+                              '$_contactCount contact${_contactCount != 1 ? 's' : ''}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF00A884),
+                                decoration: TextDecoration.underline,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
+
+                    // MEETING OUTCOME
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,12 +408,15 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                             },
                             child: Row(
                               children: [
-                                Text(
-                                  _selectedOutcome,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF00A884),
+                                Flexible(
+                                  child: Text(
+                                    _selectedOutcome,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF00A884),
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
@@ -339,10 +428,57 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                               ],
                             ),
                             itemBuilder: (context) => outcomes
-                                .map((o) => PopupMenuItem(
-                                      value: o,
-                                      child: Text(o, style: GoogleFonts.poppins(fontSize: 13)),
-                                    ))
+                                .map((o) => _buildPopupMenuItem(o, _selectedOutcome))
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // DURATION
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'DURATION',
+                            style: GoogleFonts.poppins(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF64748B),
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          PopupMenuButton<String>(
+                            onSelected: (val) {
+                              setState(() {
+                                _selectedDuration = val;
+                              });
+                            },
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    _selectedDuration,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF00A884),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: Color(0xFF00A884),
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                            itemBuilder: (context) => _durations
+                                .map((d) => _buildPopupMenuItem(d, _selectedDuration))
                                 .toList(),
                           ),
                         ],
@@ -352,57 +488,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 ),
                 const SizedBox(height: 8),
 
-                // DURATION Row
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'DURATION',
-                      style: GoogleFonts.poppins(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF64748B),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    PopupMenuButton<String>(
-                      onSelected: (val) {
-                        setState(() {
-                          _selectedDuration = val;
-                        });
-                      },
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _selectedDuration,
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF00A884),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            Icons.keyboard_arrow_down_rounded,
-                            color: Color(0xFF00A884),
-                            size: 18,
-                          ),
-                        ],
-                      ),
-                      itemBuilder: (context) => _durations
-                          .map((d) => PopupMenuItem(
-                                value: d,
-                                child: Text(d, style: GoogleFonts.poppins(fontSize: 13)),
-                              ))
-                          .toList(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // MEETING START TIME Box
+                // MEETING START TIME Box matching reference image
                 Text(
                   'MEETING START TIME',
                   style: GoogleFonts.poppins(
@@ -413,31 +499,43 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Container(
-                  height: 42,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _startTimeController,
-                          style: GoogleFonts.poppins(fontSize: 13),
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
+                InkWell(
+                  onTap: _pickMeetingStartDateTime,
+                  child: Container(
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF94A3B8), width: 1.2),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _startTimeController.text.isNotEmpty
+                                ? _startTimeController.text
+                                : '${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().day.toString().padLeft(2, '0')}/${DateTime.now().year}',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              color: const Color(0xFF1E293B),
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                      ),
-                      const Icon(
-                        Icons.calendar_today_outlined,
-                        size: 18,
-                        color: Color(0xFF64748B),
-                      ),
-                    ],
+                        IconButton(
+                          icon: const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 18,
+                            color: Color(0xFF64748B),
+                          ),
+                          onPressed: _pickMeetingStartDateTime,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -578,52 +676,13 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 const SizedBox(height: 8),
 
                 // Checkbox Row: Create a To-do task to follow up
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _createFollowUpTask,
-                      onChanged: (val) {
-                        setState(() {
-                          _createFollowUpTask = val ?? false;
-                        });
-                      },
-                      activeColor: const Color(0xFF00A884),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    Expanded(
-                      child: Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            'Create a ',
-                            style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF334155)),
-                          ),
-                          Text(
-                            'To-do ∨ ',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF00A884),
-                            ),
-                          ),
-                          Text(
-                            'task to follow up ',
-                            style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF334155)),
-                          ),
-                          Text(
-                            'In 3 business days (Friday) ∨',
-                            style: GoogleFonts.poppins(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF00A884),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                FollowUpTaskSection(
+                  initialChecked: _createFollowUpTask,
+                  onCheckedChanged: (val) {
+                    setState(() {
+                      _createFollowUpTask = val;
+                    });
+                  },
                 ),
                 const SizedBox(height: 12),
               ],

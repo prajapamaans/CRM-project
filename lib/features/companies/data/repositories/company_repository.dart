@@ -10,6 +10,7 @@ abstract class CompanyRepository {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   });
 
@@ -34,6 +35,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   }) async {
     try {
@@ -42,6 +44,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
         limit: limit,
         search: search,
         ownerId: ownerId,
+        departmentId: departmentId,
         ignorePermissions: ignorePermissions,
       );
     } catch (e) {

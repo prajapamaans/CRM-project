@@ -87,7 +87,12 @@ class AppTextStyles {
 class AppTheme {
   AppTheme._();
 
-  static ThemeData get lightTheme {
+  static ThemeData get lightTheme => getThemeWithFontSize(16.0);
+
+  static ThemeData getThemeWithFontSize(double baseFontSize) {
+    final scale = baseFontSize / 16.0;
+    final baseTextTheme = GoogleFonts.poppinsTextTheme();
+
     return ThemeData(
       useMaterial3: true,
       scaffoldBackgroundColor: AppColors.background,
@@ -102,13 +107,22 @@ class AppTheme {
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
       ),
-      textTheme: GoogleFonts.poppinsTextTheme().copyWith(
-        bodyLarge: GoogleFonts.poppins(fontSize: 16),
-        bodyMedium: GoogleFonts.poppins(fontSize: 15),
-        bodySmall: GoogleFonts.poppins(fontSize: 13.5),
-        titleLarge: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold),
-        titleMedium: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600),
-        titleSmall: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600),
+      textTheme: baseTextTheme.copyWith(
+        bodyLarge: GoogleFonts.poppins(fontSize: 16 * scale),
+        bodyMedium: GoogleFonts.poppins(fontSize: 15 * scale),
+        bodySmall: GoogleFonts.poppins(fontSize: 13.5 * scale),
+        titleLarge: GoogleFonts.poppins(fontSize: 22 * scale, fontWeight: FontWeight.bold),
+        titleMedium: GoogleFonts.poppins(fontSize: 18 * scale, fontWeight: FontWeight.w600),
+        titleSmall: GoogleFonts.poppins(fontSize: 15 * scale, fontWeight: FontWeight.w600),
+        displayLarge: GoogleFonts.poppins(fontSize: 57 * scale, fontWeight: FontWeight.bold),
+        displayMedium: GoogleFonts.poppins(fontSize: 45 * scale, fontWeight: FontWeight.bold),
+        displaySmall: GoogleFonts.poppins(fontSize: 36 * scale, fontWeight: FontWeight.bold),
+        headlineLarge: GoogleFonts.poppins(fontSize: 32 * scale, fontWeight: FontWeight.w600),
+        headlineMedium: GoogleFonts.poppins(fontSize: 28 * scale, fontWeight: FontWeight.w600),
+        headlineSmall: GoogleFonts.poppins(fontSize: 24 * scale, fontWeight: FontWeight.w600),
+        labelLarge: GoogleFonts.poppins(fontSize: 14 * scale, fontWeight: FontWeight.w600),
+        labelMedium: GoogleFonts.poppins(fontSize: 12 * scale, fontWeight: FontWeight.w500),
+        labelSmall: GoogleFonts.poppins(fontSize: 11 * scale, fontWeight: FontWeight.w500),
       ),
     );
   }

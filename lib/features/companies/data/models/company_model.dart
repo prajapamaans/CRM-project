@@ -18,6 +18,9 @@ class CompanyModel {
   final String? createdAt;
   final String? ownerId;
   final String? ownerName;
+  final List<Map<String, dynamic>>? contacts;
+  final List<Map<String, dynamic>>? deals;
+  final List<Map<String, dynamic>>? associatedCompanies;
 
   const CompanyModel({
     required this.id,
@@ -37,6 +40,9 @@ class CompanyModel {
     this.createdAt,
     this.ownerId,
     this.ownerName,
+    this.contacts,
+    this.deals,
+    this.associatedCompanies,
   });
 
   factory CompanyModel.fromJson(Map<String, dynamic> json) {
@@ -74,6 +80,15 @@ class CompanyModel {
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
       ownerId: json['ownerId'] as String? ?? json['owner_id'] as String?,
       ownerName: json['ownerName'] as String? ?? json['owner_name'] as String?,
+      contacts: (json['contacts'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
+      deals: (json['deals'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
+      associatedCompanies: (json['associatedCompanies'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 

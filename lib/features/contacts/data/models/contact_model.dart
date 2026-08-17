@@ -12,10 +12,14 @@ class ContactModel {
   final String? companyAvatar;
   final String? ownerId;
   final String? ownerName;
+  final String? msp;
   final String? avatarUrl;
   final String? leadStatus;
   final String? lifecycleStage;
   final String? createdAt;
+  final List<Map<String, dynamic>>? associatedCompanies;
+  final List<Map<String, dynamic>>? deals;
+  final List<Map<String, dynamic>>? associatedContacts;
 
   const ContactModel({
     required this.id,
@@ -29,10 +33,14 @@ class ContactModel {
     this.companyAvatar,
     this.ownerId,
     this.ownerName,
+    this.msp,
     this.avatarUrl,
     this.leadStatus,
     this.lifecycleStage,
     this.createdAt,
+    this.associatedCompanies,
+    this.deals,
+    this.associatedContacts,
   });
 
   factory ContactModel.fromJson(Map<String, dynamic> json) {
@@ -48,10 +56,20 @@ class ContactModel {
       companyAvatar: json['companyAvatar'] as String? ?? json['company_avatar'] as String?,
       ownerId: json['ownerId'] as String? ?? json['owner_id'] as String?,
       ownerName: json['ownerName'] as String? ?? json['owner_name'] as String?,
+      msp: json['msp'] as String?,
       avatarUrl: json['avatarUrl'] as String? ?? json['avatar_url'] as String?,
       leadStatus: json['leadStatus'] as String? ?? json['lead_status'] as String?,
       lifecycleStage: json['lifecycleStage'] as String? ?? json['lifecycle_stage'] as String?,
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
+      associatedCompanies: (json['associatedCompanies'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
+      deals: (json['deals'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
+      associatedContacts: (json['associatedContacts'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 

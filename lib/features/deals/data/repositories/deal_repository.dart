@@ -6,17 +6,19 @@ import '../models/deal_model.dart';
 import '../models/deal_stats_model.dart';
 
 abstract class DealRepository {
-  Future<DealStatsModel> getDealStats();
+  Future<DealStatsModel> getDealStats({String? departmentId});
   Future<PaginatedDealsResponse> getDeals({
     int? page,
     int? limit,
     String? search,
     String? stage,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   });
   Future<DealModel> createDeal(Map<String, dynamic> dealData);
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData);
+  Future<DealModel> getDealById(String id);
 }
 
 class DealRepositoryImpl implements DealRepository {
@@ -26,9 +28,9 @@ class DealRepositoryImpl implements DealRepository {
       : _remoteDataSource = remoteDataSource ?? DealRemoteDataSourceImpl();
 
   @override
-  Future<DealStatsModel> getDealStats() async {
+  Future<DealStatsModel> getDealStats({String? departmentId}) async {
     try {
-      return await _remoteDataSource.getDealStats();
+      return await _remoteDataSource.getDealStats(departmentId: departmentId);
     } catch (e) {
       debugPrint('[GET /api/deals/stats ERROR]: $e');
       if (e is DioException) {
@@ -45,6 +47,7 @@ class DealRepositoryImpl implements DealRepository {
     String? search,
     String? stage,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   }) async {
     try {
@@ -54,6 +57,7 @@ class DealRepositoryImpl implements DealRepository {
         search: search,
         stage: stage,
         ownerId: ownerId,
+        departmentId: departmentId,
         ignorePermissions: ignorePermissions,
       );
     } catch (e) {
@@ -84,6 +88,19 @@ class DealRepositoryImpl implements DealRepository {
       return await _remoteDataSource.updateDeal(id, dealData);
     } catch (e) {
       debugPrint('[PUT /api/deals/$id ERROR]: $e');
+      if (e is DioException) {
+        throw NetworkException.fromDioException(e);
+      }
+      throw NetworkException(message: e.toString());
+    }
+  }
+
+  @override
+  Future<DealModel> getDealById(String id) async {
+    try {
+      return await _remoteDataSource.getDealById(id);
+    } catch (e) {
+      debugPrint('[GET /api/deals/$id ERROR]: $e');
       if (e is DioException) {
         throw NetworkException.fromDioException(e);
       }

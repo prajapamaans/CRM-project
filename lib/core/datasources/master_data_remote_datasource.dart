@@ -11,7 +11,7 @@ abstract class MasterDataRemoteDataSource {
   });
   Future<List<MspOptionModel>> getMspOptions();
   Future<List<Map<String, dynamic>>> getDepartments();
-  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit});
+  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit, String? departmentId});
   Future<List<Map<String, dynamic>>> getDealStages();
   Future<List<Map<String, dynamic>>> getActivities({
     String? ownerId,
@@ -22,6 +22,7 @@ abstract class MasterDataRemoteDataSource {
     String? contactId,
     String? companyId,
     String? dealId,
+    String? departmentId,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -178,16 +179,18 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit}) async {
+  Future<List<Map<String, dynamic>>> getNotifications({bool? isRead, int? limit, String? departmentId}) async {
     final queryParameters = <String, dynamic>{};
     if (isRead != null) queryParameters['isRead'] = isRead.toString();
     if (limit != null) queryParameters['limit'] = limit.toString();
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['department_id'] = departmentId;
+    }
 
     final response = await _apiService.get(
       ApiConstants.notifications,
       queryParameters: queryParameters,
     );
-    debugPrint('[GET ${ApiConstants.notifications} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
@@ -213,7 +216,6 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   @override
   Future<List<Map<String, dynamic>>> getDealStages() async {
     final response = await _apiService.get(ApiConstants.dealsStages);
-    debugPrint('[GET ${ApiConstants.dealsStages} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
@@ -246,6 +248,7 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? contactId,
     String? companyId,
     String? dealId,
+    String? departmentId,
   }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
@@ -256,12 +259,14 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     if (contactId != null && contactId.isNotEmpty) queryParameters['contactId'] = contactId;
     if (companyId != null && companyId.isNotEmpty) queryParameters['companyId'] = companyId;
     if (dealId != null && dealId.isNotEmpty) queryParameters['dealId'] = dealId;
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['department_id'] = departmentId;
+    }
 
     final response = await _apiService.get(
       ApiConstants.activities,
       queryParameters: queryParameters,
     );
-    debugPrint('[GET ${ApiConstants.activities} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
@@ -276,6 +281,24 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
       } else if (rawData['items'] is List) {
         list = rawData['items'] as List;
       }
+    }
+
+    final String? firstRecordDeptId = list.isNotEmpty && list.first is Map
+        ? (list.first['departmentId'] ?? list.first['department_id'] ?? list.first['department']?['id'])?.toString()
+        : null;
+
+    debugPrint('========== DEPARTMENT API TRACE ==========');
+    debugPrint('Screen: Activities ($type)');
+    debugPrint('API: ${ApiConstants.activities}?type=$type');
+    debugPrint('Selected Department ID: $departmentId');
+    debugPrint('Request department_id: $departmentId');
+    debugPrint('Response status: ${response.statusCode}');
+    debugPrint('First returned record departmentId: $firstRecordDeptId');
+    debugPrint('==========================================');
+
+    if (firstRecordDeptId != null && departmentId != null && firstRecordDeptId != departmentId) {
+      debugPrint('REQUESTED DEPARTMENT: $departmentId');
+      debugPrint('RETURNED RECORD DEPARTMENT: $firstRecordDeptId');
     }
 
     return list
@@ -573,11 +596,46 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
       ApiConstants.reportsDashboardsDefault,
       queryParameters: queryParameters,
     );
-    debugPrint('[GET ${ApiConstants.reportsDashboardsDefault} SUCCESS]: ${response.data}');
 
-    if (response.data is Map<String, dynamic>) {
-      return response.data as Map<String, dynamic>;
+    final Map<String, dynamic> resData = response.data is Map<String, dynamic>
+        ? response.data as Map<String, dynamic>
+        : {};
+
+    final dynamic scope = resData['scope'] ?? resData['data']?['scope'];
+    final scopeSelected = scope is Map ? scope['selected'] : null;
+    final scopeLabel = scope is Map ? scope['label'] : null;
+
+    final dynamic dataObj = resData['data'] ?? resData;
+    final dynamic totalContactsOwned = dataObj is Map ? (dataObj['totalContactsOwned'] ?? dataObj['totalContacts'] ?? dataObj['contactsCount']) : null;
+    final dynamic totalDealsOwned = dataObj is Map ? (dataObj['totalDealsOwned'] ?? dataObj['totalDeals'] ?? dataObj['dealsCount']) : null;
+    final dynamic totalRevenueWon = dataObj is Map ? (dataObj['totalRevenueWon'] ?? dataObj['revenueWon'] ?? dataObj['revenue']) : null;
+    final dynamic totalTasks = dataObj is Map ? (dataObj['totalTasks'] ?? dataObj['totalTask'] ?? dataObj['tasksCount']) : null;
+
+    debugPrint('========== DEPARTMENT API TRACE ==========');
+    debugPrint('Screen: Dashboard');
+    debugPrint('API: ${ApiConstants.reportsDashboardsDefault}');
+    debugPrint('');
+    debugPrint('Selected Department: $scopeLabel');
+    debugPrint('Selected Department ID: $departmentId');
+    debugPrint('');
+    debugPrint('Request department_id: $departmentId');
+    debugPrint('');
+    debugPrint('Response status: ${response.statusCode}');
+    debugPrint('');
+    debugPrint('First returned record departmentId: $scopeSelected');
+    debugPrint('');
+    debugPrint('Returned:');
+    debugPrint('totalContactsOwned: $totalContactsOwned');
+    debugPrint('totalDealsOwned: $totalDealsOwned');
+    debugPrint('totalRevenueWon: $totalRevenueWon');
+    debugPrint('totalTask: $totalTasks');
+    debugPrint('==========================================');
+
+    if (scopeSelected != null && departmentId != null && scopeSelected != departmentId) {
+      debugPrint('REQUESTED DEPARTMENT: $departmentId');
+      debugPrint('RETURNED RECORD DEPARTMENT: $scopeSelected');
     }
-    return {};
+
+    return resData;
   }
 }

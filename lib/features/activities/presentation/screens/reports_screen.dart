@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/network/api_service.dart';
+import '../../../../core/widgets/app_refresh_indicator.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../contacts/data/models/contact_model.dart';
 import '../../../dashboard/data/datasource/remote/dashboard_remote_datasource.dart';
@@ -228,8 +229,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+        child: AppRefreshIndicator(
+          onRefresh: () async {
+            await Future.wait([
+              _fetchReportsData(),
+              _fetchTabSpecificData(),
+            ]);
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.all(16),
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -456,6 +465,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 

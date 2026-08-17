@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../widgets/create_task_modal.dart';
 
 class TaskDetailsScreen extends StatefulWidget {
@@ -59,9 +60,15 @@ class _TaskDetailsScreenState extends State<TaskDetailsScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      body: AppRefreshIndicator(
+        onRefresh: () async {
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (mounted) setState(() {});
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: const EdgeInsets.all(16),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Task Title Card
@@ -224,6 +231,7 @@ class _TaskDetailsScreenState extends State<TaskDetailsScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 

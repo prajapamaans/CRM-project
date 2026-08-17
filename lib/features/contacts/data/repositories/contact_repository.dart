@@ -10,6 +10,7 @@ abstract class ContactRepository {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   });
 
@@ -34,6 +35,7 @@ class ContactRepositoryImpl implements ContactRepository {
     String? limit,
     String? search,
     String? ownerId,
+    String? departmentId,
     bool? ignorePermissions,
   }) async {
     try {
@@ -42,6 +44,7 @@ class ContactRepositoryImpl implements ContactRepository {
         limit: limit,
         search: search,
         ownerId: ownerId,
+        departmentId: departmentId,
         ignorePermissions: ignorePermissions,
       );
     } catch (e) {

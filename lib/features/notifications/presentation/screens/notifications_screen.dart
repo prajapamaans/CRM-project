@@ -294,40 +294,47 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final groupedNotifications = NotificationUtils.groupNotificationsByDate(sortedList);
 
     if (groupedNotifications.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.notifications_none_rounded, size: 54, color: Color(0xFFCBD5E1)),
-            const SizedBox(height: 12),
-            Text(
-              'No notifications found',
-              style: GoogleFonts.poppins(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF64748B),
-              ),
-            ),
-            if (_selectedTab != NotificationTypeTab.all ||
-                _selectedTimeFilter != NotificationTimeFilter.all ||
-                _searchQuery.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Try adjusting your selected tab or filter criteria',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: const Color(0xFF94A3B8),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        children: [
+          const SizedBox(height: 120),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.notifications_none_rounded, size: 54, color: Color(0xFFCBD5E1)),
+                const SizedBox(height: 12),
+                Text(
+                  'No notifications found',
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF64748B),
+                  ),
                 ),
-              ),
-            ],
-          ],
-        ),
+                if (_selectedTab != NotificationTypeTab.all ||
+                    _selectedTimeFilter != NotificationTimeFilter.all ||
+                    _searchQuery.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Try adjusting your selected tab or filter criteria',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: const Color(0xFF94A3B8),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       );
     }
 
     final dateKeys = groupedNotifications.keys.toList();
 
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       itemCount: dateKeys.length,
       itemBuilder: (context, dateIndex) {

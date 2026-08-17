@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../../../../core/widgets/app_refresh_indicator.dart';
 import '../../data/models/department_model.dart';
 import '../providers/department_provider.dart';
 
@@ -328,8 +329,14 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+      body: SafeArea(
+        child: AppRefreshIndicator(
+          onRefresh: () async {
+            await context.read<DepartmentProvider>().fetchDepartments();
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -361,6 +368,8 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
           ],
         ),
       ),
+    ),
+    ),
     );
   }
 

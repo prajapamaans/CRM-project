@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/datasources/master_data_remote_datasource.dart';
 import '../../../../core/models/master_dropdown_model.dart';
+import '../../../../core/widgets/app_refresh_indicator.dart';
 
 /// Screen for managing Master Dropdowns.
 /// Strictly follows ZERO hardcoded dummy option/category rules.
@@ -499,8 +500,14 @@ class _MasterDropdownsScreenState extends State<MasterDropdownsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+      body: SafeArea(
+        child: AppRefreshIndicator(
+          onRefresh: () async {
+            await _loadMasterDataApis();
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -517,6 +524,8 @@ class _MasterDropdownsScreenState extends State<MasterDropdownsScreen> {
           ],
         ),
       ),
+    ),
+    ),
     );
   }
 
