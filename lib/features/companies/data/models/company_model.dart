@@ -18,6 +18,7 @@ class CompanyModel {
   final String? createdAt;
   final String? ownerId;
   final String? ownerName;
+  final String? msp;
   final List<Map<String, dynamic>>? contacts;
   final List<Map<String, dynamic>>? deals;
   final List<Map<String, dynamic>>? associatedCompanies;
@@ -40,6 +41,7 @@ class CompanyModel {
     this.createdAt,
     this.ownerId,
     this.ownerName,
+    this.msp,
     this.contacts,
     this.deals,
     this.associatedCompanies,
@@ -62,6 +64,26 @@ class CompanyModel {
       count = int.tryParse(rawCount);
     }
 
+    String? parsedMsp;
+    dynamic rawMsp = json['msp'] ?? json['msps'] ?? json['associatedMsps'] ?? json['associated_msps'];
+    if (rawMsp != null) {
+      if (rawMsp is String) {
+        parsedMsp = rawMsp;
+      } else if (rawMsp is List) {
+        final listItems = rawMsp.map((e) {
+          if (e is Map) {
+            return (e['name'] ?? e['title'] ?? e['label'] ?? e.toString()).toString();
+          }
+          return e.toString();
+        }).where((s) => s.isNotEmpty).toList();
+        if (listItems.isNotEmpty) {
+          parsedMsp = listItems.join(', ');
+        }
+      } else if (rawMsp is Map) {
+        parsedMsp = (rawMsp['name'] ?? rawMsp['title'] ?? rawMsp['label'])?.toString();
+      }
+    }
+
     return CompanyModel(
       id: json['id']?.toString() ?? '',
       name: json['name'] as String? ?? json['companyName'] as String? ?? json['company_name'] as String? ?? '',
@@ -80,6 +102,7 @@ class CompanyModel {
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
       ownerId: json['ownerId'] as String? ?? json['owner_id'] as String?,
       ownerName: json['ownerName'] as String? ?? json['owner_name'] as String?,
+      msp: parsedMsp,
       contacts: (json['contacts'] as List?)
           ?.map((e) => Map<String, dynamic>.from(e as Map))
           .toList(),
@@ -129,6 +152,7 @@ class CompanyModel {
       if (annualRevenue != null) 'annualRevenue': annualRevenue,
       if (leadStatus != null) 'leadStatus': leadStatus,
       if (lifecycleStage != null) 'lifecycleStage': lifecycleStage,
+      if (msp != null) 'msp': msp,
     };
   }
 
@@ -147,6 +171,7 @@ class CompanyModel {
     String? leadStatus,
     String? lifecycleStage,
     int? contactCount,
+    String? msp,
   }) {
     return CompanyModel(
       id: id ?? this.id,
@@ -163,6 +188,7 @@ class CompanyModel {
       leadStatus: leadStatus ?? this.leadStatus,
       lifecycleStage: lifecycleStage ?? this.lifecycleStage,
       contactCount: contactCount ?? this.contactCount,
+      msp: msp ?? this.msp,
     );
   }
 

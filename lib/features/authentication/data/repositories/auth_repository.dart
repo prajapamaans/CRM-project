@@ -25,6 +25,7 @@ abstract class AuthRepository {
   Future<void> logout();
   Future<String?> getToken();
   Future<String?> getRefreshToken();
+  Future<bool> switchDepartment(String departmentId);
 }
 
 class AuthRepositoryImpl implements AuthRepository {
@@ -154,5 +155,21 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<String?> getRefreshToken() async {
     return await _storageService.getRefreshToken();
+  }
+
+  @override
+  Future<bool> switchDepartment(String departmentId) async {
+    try {
+      final newToken = await _remoteDataSource.switchDepartment(departmentId);
+      if (newToken != null && newToken.isNotEmpty) {
+        await _storageService.saveToken(newToken);
+        debugPrint('[AuthRepository.switchDepartment SUCCESS] Swapped access token for department: $departmentId');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[AuthRepository.switchDepartment ERROR]: $e');
+      return false;
+    }
   }
 }

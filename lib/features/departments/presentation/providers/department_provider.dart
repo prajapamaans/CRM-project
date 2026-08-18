@@ -1,9 +1,43 @@
+// ============================================================================
+// FILE PURPOSE & ARCHITECTURE OVERVIEW:
+// ============================================================================
+// What does this file do?
+// -----------------------
+// `department_provider.dart` is the central state management provider for organization departments
+// in the APIDEL CRM application. It tracks the currently selected department ID (`selectedDepartmentId`),
+// department permissions based on user role (`SUPER_ADMIN`, `ADMIN`, `USER`), persists choices to
+// secure local storage, and handles cross-provider data cache clearing and re-fetching when switching departments.
+//
+// How does the application workflow work in this file?
+// ---------------------------------------------------
+// 1. **Initialization (`_loadInitialStoredDepartment` & `initFromUser`)**:
+//    - Restores saved department selections and user role from `SecureStorageService`.
+//    - Populates available departments list from user profile or backend defaults (`DepartmentConstants`).
+// 2. **Department Switch Execution (`changeDepartment`)**:
+//    - Sets `_isSwitchingDepartment = true` to display the top loading overlay.
+//    - Persists the new department ID and name to local storage.
+//    - Calls `_clearAllProviderData` to reset stale cached state in `DashboardProvider`, `ContactProvider`,
+//      `CompanyProvider`, `DealProvider`, and `MasterDataProvider`.
+//    - Calls `_reloadAllDepartmentData` via `Future.wait` to query backend REST APIs passing `department_id=<newId>`.
+//    - Resets `_isSwitchingDepartment = false` and calls `notifyListeners()`.
+//
+// Explanation of Key Flutter & Project Keywords / Concepts:
+// --------------------------------------------------------
+// • `ChangeNotifier`: A class provided by Flutter that allows objects to send change notifications to listeners.
+// • `notifyListeners()`: Broadcasts a signal to all listening widgets (`Consumer`, `context.watch`) to rebuild.
+// • `SecureStorageService`: Encrypted local storage wrapper (`flutter_secure_storage`) for persisting department choices.
+// • `enum DepartmentState`: Tracks discrete UI state phases (`initial`, `loading`, `loaded`, `empty`, `error`).
+// • `Future.wait`: Concurrently executes multiple asynchronous provider API calls during department switching.
+// ============================================================================
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../../../core/network/network_exception.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/storage/secure_storage_service.dart';
 import '../../../authentication/data/models/user_model.dart';
+import '../../../authentication/data/repositories/auth_repository.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
@@ -11,16 +45,17 @@ import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../data/models/department_model.dart';
 import '../../data/repositories/department_repository.dart';
 
+/// Enum representing current state phase of department operations
 enum DepartmentState { initial, loading, loaded, empty, error }
 
+/// Constants for default fallback department UUIDs
 class DepartmentConstants {
   static const String apacId = 'a1b2c3d4-0000-0000-0000-000000000002';
   static const String australiaId = 'a1b2c3d4-0000-0000-0000-000000000003';
   static const String talentAcquisitionNightId = 'a1b2c3d4-0000-0000-0000-000000000001';
 }
 
-/// Centralized DepartmentProvider for managing global selected department ID,
-/// role access, department switching, cache resetting, and notifying listeners.
+/// Centralized DepartmentProvider managing selected department state and cross-provider re-fetching.
 class DepartmentProvider extends ChangeNotifier {
   final DepartmentRepository _repository;
   final SecureStorageService _storageService;
@@ -44,12 +79,14 @@ class DepartmentProvider extends ChangeNotifier {
     _loadInitialStoredDepartment();
   }
 
+  // Hardcoded default department list fallbacks
   static final List<DepartmentModel> defaultDepartments = [
     const DepartmentModel(id: DepartmentConstants.apacId, name: 'APAC Team'),
     const DepartmentModel(id: DepartmentConstants.australiaId, name: 'Australia'),
     const DepartmentModel(id: DepartmentConstants.talentAcquisitionNightId, name: 'Talent Acquisition Night'),
   ];
 
+  // Getters for department state variables
   DepartmentState get state => _state;
   List<DepartmentModel> get departments => _departments;
   List<DepartmentModel> get availableDepartments => _departments.isNotEmpty ? _departments : defaultDepartments;
@@ -63,6 +100,7 @@ class DepartmentProvider extends ChangeNotifier {
   String? get assignedDepartmentId => _assignedDepartmentId;
   String get userRole => _userRole;
 
+  // Role validation getters
   bool get isSuperAdmin =>
       _userRole.toUpperCase() == 'SUPER_ADMIN' ||
       _userRole.toUpperCase() == 'SUPERADMIN' ||
@@ -76,6 +114,7 @@ class DepartmentProvider extends ChangeNotifier {
 
   bool get canSwitchDepartment => true;
 
+  /// Restores saved department selections and user role from encrypted local storage.
   Future<void> _loadInitialStoredDepartment() async {
     final storedDeptId = await _storageService.getSelectedDepartmentId();
     final storedDeptName = await _storageService.getSelectedDepartmentName();
@@ -218,19 +257,19 @@ class DepartmentProvider extends ChangeNotifier {
     }
   }
 
-  /// Allows Super Admin to switch active department across the entire app.
-  /// Automatically resets all feature provider states, updates global storage,
-  /// and reloads all department-specific data.
+  /// Switches active department globally across the app.
+  /// Resets stale provider state, updates storage, and reloads all department-specific data.
   Future<void> changeDepartment(
     BuildContext context,
     String departmentId,
     String departmentName,
   ) async {
-    debugPrint('========== DEPARTMENT SWITCH ==========');
-    debugPrint('');
-    debugPrint('Selected Department Name: $departmentName');
-    debugPrint('Selected Department ID: $departmentId');
-    debugPrint('');
+    final prevDeptId = _selectedDepartmentId;
+    final prevDeptName = _selectedDepartmentName;
+
+    debugPrint('[DEPARTMENT] Switching department:');
+    debugPrint('  Previous ID: $prevDeptId ($prevDeptName)');
+    debugPrint('  New ID:      $departmentId ($departmentName)');
 
     if (_selectedDepartmentId == departmentId && !_isSwitchingDepartment) {
       return;
@@ -246,10 +285,22 @@ class DepartmentProvider extends ChangeNotifier {
 
     try {
       if (context.mounted) {
-        // 1. Reset & clear stale cached data from providers
+        // 0. Call POST /api/auth/switch-department to swap JWT access token for the selected department
+        debugPrint('[DEPARTMENT] Requesting new JWT token from /api/auth/switch-department for departmentId: $departmentId');
+        try {
+          final authRepo = AuthRepositoryImpl();
+          await authRepo.switchDepartment(departmentId);
+        } catch (e) {
+          debugPrint('[DepartmentProvider] Warning during token swap: $e');
+        }
+
+        if (!context.mounted) return;
+
+        // 1. Clear stale cached data across active feature providers
+        debugPrint('[STATE UPDATE] Clearing stale provider caches for new department selection');
         _clearAllProviderData(context);
 
-        // 2. Reload all department-specific data asynchronously
+        // 2. Reload department-specific data concurrently
         await _reloadAllDepartmentData(context);
       }
     } catch (e) {
@@ -257,10 +308,11 @@ class DepartmentProvider extends ChangeNotifier {
     } finally {
       _isSwitchingDepartment = false;
       notifyListeners();
+      debugPrint('[DEPARTMENT] Department switch completed. Displaying data for ID: $departmentId ($departmentName)');
     }
   }
 
-  /// Clears cached state across active Providers
+  /// Clears cached state across active feature Providers
   void _clearAllProviderData(BuildContext context) {
     try {
       context.read<DashboardProvider>().clearData();
@@ -273,7 +325,7 @@ class DepartmentProvider extends ChangeNotifier {
     }
   }
 
-  /// Trigger concurrency load of department-specific APIs
+  /// Triggers concurrent re-fetching of department-specific APIs
   Future<void> _reloadAllDepartmentData(BuildContext context) async {
     try {
       final dashboardProvider = context.read<DashboardProvider>();
@@ -285,6 +337,8 @@ class DepartmentProvider extends ChangeNotifier {
       final currentDeptId = selectedDepartmentId;
       final currentDeptName = selectedDepartmentName;
 
+      debugPrint('[API REQUEST] Reloading all data for departmentId: $currentDeptId ($currentDeptName)');
+
       await Future.wait<void>([
         dashboardProvider.loadDashboardData(departmentId: currentDeptId, departmentName: currentDeptName),
         contactProvider.fetchContacts(refresh: true, departmentId: currentDeptId),
@@ -293,6 +347,8 @@ class DepartmentProvider extends ChangeNotifier {
         dealProvider.fetchDealStats(departmentId: currentDeptId),
         masterDataProvider.fetchAllMasterData(departmentId: currentDeptId),
       ]);
+
+      debugPrint('[API RESPONSE] Successfully fetched all department data for ID: $currentDeptId');
     } catch (e) {
       debugPrint('[DepartmentProvider] Error reloading department data: $e');
     }

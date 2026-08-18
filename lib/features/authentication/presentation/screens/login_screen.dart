@@ -1,10 +1,64 @@
+// ============================================================================
+// FILE PURPOSE & ARCHITECTURE OVERVIEW:
+// ============================================================================
+// What does this file do?
+// -----------------------
+// `login_screen.dart` is the main authentication user interface for the APIDEL CRM
+// Flutter application. It renders a clean, responsive sign-in card where users enter
+// their email and password to log into the system.
+//
+// How does the application workflow work in this file?
+// ---------------------------------------------------
+// 1. **Email Input & Live Verification**:
+//    - As the user types their email address, `_onEmailChanged` detects a valid format
+//      and triggers `_fetchUserEmailDetails`.
+//    - It calls `AuthProvider.fetchEmailDetails` (POST /auth/email-details) to look up
+//      the user's role and assigned department before submission.
+//    - If the user is a regular user (non-admin), a read-only assigned department box
+//      `_buildReadOnlyDepartmentField` is displayed.
+// 2. **Form Submission & Authentication**:
+//    - When the user taps "Sign In" (`_handleSignIn`), `_formKey.currentState!.validate()`
+//      runs validation rules on the email and password text fields.
+//    - `AuthProvider.login` submits credentials to POST /auth/login and GET /auth/me.
+// 3. **Department State Initialization & Seamless Navigation**:
+//    - Upon successful login, `DepartmentProvider.initFromUser` initializes the active
+//      department selection from user profile data.
+//    - The user is smoothly navigated to `InitialDataLoaderScreen` where all initial
+//      application data (Dashboard, Contacts, Companies, Deals, Reports) is pre-fetched
+//      before revealing `MainLayoutScreen`.
+// 4. **Error Handling**:
+//    - If authentication fails, `_showError` renders a floating red SnackBar displaying
+//      the error returned by backend APIs.
+//
+// Explanation of Key Flutter & Project Keywords / Concepts:
+// --------------------------------------------------------
+// • `StatefulWidget`: A Flutter widget that has mutable state (`_LoginScreenState`).
+//   It allows the screen to dynamically update its UI when data changes (e.g. typing email).
+// • `State<_LoginScreenState>`: Holds the mutable variables, logic, and lifecycle hooks
+//   (`initState`, `dispose`, `build`) for `LoginScreen`.
+// • `GlobalKey<FormState>`: A unique reference key used to validate all child `TextFormField`
+//   widgets in the `Form` container simultaneously.
+// • `TextEditingController`: Manages text editing buffers for input fields (`_emailController`,
+//   `_passwordController`), allowing reading, setting, or listening to user input.
+// • `AuthProvider`: Provider state manager handling user login, JWT tokens, and auth session state.
+// • `DepartmentProvider`: Provider managing active department choices and department switching.
+// • `DepartmentConstants`: Holds central constant fallback values (e.g., `apacId`).
+// • `mounted`: A boolean getter on `State`. Checking `if (mounted)` ensures the widget is still
+//   active in the element tree before calling `setState()` or `Navigator` after async API gaps.
+// • `context.read<T>()`: Obtains provider `T` without listening to UI rebuilds (ideal for callbacks).
+// • `context.watch<T>()`: Obtains provider `T` and subscribes `build()` to rebuild when `T` changes.
+// • `AutovalidateMode.onUserInteraction`: Triggers validation automatically as user types into fields.
+// ============================================================================
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../../navigation/presentation/screens/main_layout_screen.dart';
+
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../navigation/presentation/screens/initial_data_loader_screen.dart';
 import '../providers/auth_provider.dart';
 
-/// Full-screen login form with email/password validation and API submission.
+/// Full-screen responsive login form with email/password validation,
+/// dynamic email role lookup, and backend API authentication.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -13,24 +67,99 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  // Form key used to trigger global form field validation
   final _formKey = GlobalKey<FormState>();
+
+  // Text controllers managing user input for email address and password
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  // Toggles password visibility in text field (true = hidden dots, false = visible text)
   bool _obscurePassword = true;
+
+  // Selected department ID (defaults to APAC Team ID)
   String? _selectedDepartmentId = DepartmentConstants.apacId;
 
+  // State flags for background email role verification
+  bool _isFetchingEmailDetails = false;
+  bool _isEmailChecked = false;
+  String? _userRole;
+  String? _assignedDeptName;
+
+  // Primary brand color tokens used across the login card
   static const _tealDark = Color(0xFF0F5C5B);
   static const _tealLight = Color(0xFF2CA6A4);
   static const _bgGray = Color(0xFFF0F1F3);
   static const _borderGray = Color(0xFFE1E3E6);
   static const _hintGray = Color(0xFFB0B3B8);
 
+  /// Helper getter evaluating if the verified user role is a regular non-admin user
+  bool get _isRegularUser {
+    if (_userRole == null) return false;
+    final r = _userRole!.toUpperCase().replaceAll(' ', '_');
+    return r != 'SUPER_ADMIN' && r != 'SUPERADMIN' && r != 'ADMIN';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Attach listener to email input field to auto-verify email on typing
+    _emailController.addListener(_onEmailChanged);
+  }
+
   @override
   void dispose() {
+    // Dispose text controllers to prevent memory leaks when screen is destroyed
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  /// Triggered whenever user types into the Email text field.
+  /// Automatically calls `_fetchUserEmailDetails` when a valid email format is entered.
+  void _onEmailChanged() {
+    final email = _emailController.text.trim();
+    if (_validateEmail(email) == null) {
+      _fetchUserEmailDetails(email);
+    } else {
+      if (_isEmailChecked) {
+        setState(() {
+          _isEmailChecked = false;
+          _userRole = null;
+          _assignedDeptName = null;
+        });
+      }
+    }
+  }
+
+  /// Calls `AuthProvider.fetchEmailDetails` (POST /auth/email-details) to pre-fetch user role
+  /// and department assignment before form submission.
+  Future<void> _fetchUserEmailDetails(String email) async {
+    if (_isFetchingEmailDetails) return;
+    setState(() => _isFetchingEmailDetails = true);
+
+    try {
+      final authProvider = context.read<AuthProvider>();
+      final details = await authProvider.fetchEmailDetails(email);
+      if (details != null && mounted) {
+        setState(() {
+          _isEmailChecked = true;
+          _userRole = details.role;
+          _assignedDeptName = details.departmentName;
+          if (details.departmentId != null && details.departmentId!.isNotEmpty) {
+            _selectedDepartmentId = details.departmentId;
+          }
+        });
+
+        if (_isRegularUser && (details.data?.departments == null || details.data!.departments.isEmpty) && (details.departmentId == null || details.departmentId!.isEmpty)) {
+          _showError('Access denied: You do not have permission to access the department.');
+        }
+      }
+    } catch (e) {
+      debugPrint('[LoginScreen fetchEmailDetails error]: $e');
+    } finally {
+      if (mounted) setState(() => _isFetchingEmailDetails = false);
+    }
   }
 
   /// Returns a validation error string for the email field, or null if valid.
@@ -48,8 +177,8 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
-  /// Validates the form, delegates the login call to [AuthProvider],
-  /// then navigates to [MainLayoutScreen] on success or shows a SnackBar on failure.
+  /// Validates form inputs, delegates authentication to [AuthProvider.login],
+  /// initializes user department state, and navigates to [InitialDataLoaderScreen] on success.
   Future<void> _handleSignIn() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -68,15 +197,16 @@ class _LoginScreenState extends State<LoginScreen> {
         await context.read<DepartmentProvider>().initFromUser(user);
       }
       if (!mounted) return;
+      // Navigate to InitialDataLoaderScreen to pre-fetch initial application data
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainLayoutScreen()),
+        MaterialPageRoute(builder: (_) => const InitialDataLoaderScreen()),
       );
     } else {
       _showError(authProvider.error ?? 'Login failed');
     }
   }
 
-  /// Displays a floating red SnackBar with the given [message].
+  /// Displays a floating red SnackBar with the given error [message].
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -89,6 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch AuthProvider to update UI during loading state
     final authProvider = context.watch<AuthProvider>();
 
     return Scaffold(
@@ -130,13 +261,16 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: _tealLight),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _tealLight,
+                              ),
                             )
                           : null,
                     ),
                     const SizedBox(height: 20),
 
-                    // Show Department field ONLY if email is checked AND user is regular 'User'
+                    // Show read-only Department box ONLY if email is verified AND user is a regular 'User'
                     if (_isEmailChecked && _isRegularUser) ...[
                       _buildFieldLabel('DEPARTMENT'),
                       const SizedBox(height: 8),
@@ -154,7 +288,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       suffixIcon: GestureDetector(
                         onTap: () => setState(() => _obscurePassword = !_obscurePassword),
                         child: Icon(
-                          _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          _obscurePassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
                           size: 20,
                           color: _hintGray,
                         ),
@@ -172,7 +308,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  /// Renders the APIDEL brand logo image.
+  /// Renders the APIDEL brand logo image (with text shader fallback).
   Widget _buildLogo() {
     return Column(
       children: [
@@ -212,62 +348,6 @@ class _LoginScreenState extends State<LoginScreen> {
         color: Color(0xFF2D3339),
       ),
     );
-  }
-
-  bool _isFetchingEmailDetails = false;
-  bool _isEmailChecked = false;
-  String? _userRole;
-  String? _assignedDeptName;
-
-  bool get _isRegularUser {
-    if (_userRole == null) return false;
-    final r = _userRole!.toUpperCase().replaceAll(' ', '_');
-    return r != 'SUPER_ADMIN' && r != 'SUPERADMIN' && r != 'ADMIN';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _emailController.addListener(_onEmailChanged);
-  }
-
-  void _onEmailChanged() {
-    final email = _emailController.text.trim();
-    if (_validateEmail(email) == null) {
-      _fetchUserEmailDetails(email);
-    } else {
-      if (_isEmailChecked) {
-        setState(() {
-          _isEmailChecked = false;
-          _userRole = null;
-          _assignedDeptName = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _fetchUserEmailDetails(String email) async {
-    if (_isFetchingEmailDetails) return;
-    setState(() => _isFetchingEmailDetails = true);
-
-    try {
-      final authProvider = context.read<AuthProvider>();
-      final details = await authProvider.fetchEmailDetails(email);
-      if (details != null && mounted) {
-        setState(() {
-          _isEmailChecked = true;
-          _userRole = details.role;
-          _assignedDeptName = details.departmentName;
-          if (details.departmentId != null && details.departmentId!.isNotEmpty) {
-            _selectedDepartmentId = details.departmentId;
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('[LoginScreen fetchEmailDetails error]: $e');
-    } finally {
-      if (mounted) setState(() => _isFetchingEmailDetails = false);
-    }
   }
 
   /// Builds read-only assigned department field for Normal User
@@ -350,108 +430,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  /// Builds styled department selection dropdown or assigned department field.
-  Widget _buildDepartmentDropdown(DepartmentProvider deptProvider) {
-    final normalizedRole = _userRole?.toUpperCase().replaceAll(' ', '_');
-    final isRegularUser = normalizedRole != null &&
-        normalizedRole != 'SUPER_ADMIN' &&
-        normalizedRole != 'SUPERADMIN' &&
-        normalizedRole != 'ADMIN';
-
-    // 1. If Normal User (and assigned department name exists), show read-only assigned department display
-    if (isRegularUser && _assignedDeptName != null && _assignedDeptName!.isNotEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _borderGray),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.apartment_rounded,
-              size: 18,
-              color: Color(0xFF64748B),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _assignedDeptName!,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF475569),
-                ),
-              ),
-            ),
-            const Icon(Icons.lock_outline_rounded, size: 16, color: Color(0xFF94A3B8)),
-          ],
-        ),
-      );
-    }
-
-    // 2. Default dropdown for Super Admin, Admin, or unverified email
-    final depts = deptProvider.availableDepartments;
-
-    final validSelected = depts.any((d) => d.id == _selectedDepartmentId)
-        ? _selectedDepartmentId
-        : (depts.isNotEmpty ? depts.first.id : null);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _borderGray),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: validSelected,
-          isExpanded: true,
-          icon: _isFetchingEmailDetails
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: _tealLight))
-              : const Icon(Icons.keyboard_arrow_down_rounded, color: _hintGray),
-          dropdownColor: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          items: depts.map((dept) {
-            return DropdownMenuItem<String>(
-              value: dept.id,
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.apartment_rounded,
-                    size: 18,
-                    color: _tealLight,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      dept.name,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-          onChanged: (String? value) {
-            if (value != null) {
-              setState(() {
-                _selectedDepartmentId = value;
-              });
-            }
-          },
-        ),
-      ),
-    );
-  }
-
-  /// Gradient "Sign In" button. Shows a [CircularProgressIndicator] when [isLoading].
+  /// Gradient "Sign In" button. Shows a [CircularProgressIndicator] when [isLoading] is true.
   Widget _buildSignInButton(bool isLoading) {
     return Container(
       height: 50,

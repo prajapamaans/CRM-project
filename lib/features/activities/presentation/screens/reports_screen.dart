@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:provider/provider.dart';
+
 import '../../../../core/network/api_service.dart';
 import '../../../../core/widgets/app_refresh_indicator.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../contacts/data/models/contact_model.dart';
 import '../../../dashboard/data/datasource/remote/dashboard_remote_datasource.dart';
 import '../../../dashboard/data/models/activity_stats_model.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -51,6 +54,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _activitiesList = [];
 
   bool _isTabLoading = false;
+  String? _lastDepartmentId;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final currentDeptId = context.watch<DepartmentProvider>().selectedDepartmentId;
+    if (_lastDepartmentId != currentDeptId) {
+      _lastDepartmentId = currentDeptId;
+      _fetchReportsData();
+      _fetchTabSpecificData();
+    }
+  }
 
   @override
   void initState() {

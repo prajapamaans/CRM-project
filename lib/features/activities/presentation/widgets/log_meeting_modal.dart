@@ -9,20 +9,28 @@ import '../../../../core/widgets/record_association_sheet.dart';
 import 'follow_up_task_section.dart';
 
 class MeetingModel {
+  final String? id;
   final String title;
   final String outcome;
   final String duration;
   final String startTime;
   final String notes;
   final String? assignedTo;
+  final String? contactId;
+  final String? companyId;
+  final String? dealId;
 
   MeetingModel({
+    this.id,
     required this.title,
     required this.outcome,
     required this.duration,
     required this.startTime,
     required this.notes,
     this.assignedTo = 'Admin User',
+    this.contactId,
+    this.companyId,
+    this.dealId,
   });
 }
 
@@ -31,6 +39,7 @@ class LogMeetingModal extends StatefulWidget {
   final String? companyId;
   final String? dealId;
   final String associatedRecordName;
+  final MeetingModel? existingMeeting;
 
   const LogMeetingModal({
     super.key,
@@ -38,6 +47,7 @@ class LogMeetingModal extends StatefulWidget {
     this.companyId,
     this.dealId,
     this.associatedRecordName = 'xyzzzz',
+    this.existingMeeting,
   });
 
   static Future<MeetingModel?> show(
@@ -46,6 +56,7 @@ class LogMeetingModal extends StatefulWidget {
     String? companyId,
     String? dealId,
     String associatedRecordName = 'xyzzzz',
+    MeetingModel? existingMeeting,
   }) {
     return showModalBottomSheet<MeetingModel>(
       context: context,
@@ -56,6 +67,7 @@ class LogMeetingModal extends StatefulWidget {
         companyId: companyId,
         dealId: dealId,
         associatedRecordName: associatedRecordName,
+        existingMeeting: existingMeeting,
       ),
     );
   }
@@ -186,17 +198,29 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
   @override
   void initState() {
     super.initState();
+    final em = widget.existingMeeting;
+    if (em != null) {
+      _titleController.text = em.title;
+      _notesController.text = em.notes;
+      _selectedOutcome = em.outcome;
+      _selectedDuration = em.duration;
+    }
+
+    final cId = widget.contactId ?? em?.contactId;
+    final compId = widget.companyId ?? em?.companyId;
+    final dId = widget.dealId ?? em?.dealId;
+
     _associations = {
-      'Companies': widget.companyId != null ? [{'id': widget.companyId!, 'name': widget.associatedRecordName}] : [],
-      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
-      'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
+      'Companies': compId != null && compId.isNotEmpty ? [{'id': compId, 'name': widget.associatedRecordName}] : [],
+      'Contacts': cId != null && cId.isNotEmpty ? [{'id': cId, 'name': widget.associatedRecordName}] : (compId == null && dId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : []),
+      'Deals': dId != null && dId.isNotEmpty ? [{'id': dId, 'name': widget.associatedRecordName}] : [],
     };
     final now = DateTime.now();
     final d = now.day.toString().padLeft(2, '0');
     final m = now.month.toString().padLeft(2, '0');
     final y = now.year.toString();
     _startTimeController = TextEditingController(
-      text: '$m/$d/$y 6:13 PM',
+      text: (em != null && em.startTime.isNotEmpty) ? em.startTime : '$m/$d/$y 6:13 PM',
     );
   }
 
@@ -277,7 +301,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Log Meeting',
+                      widget.existingMeeting != null ? 'Edit Meeting' : 'Log Meeting',
                       style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontSize: 16,
@@ -710,6 +734,10 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                       );
                       final outcomeValue = matchedOption.value;
 
+                      final contactId = widget.contactId ?? widget.existingMeeting?.contactId;
+                      final companyId = widget.companyId ?? widget.existingMeeting?.companyId;
+                      final dealId = widget.dealId ?? widget.existingMeeting?.dealId;
+
                       final meetingData = {
                         'title': _titleController.text.trim(),
                         'type': 'meeting',
@@ -718,23 +746,41 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                         'startTime': _startTimeController.text.trim(),
                         'notes': _notesController.text.trim(),
                         'createFollowUpTask': _createFollowUpTask,
-                        if (widget.contactId != null) 'contactId': widget.contactId,
-                        if (widget.companyId != null) 'companyId': widget.companyId,
-                        if (widget.dealId != null) 'dealId': widget.dealId,
+                        if (contactId != null) 'contactId': contactId,
+                        if (companyId != null) 'companyId': companyId,
+                        if (dealId != null) 'dealId': dealId,
                       };
 
+                      final existingId = widget.existingMeeting?.id;
                       try {
-                        await ApiService().post(ApiConstants.activities, data: meetingData);
+                        if (existingId != null && existingId.isNotEmpty) {
+                          try {
+                            final res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
+                            debugPrint('[PUT /api/activities/$existingId SUCCESS]: ${res.data}');
+                          } catch (e) {
+                            debugPrint('[PUT /api/activities/$existingId FAILED, TRYING PATCH]: $e');
+                            final res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
+                            debugPrint('[PATCH /api/activities/$existingId SUCCESS]: ${res.data}');
+                          }
+                        } else {
+                          final res = await ApiService().post(ApiConstants.activities, data: meetingData);
+                          debugPrint('[POST /api/activities SUCCESS]: ${res.data}');
+                        }
                       } catch (e) {
-                        debugPrint('[POST ${ApiConstants.activities} ERROR]: $e');
+                        debugPrint('[SAVE ${ApiConstants.activities} ERROR]: $e');
                       }
 
                       final meeting = MeetingModel(
+                        id: existingId,
                         title: _titleController.text.trim(),
                         outcome: _selectedOutcome,
                         duration: _selectedDuration,
                         startTime: _startTimeController.text.trim(),
                         notes: _notesController.text.trim(),
+                        assignedTo: widget.existingMeeting?.assignedTo ?? 'Admin User',
+                        contactId: contactId,
+                        companyId: companyId,
+                        dealId: dealId,
                       );
                       if (context.mounted) {
                         Navigator.of(context).pop(meeting);
@@ -751,7 +797,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 ),
               ),
               child: Text(
-                'Log meeting',
+                widget.existingMeeting != null ? 'Save' : 'Log meeting',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.w700,
                   fontSize: 13.5,

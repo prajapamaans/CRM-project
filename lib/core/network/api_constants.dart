@@ -15,6 +15,7 @@ class ApiConstants {
   static const String me = '/auth/me';
   static const String refreshToken = '/auth/refresh';
   static const String team = '/auth/team';
+  static const String switchDepartment = '/auth/switch-department';
 
   // Core CRM Endpoints
   static const String departments = '/departments';

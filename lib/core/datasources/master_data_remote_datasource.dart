@@ -287,19 +287,23 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
         ? (list.first['departmentId'] ?? list.first['department_id'] ?? list.first['department']?['id'])?.toString()
         : null;
 
-    debugPrint('========== DEPARTMENT API TRACE ==========');
-    debugPrint('Screen: Activities ($type)');
-    debugPrint('API: ${ApiConstants.activities}?type=$type');
-    debugPrint('Selected Department ID: $departmentId');
-    debugPrint('Request department_id: $departmentId');
-    debugPrint('Response status: ${response.statusCode}');
-    debugPrint('First returned record departmentId: $firstRecordDeptId');
-    debugPrint('==========================================');
-
-    if (firstRecordDeptId != null && departmentId != null && firstRecordDeptId != departmentId) {
-      debugPrint('REQUESTED DEPARTMENT: $departmentId');
-      debugPrint('RETURNED RECORD DEPARTMENT: $firstRecordDeptId');
+    debugPrint('========== DEPARTMENT DATA COMPARISON ==========');
+    debugPrint('DEPARTMENT REQUESTED: $departmentId');
+    debugPrint('REQUEST URL: ${ApiConstants.activities}?type=$type&department_id=$departmentId');
+    debugPrint('HTTP STATUS: ${response.statusCode}');
+    debugPrint('RECORD COUNT: ${list.length}');
+    if (list.isNotEmpty) {
+      final sampleIds = list.map((item) => item['id'] ?? item['_id']).take(5).toList();
+      final sampleTitles = list.map((item) => item['title'] ?? item['subject'] ?? item['name']).take(5).toList();
+      debugPrint('FIRST 5 RECORD IDS: $sampleIds');
+      debugPrint('FIRST 5 RECORD TITLES: $sampleTitles');
+      if (list.first is Map) {
+        final firstMap = list.first as Map<String, dynamic>;
+        debugPrint('RAW JSON KEYS IN FIRST RECORD: ${firstMap.keys.toList()}');
+        debugPrint('DEPARTMENT FIELD IN RECORD: departmentId=${firstMap['departmentId']}, department_id=${firstMap['department_id']}, department=${firstMap['department']}');
+      }
     }
+    debugPrint('===============================================');
 
     return list
         .whereType<Map>()

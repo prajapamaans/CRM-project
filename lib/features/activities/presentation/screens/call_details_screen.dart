@@ -17,6 +17,7 @@ class CallDetailsScreen extends StatefulWidget {
 class _CallDetailsScreenState extends State<CallDetailsScreen> {
   late CallModel _currentCall;
   bool _isDeleting = false;
+  bool _isEdited = false;
 
   @override
   void initState() {
@@ -53,6 +54,7 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
   Future<void> _showEditDialog() async {
     final updatedCall = await LogCallModal.show(context, callToEdit: _currentCall);
     if (updatedCall != null) {
+      _isEdited = true;
       setState(() {
         _currentCall = updatedCall;
       });
@@ -136,20 +138,26 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top Go back bar
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              color: const Color(0xFFF8FAFC),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: InkWell(
-                  onTap: () => Navigator.of(context).pop(),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.of(context).pop(_isEdited);
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top Go back bar
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                color: const Color(0xFFF8FAFC),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: InkWell(
+                    onTap: () => Navigator.of(context).pop(_isEdited),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -520,6 +528,7 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+ }
 }

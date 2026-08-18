@@ -176,10 +176,12 @@ class DealProvider extends ChangeNotifier {
   }
 
   String? _currentDepartmentId;
+  String? get currentDepartmentId => _currentDepartmentId;
 
   Future<void> fetchDealStats({String? departmentId}) async {
+    final deptId = departmentId ?? _currentDepartmentId;
     try {
-      _stats = await _repository.getDealStats(departmentId: departmentId);
+      _stats = await _repository.getDealStats(departmentId: deptId);
       notifyListeners();
     } catch (e) {
       debugPrint('[DealProvider fetchDealStats error]: $e');
@@ -194,13 +196,18 @@ class DealProvider extends ChangeNotifier {
     int? limit,
     bool refresh = true,
   }) async {
+    if (departmentId != null) {
+      _currentDepartmentId = departmentId;
+    }
+
+    final requestedDeptId = _currentDepartmentId;
+
     if (refresh) {
       _currentPage = 1;
       _isLoading = true;
       _error = null;
       if (search != null) _currentSearch = search;
       _currentOwnerId = ownerId;
-      _currentDepartmentId = departmentId;
       _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     }
@@ -215,13 +222,23 @@ class DealProvider extends ChangeNotifier {
         ignorePermissions: _currentIgnorePermissions,
       );
 
+      // Race condition guard: ignore stale response if department changed while waiting
+      if (requestedDeptId != _currentDepartmentId) {
+        debugPrint('[DealProvider] Ignoring stale response for department: $requestedDeptId (active: $_currentDepartmentId)');
+        return;
+      }
+
       _deals = res.deals;
       _totalCount = res.total > 0 ? res.total : _deals.length;
     } catch (e) {
-      _error = e.toString();
+      if (requestedDeptId == _currentDepartmentId) {
+        _error = e.toString();
+      }
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (requestedDeptId == _currentDepartmentId) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -235,6 +252,7 @@ class DealProvider extends ChangeNotifier {
     _error = null;
     _currentSearch = null;
     _currentOwnerId = null;
+    _currentDepartmentId = null;
     _currentIgnorePermissions = null;
     _selectedOwnerId = null;
     _selectedStage = null;
@@ -257,6 +275,7 @@ class DealProvider extends ChangeNotifier {
         limit: _limit,
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
       );
 

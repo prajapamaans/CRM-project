@@ -1337,78 +1337,84 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      // Date Filter Dropdown (Opens Filter Sheet matching Image 3)
-                      InkWell(
-                        onTap: _showDateFilterDialog,
-                        child: Row(
-                          children: [
-                            Text(
-                              '$_selectedDateFilter ',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF00A884),
-                              ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          // Date Filter Dropdown (Opens Filter Sheet matching Image 3)
+                          InkWell(
+                            onTap: _showDateFilterDialog,
+                            child: Row(
+                              children: [
+                                Text(
+                                  '$_selectedDateFilter ',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF00A884),
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: Color(0xFF00A884),
+                                  size: 18,
+                                ),
+                              ],
                             ),
-                            const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              color: Color(0xFF00A884),
-                              size: 18,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 14),
+                          ),
+                          const SizedBox(width: 14),
 
-                      // Assignee Filter Dropdown
-                      PopupMenuButton<String>(
-                        onSelected: (val) {
-                          setState(() {
-                            _selectedAssigneeFilter = val;
-                          });
-                        },
-                        itemBuilder: (context) {
-                          final options = <String>[
-                            'Activity assigned to',
-                            'Admin User',
-                            'Unassigned',
-                          ];
-                          for (final u in _userList) {
-                            final name = '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'.trim();
-                            if (name.isNotEmpty && !options.contains(name)) {
-                              options.add(name);
-                            }
-                          }
-                          return options
-                              .map((s) => PopupMenuItem(
-                                    value: s,
-                                    child: Text(s,
-                                        style: GoogleFonts.poppins(fontSize: 13)),
-                                  ))
-                              .toList();
-                        },
-                        child: Row(
-                          children: [
-                            Text(
-                              '$_selectedAssigneeFilter ',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF00A884),
-                              ),
+                          // Assignee Filter Dropdown
+                          PopupMenuButton<String>(
+                            onSelected: (val) {
+                              setState(() {
+                                _selectedAssigneeFilter = val;
+                              });
+                            },
+                            itemBuilder: (context) {
+                              final options = <String>[
+                                'Activity assigned to',
+                                'Admin User',
+                                'Unassigned',
+                              ];
+                              for (final u in _userList) {
+                                final name = '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'.trim();
+                                if (name.isNotEmpty && !options.contains(name)) {
+                                  options.add(name);
+                                }
+                              }
+                              return options
+                                  .map((s) => PopupMenuItem(
+                                        value: s,
+                                        child: Text(s,
+                                            style: GoogleFonts.poppins(fontSize: 13)),
+                                      ))
+                                  .toList();
+                            },
+                            child: Row(
+                              children: [
+                                Text(
+                                  '$_selectedAssigneeFilter ',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF00A884),
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: Color(0xFF00A884),
+                                  size: 18,
+                                ),
+                              ],
                             ),
-                            const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              color: Color(0xFF00A884),
-                              size: 18,
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
 
                   // Collapse/Expand button
                   InkWell(
@@ -1418,6 +1424,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       });
                     },
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           _isActivitiesCollapsed ? 'Expand all ' : 'Collapse all ',

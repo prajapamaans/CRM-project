@@ -6,6 +6,7 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/company_tile.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import 'package:crmproject/features/contacts/presentation/providers/contact_provider.dart';
 import '../providers/company_provider.dart';
 import '../widgets/company_inline_filter_section.dart';
@@ -29,7 +30,8 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<MasterDataProvider>().fetchAllMasterData();
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      context.read<MasterDataProvider>().fetchAllMasterData(departmentId: deptId);
       _loadCompaniesForSegment(_selectedSegment);
     });
   }
@@ -37,17 +39,20 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   void _loadCompaniesForSegment(int segmentIndex) {
     final auth = context.read<AuthProvider>();
     final currentUserId = auth.currentUser?.id;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
     if (segmentIndex == 1) {
       context.read<CompanyProvider>().fetchCompanies(
             search: _searchQuery,
             ownerId: currentUserId,
+            departmentId: deptId,
             ignorePermissions: false,
           );
     } else {
       context.read<CompanyProvider>().fetchCompanies(
             search: _searchQuery,
             ownerId: null,
+            departmentId: deptId,
             ignorePermissions: true,
           );
     }

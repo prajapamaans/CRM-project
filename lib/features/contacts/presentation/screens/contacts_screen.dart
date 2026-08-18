@@ -6,6 +6,7 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/contact_tile.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../providers/contact_provider.dart';
 import '../widgets/contact_inline_filter_section.dart';
 import '../widgets/create_contact_modal.dart';
@@ -28,7 +29,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<MasterDataProvider>().fetchAllMasterData();
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      context.read<MasterDataProvider>().fetchAllMasterData(departmentId: deptId);
       _loadContactsForSegment(_selectedSegment);
     });
   }
@@ -36,17 +38,20 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void _loadContactsForSegment(int segmentIndex) {
     final auth = context.read<AuthProvider>();
     final currentUserId = auth.currentUser?.id;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
     if (segmentIndex == 1) {
       context.read<ContactProvider>().fetchContacts(
             search: _searchQuery,
             ownerId: currentUserId,
+            departmentId: deptId,
             ignorePermissions: false,
           );
     } else {
       context.read<ContactProvider>().fetchContacts(
             search: _searchQuery,
             ownerId: null,
+            departmentId: deptId,
             ignorePermissions: true,
           );
     }

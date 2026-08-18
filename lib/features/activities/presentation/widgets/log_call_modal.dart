@@ -19,6 +19,9 @@ class CallModel {
   final String? status;
   final String? type;
   final String? direction;
+  final String? contactId;
+  final String? companyId;
+  final String? dealId;
   final Map<String, dynamic>? rawMap;
 
   CallModel({
@@ -33,6 +36,9 @@ class CallModel {
     this.status = 'PENDING',
     this.type = 'call',
     this.direction = 'Outbound',
+    this.contactId,
+    this.companyId,
+    this.dealId,
     this.rawMap,
   });
 }
@@ -1168,18 +1174,26 @@ class _LogCallModalState extends State<LogCallModal> {
       outcomeValue = _selectedOutcome.toLowerCase();
     }
 
+    final contactId = widget.contactId ?? widget.callToEdit?.contactId;
+    final companyId = widget.companyId ?? widget.callToEdit?.companyId;
+    final dealId = widget.dealId ?? widget.callToEdit?.dealId;
+
     final callData = {
       'title': _titleController.text.trim(),
+      'subject': _titleController.text.trim(),
       'type': widget.activityType.toLowerCase(),
       'outcome': outcomeValue,
       'duration': _selectedDuration,
       'startTime': _startTimeController.text.trim(),
+      'start_time': _startTimeController.text.trim(),
       'notes': _notesController.text.trim(),
+      'description': _notesController.text.trim(),
       'direction': _selectedDirection,
       'createFollowUpTask': _createFollowUpTask,
-      if (widget.contactId != null) 'contactId': widget.contactId,
-      if (widget.companyId != null) 'companyId': widget.companyId,
-      if (widget.dealId != null) 'dealId': widget.dealId,
+      if (_selectedOwner != 'Select owner') 'ownerName': _selectedOwner,
+      if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
+      if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
+      if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
     };
 
     final isEditing = widget.callToEdit != null &&
@@ -1188,10 +1202,22 @@ class _LogCallModalState extends State<LogCallModal> {
 
     try {
       if (isEditing) {
-        await ApiService().put(
-          '${ApiConstants.activities}/${widget.callToEdit!.id}',
-          data: callData,
-        );
+        final callId = widget.callToEdit!.id!;
+        debugPrint('[EDIT CALL] Updating activity $callId with data: $callData');
+        try {
+          await ApiService().patch(
+            '${ApiConstants.activities}/$callId',
+            data: callData,
+          );
+          debugPrint('[EDIT CALL PATCH SUCCESS]');
+        } catch (e) {
+          debugPrint('[EDIT CALL PATCH FAILED, RETRYING PUT]: $e');
+          await ApiService().put(
+            '${ApiConstants.activities}/$callId',
+            data: callData,
+          );
+          debugPrint('[EDIT CALL PUT SUCCESS]');
+        }
       } else {
         await ApiService().post(ApiConstants.activities, data: callData);
       }
@@ -1211,6 +1237,10 @@ class _LogCallModalState extends State<LogCallModal> {
       priority: widget.callToEdit?.priority ?? 'Medium',
       status: widget.callToEdit?.status ?? 'PENDING',
       type: widget.callToEdit?.type ?? 'call',
+      contactId: contactId,
+      companyId: companyId,
+      dealId: dealId,
+      rawMap: widget.callToEdit?.rawMap,
     );
 
     if (mounted) {

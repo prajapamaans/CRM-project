@@ -28,6 +28,18 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedPillIndex = 0; // 0 = Team, 1 = My work
   int _selectedTimeFilter = 1; // 0: 7 Days, 1: 30 Days, 2: 90 Days, 3: All time
+  String? _lastDepartmentId;
+  Future<List<Map<String, dynamic>>>? _meetingsBookedFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final deptId = context.watch<DepartmentProvider>().selectedDepartmentId;
+    if (_lastDepartmentId != deptId) {
+      _lastDepartmentId = deptId;
+      _meetingsBookedFuture = MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId);
+    }
+  }
 
   @override
   void initState() {
@@ -41,8 +53,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ownerId: _selectedPillIndex == 1 ? currentUserId : null,
         departmentId: deptId,
       );
-      context.read<ContactProvider>().fetchContacts();
-      context.read<DealProvider>().fetchDeals();
+      context.read<ContactProvider>().fetchContacts(departmentId: deptId);
+      context.read<DealProvider>().fetchDeals(departmentId: deptId);
       context.read<MasterDataProvider>().fetchAllMasterData(
         currentUserId: currentUserId,
         departmentId: deptId,
@@ -759,8 +771,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildMeetingsBookedTable() {
     final deptId = context.watch<DepartmentProvider>().selectedDepartmentId;
+    _meetingsBookedFuture ??= MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId);
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId),
+      future: _meetingsBookedFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(

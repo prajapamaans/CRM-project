@@ -98,6 +98,20 @@ class AuthProvider extends ChangeNotifier {
       final user = await _repository.getMe();
       _currentUser = user;
 
+      // Validate normal user department permission:
+      final roleUpper = user.role?.toUpperCase().replaceAll(' ', '_') ?? '';
+      final isNormalUser = roleUpper != 'SUPER_ADMIN' && roleUpper != 'SUPERADMIN' && roleUpper != 'ADMIN';
+      final hasNoDept = user.departments.isEmpty && (user.departmentId == null || user.departmentId!.isEmpty);
+
+      if (isNormalUser && hasNoDept) {
+        _error = 'Access denied: You do not have permission to access the department.';
+        _state = AuthState.error;
+        _isLoading = false;
+        _currentUser = null;
+        notifyListeners();
+        return false;
+      }
+
       final storage = SecureStorageService();
       if (user.role != null && user.role!.isNotEmpty) {
         await storage.saveUserRole(user.role!);

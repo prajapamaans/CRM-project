@@ -148,6 +148,7 @@ class ContactProvider extends ChangeNotifier {
   }
 
   String? _currentDepartmentId;
+  String? get currentDepartmentId => _currentDepartmentId;
 
   Future<void> fetchContacts({
     String? search,
@@ -156,13 +157,18 @@ class ContactProvider extends ChangeNotifier {
     bool? ignorePermissions,
     bool refresh = true,
   }) async {
+    if (departmentId != null) {
+      _currentDepartmentId = departmentId;
+    }
+
+    final requestedDeptId = _currentDepartmentId;
+
     if (refresh) {
       _currentPage = 1;
       _isLoading = true;
       _error = null;
       if (search != null) _currentSearch = search;
       _currentOwnerId = ownerId;
-      _currentDepartmentId = departmentId;
       _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     } else {
@@ -181,6 +187,12 @@ class ContactProvider extends ChangeNotifier {
         ignorePermissions: _currentIgnorePermissions,
       );
 
+      // Race condition guard: ignore stale response if department changed while waiting
+      if (requestedDeptId != _currentDepartmentId) {
+        debugPrint('[ContactProvider] Ignoring stale response for department: $requestedDeptId (active: $_currentDepartmentId)');
+        return;
+      }
+
       if (refresh) {
         _contacts = res.contacts;
       } else {
@@ -190,11 +202,15 @@ class ContactProvider extends ChangeNotifier {
       _totalCount = res.total > 0 ? res.total : _contacts.length;
       _hasMore = _contacts.length < _totalCount && res.contacts.isNotEmpty;
     } catch (e) {
-      _error = e.toString();
+      if (requestedDeptId == _currentDepartmentId) {
+        _error = e.toString();
+      }
     } finally {
-      _isLoading = false;
-      _isLoadingMore = false;
-      notifyListeners();
+      if (requestedDeptId == _currentDepartmentId) {
+        _isLoading = false;
+        _isLoadingMore = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -211,6 +227,7 @@ class ContactProvider extends ChangeNotifier {
         limit: _limit.toString(),
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
       );
 
@@ -231,6 +248,7 @@ class ContactProvider extends ChangeNotifier {
       await fetchContacts(
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
         refresh: false,
       );
@@ -333,6 +351,7 @@ class ContactProvider extends ChangeNotifier {
     _error = null;
     _currentSearch = null;
     _currentOwnerId = null;
+    _currentDepartmentId = null;
     _currentIgnorePermissions = null;
     _selectedOwnerId = null;
     _selectedLifecycleStage = null;

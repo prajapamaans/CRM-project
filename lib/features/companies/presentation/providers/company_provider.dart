@@ -152,6 +152,7 @@ class CompanyProvider extends ChangeNotifier {
   }
 
   String? _currentDepartmentId;
+  String? get currentDepartmentId => _currentDepartmentId;
 
   Future<void> fetchCompanies({
     String? search,
@@ -160,13 +161,18 @@ class CompanyProvider extends ChangeNotifier {
     bool? ignorePermissions,
     bool refresh = true,
   }) async {
+    if (departmentId != null) {
+      _currentDepartmentId = departmentId;
+    }
+
+    final requestedDeptId = _currentDepartmentId;
+
     if (refresh) {
       _currentPage = 1;
       _isLoading = true;
       _error = null;
       if (search != null) _currentSearch = search;
       _currentOwnerId = ownerId;
-      _currentDepartmentId = departmentId;
       _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     } else {
@@ -185,6 +191,12 @@ class CompanyProvider extends ChangeNotifier {
         ignorePermissions: _currentIgnorePermissions,
       );
 
+      // Race condition guard: ignore stale response if department changed while waiting
+      if (requestedDeptId != _currentDepartmentId) {
+        debugPrint('[CompanyProvider] Ignoring stale response for department: $requestedDeptId (active: $_currentDepartmentId)');
+        return;
+      }
+
       if (refresh) {
         _companies = res.companies;
       } else {
@@ -194,11 +206,15 @@ class CompanyProvider extends ChangeNotifier {
       _totalCount = res.total > 0 ? res.total : _companies.length;
       _hasMore = _companies.length < _totalCount && res.companies.isNotEmpty;
     } catch (e) {
-      _error = e.toString();
+      if (requestedDeptId == _currentDepartmentId) {
+        _error = e.toString();
+      }
     } finally {
-      _isLoading = false;
-      _isLoadingMore = false;
-      notifyListeners();
+      if (requestedDeptId == _currentDepartmentId) {
+        _isLoading = false;
+        _isLoadingMore = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -213,6 +229,7 @@ class CompanyProvider extends ChangeNotifier {
     _error = null;
     _currentSearch = null;
     _currentOwnerId = null;
+    _currentDepartmentId = null;
     _currentIgnorePermissions = null;
     _selectedOwnerId = null;
     _selectedLifecycleStage = null;
@@ -235,6 +252,7 @@ class CompanyProvider extends ChangeNotifier {
         limit: _limit.toString(),
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
       );
 
@@ -255,6 +273,7 @@ class CompanyProvider extends ChangeNotifier {
       await fetchCompanies(
         search: _currentSearch,
         ownerId: _currentOwnerId,
+        departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
         refresh: false,
       );

@@ -52,6 +52,18 @@ class _TasksScreenState extends State<TasksScreen> {
     'Most Recent',
   ];
 
+  String? _lastDepartmentId;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final currentDeptId = context.watch<DepartmentProvider>().selectedDepartmentId;
+    if (_lastDepartmentId != currentDeptId) {
+      _lastDepartmentId = currentDeptId;
+      _loadAllApisAndTasks();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
