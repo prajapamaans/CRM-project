@@ -99,6 +99,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     int displayContactsCount = contactProvider.totalCount;
     int displayCompaniesCount = companyProvider.totalCount;
     int displayDealsCount = dealProvider.totalCount;
+    int displayTasksCount = stats?.tasks != null && stats!.tasks > 0
+        ? stats.tasks
+        : (stats?.pendingTasks ?? 0);
 
     if (dataObj != null) {
       final dynamic rawContacts = dataObj['totalContactsOwned'] ?? dataObj['totalContacts'] ?? dataObj['contactsCount'];
@@ -109,6 +112,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final dynamic rawDeals = dataObj['totalDealsOwned'] ?? dataObj['totalDeals'] ?? dataObj['dealsCount'];
       if (rawDeals is num) displayDealsCount = rawDeals.toInt();
+
+      final dynamic rawTasks = dataObj['totalTasksOwned'] ?? dataObj['totalTasks'] ?? dataObj['tasksCount'];
+      if (rawTasks is num) displayTasksCount = rawTasks.toInt();
     }
 
     // Check if logged in user is Admin / Super Admin
@@ -167,87 +173,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   )
                 else ...[
-                  // 2. Stat Cards Section (TOTAL CONTACTS, TOTAL COMPANIES, TOTAL DEALS)
-                  if (isDesktop)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: StatCard(
-                            label: 'TOTAL CONTACTS',
-                            value: '$displayContactsCount',
-                            badgeText: 'Contacts',
-                            badgeBgColor: const Color(0xFFE6F4F1),
-                            badgeTextColor: const Color(0xFF0F766E),
-                            onTap: () {
-                              context.read<NavigationProvider>().selectScreen(1); // Contacts
-                            },
+                  // 2. Stat Cards Section (4 Boxes - 2 Boxes per Line: Company, Contact, Deal, Task)
+                  Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: StatCard(
+                              label: 'Companies',
+                              value: '$displayCompaniesCount',
+                              icon: Icons.domain_rounded,
+                              iconBgColor: const Color(0xFFE0F2FE),
+                              iconColor: const Color(0xFF0284C7),
+                              onTap: () {
+                                context.read<NavigationProvider>().selectScreen(2); // Companies Screen
+                              },
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: StatCard(
-                            label: 'TOTAL COMPANIES',
-                            value: '$displayCompaniesCount',
-                            badgeText: 'Companies',
-                            badgeBgColor: const Color(0xFFE6F4F1),
-                            badgeTextColor: const Color(0xFF0F766E),
-                            onTap: () {
-                              context.read<NavigationProvider>().selectScreen(2); // Companies
-                            },
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: StatCard(
+                              label: 'Contacts',
+                              value: '$displayContactsCount',
+                              icon: Icons.people_alt_rounded,
+                              iconBgColor: const Color(0xFFE6F4F1),
+                              iconColor: const Color(0xFF00A884),
+                              onTap: () {
+                                context.read<NavigationProvider>().selectScreen(1); // Contacts Screen
+                              },
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: StatCard(
-                            label: 'TOTAL DEALS',
-                            value: '$displayDealsCount',
-                            badgeText: 'Active',
-                            badgeBgColor: const Color(0xFFE6F4F1),
-                            badgeTextColor: const Color(0xFF0F766E),
-                            onTap: () {
-                              context.read<NavigationProvider>().selectScreen(3); // Deals
-                            },
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: StatCard(
+                              label: 'Deals',
+                              value: '$displayDealsCount',
+                              icon: Icons.monetization_on_rounded,
+                              iconBgColor: const Color(0xFFFEF3C7),
+                              iconColor: const Color(0xFFD97706),
+                              onTap: () {
+                                context.read<NavigationProvider>().selectScreen(3); // Deals Screen
+                              },
+                            ),
                           ),
-                        ),
-                      ],
-                    )
-                  else
-                    Column(
-                      children: [
-                        StatCard(
-                          label: 'TOTAL CONTACTS',
-                          value: '$displayContactsCount',
-                          badgeText: 'Contacts',
-                          badgeBgColor: const Color(0xFFE6F4F1),
-                          badgeTextColor: const Color(0xFF0F766E),
-                          onTap: () {
-                            context.read<NavigationProvider>().selectScreen(1); // Contacts
-                          },
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        StatCard(
-                          label: 'TOTAL COMPANIES',
-                          value: '$displayCompaniesCount',
-                          badgeText: 'Companies',
-                          badgeBgColor: const Color(0xFFE6F4F1),
-                          badgeTextColor: const Color(0xFF0F766E),
-                          onTap: () {
-                            context.read<NavigationProvider>().selectScreen(2); // Companies
-                          },
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        StatCard(
-                          label: 'TOTAL DEALS',
-                          value: '$displayDealsCount',
-                          badgeText: 'Active',
-                          badgeBgColor: const Color(0xFFE6F4F1),
-                          badgeTextColor: const Color(0xFF0F766E),
-                          onTap: () {
-                            context.read<NavigationProvider>().selectScreen(3); // Deals
-                          },
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: StatCard(
+                              label: 'Tasks',
+                              value: '$displayTasksCount',
+                              icon: Icons.task_alt_rounded,
+                              iconBgColor: const Color(0xFFF3E8FF),
+                              iconColor: const Color(0xFF7C3AED),
+                              onTap: () {
+                                context.read<NavigationProvider>().selectScreen(12); // Tasks Screen
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
 
                   const SizedBox(height: AppSpacing.lg),
 

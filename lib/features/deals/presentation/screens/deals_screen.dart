@@ -25,6 +25,7 @@ class _DealsScreenState extends State<DealsScreen> {
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
   bool _isFilterExpanded = false;
+  final Set<String> _selectedDealIds = {};
 
   @override
   void initState() {
@@ -38,6 +39,9 @@ class _DealsScreenState extends State<DealsScreen> {
   }
 
   void _loadDealsForSegment(int segmentIndex) {
+    setState(() {
+      _selectedDealIds.clear();
+    });
     final auth = context.read<AuthProvider>();
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
@@ -56,6 +60,55 @@ class _DealsScreenState extends State<DealsScreen> {
             departmentId: deptId,
             ignorePermissions: true,
           );
+    }
+  }
+
+  Future<void> _confirmDeleteSelectedDeals() async {
+    if (_selectedDealIds.isEmpty) return;
+    final count = _selectedDealIds.length;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Deal${count > 1 ? 's' : ''}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete $count selected deal${count > 1 ? 's' : ''}? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final provider = context.read<DealProvider>();
+    final idsToDelete = List<String>.from(_selectedDealIds);
+
+    for (final id in idsToDelete) {
+      await provider.deleteDeal(id);
+    }
+
+    if (mounted) {
+      setState(() {
+        _selectedDealIds.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$count deal${count > 1 ? 's' : ''} deleted successfully!', style: GoogleFonts.poppins()),
+          backgroundColor: const Color(0xFF00A884),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -105,10 +158,8 @@ class _DealsScreenState extends State<DealsScreen> {
                     },
                     isFilterActive: dealProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
-                    onToggleFilterExpanded: () {
-                      setState(() {
-                        _isFilterExpanded = !_isFilterExpanded;
-                      });
+                    onRefreshTap: () {
+                      context.read<DealProvider>().fetchDeals();
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -147,20 +198,71 @@ class _DealsScreenState extends State<DealsScreen> {
               ),
             ),
 
-            // 2. Summary Count Sub-header
+            // 2. Summary Count & Table Header Row matching reference screenshot
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: const Color(0xFFF8FAFC),
-              child: Text(
-                dealProvider.isLoading && deals.isEmpty
-                    ? 'Loading deals...'
-                    : '${_formatCount(dealProvider.totalCount > 0 ? dealProvider.totalCount : deals.length)} deals${dealProvider.stats != null ? " • Pipeline: \$${dealProvider.stats!.pipelineValue.toStringAsFixed(0)}" : ""}',
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF64748B),
-                ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: deals.isNotEmpty && _selectedDealIds.length == deals.length,
+                      onChanged: (val) {
+                        setState(() {
+                          if (val == true) {
+                            _selectedDealIds.addAll(deals.map((d) => d.id));
+                          } else {
+                            _selectedDealIds.clear();
+                          }
+                        });
+                      },
+                      activeColor: const Color(0xFF00A884),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Text(
+                    'NAME',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF2563EB),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_selectedDealIds.isNotEmpty) ...[
+                    ElevatedButton.icon(
+                      onPressed: _confirmDeleteSelectedDeals,
+                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white),
+                      label: Text(
+                        'Delete (${_selectedDealIds.length})',
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ] else
+                    Text(
+                      dealProvider.isLoading && deals.isEmpty
+                          ? 'Loading deals...'
+                          : '${_formatCount(dealProvider.totalCount > 0 ? dealProvider.totalCount : deals.length)} deals${dealProvider.stats != null ? " • Pipeline: \$${dealProvider.stats!.pipelineValue.toStringAsFixed(0)}" : ""}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                ],
               ),
             ),
 
@@ -276,8 +378,20 @@ class _DealsScreenState extends State<DealsScreen> {
                               }
 
                               final deal = deals[index];
+                              final isSelected = _selectedDealIds.contains(deal.id);
                               return DealTile(
                                 deal: deal,
+                                isSelected: isSelected,
+                                showCheckbox: true,
+                                onSelectionChanged: (val) {
+                                  setState(() {
+                                    if (val == true) {
+                                      _selectedDealIds.add(deal.id);
+                                    } else {
+                                      _selectedDealIds.remove(deal.id);
+                                    }
+                                  });
+                                },
                                 onTap: () async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(

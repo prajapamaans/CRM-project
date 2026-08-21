@@ -13,6 +13,7 @@ class SearchAndFilterBar extends StatefulWidget {
   final ContactSortOption? currentSort;
   final ValueChanged<ContactSortOption>? onSortChanged;
   final VoidCallback? onFilterTap;
+  final VoidCallback? onRefreshTap;
   final VoidCallback? onImportTap;
   final VoidCallback? onExportTap;
   final bool isFilterActive;
@@ -32,6 +33,7 @@ class SearchAndFilterBar extends StatefulWidget {
     this.currentSort,
     this.onSortChanged,
     this.onFilterTap,
+    this.onRefreshTap,
     this.onImportTap,
     this.onExportTap,
     this.isFilterActive = false,
@@ -196,41 +198,6 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
                   color: widget.isFilterActive || widget.isFilterExpanded
                       ? const Color(0xFF00A884)
                       : const Color(0xFF1E293B),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem<String>(
-          value: 'import',
-          child: Row(
-            children: [
-              const Icon(Icons.file_upload_outlined, color: Color(0xFF64748B), size: 18),
-              const SizedBox(width: 10),
-              Text(
-                'Import',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF1E293B),
-                ),
-              ),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'export',
-          child: Row(
-            children: [
-              const Icon(Icons.file_download_outlined, color: Color(0xFF64748B), size: 18),
-              const SizedBox(width: 10),
-              Text(
-                'Export',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF1E293B),
                 ),
               ),
             ],

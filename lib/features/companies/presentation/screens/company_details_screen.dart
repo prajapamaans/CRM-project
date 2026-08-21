@@ -149,6 +149,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
   ];
 
   List<Map<String, dynamic>> _userList = [];
+  final Set<String> _expandedActivityIds = {};
 
   @override
   void initState() {
@@ -578,6 +579,26 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
         ),
         actions: [
           IconButton(
+            onPressed: () {
+              _fetchActivities();
+              _fetchUsers();
+              _fetchCompanyDetails();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Refreshing company data...'),
+                  backgroundColor: Color(0xFF00A884),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            icon: const Icon(
+              Icons.refresh_rounded,
+              color: Color(0xFF00A884),
+              size: 24,
+            ),
+            tooltip: 'Refresh Company Data',
+          ),
+          IconButton(
             onPressed: () {},
             icon: Stack(
               clipBehavior: Clip.none,
@@ -848,13 +869,46 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _displayName,
-                          style: GoogleFonts.poppins(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF1E293B),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _displayName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF1E293B),
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () {
+                                _fetchActivities();
+                                _fetchUsers();
+                                _fetchCompanyDetails();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Refreshing company data...'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE6F4F1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF64D2B7), width: 1),
+                                ),
+                                child: const Icon(
+                                  Icons.refresh_rounded,
+                                  size: 18,
+                                  color: Color(0xFF00A884),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -1176,13 +1230,12 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                 ),
               ),
               const SizedBox(height: 16),
-              _buildAboutField('COMPANY DOMAIN NAME', 'domain', _domainController),
-              _buildAboutField('COMPANY NAME', 'name', _nameController),
-              _buildAboutField('MSP', 'msp', TextEditingController(text: '--')),
-              _buildAboutField('PHONE NUMBER', 'phone', _phoneController),
-              _buildAboutField('COMPANY OWNER', 'owner', _ownerController),
+              _buildAboutField('Company Owner', 'owner', _ownerController),
+              _buildAboutField('Company Name', 'name', _nameController),
+              _buildAboutField('Company Domain Name', 'domain', _domainController),
+              _buildAboutField('Phone Number', 'phone', _phoneController),
               _buildAboutField(
-                'LIFECYCLE STAGE',
+                'Lifecycle Stage',
                 'lifecycleStage',
                 TextEditingController(text: _lifecycleStage),
                 options: _lifecycleStages,
@@ -1194,7 +1247,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                 },
               ),
               _buildAboutField(
-                'LEAD STATUS',
+                'Lead Status',
                 'leadStatus',
                 TextEditingController(
                     text: _leadStatus.isNotEmpty ? _leadStatus : '--'),
@@ -1215,9 +1268,28 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                   _saveCompanyChanges();
                 },
               ),
-              _buildAboutField('INDUSTRY', 'industry', _industryController),
-              _buildAboutField('TYPE', 'type', _sizeController),
-              _buildAboutField('CITY', 'city', _cityController),
+              _buildAboutField(
+                'MSP',
+                'msp',
+                TextEditingController(text: '--'),
+                options: const ['MSP 1', 'MSP 2', 'MSP 3', 'None'],
+                onSelectedOption: (selected) {
+                  _saveCompanyChanges();
+                },
+              ),
+              _buildAboutField(
+                'Priority',
+                'priority',
+                TextEditingController(text: 'Medium'),
+                options: const ['Low', 'Medium', 'High'],
+                onSelectedOption: (selected) {
+                  _saveCompanyChanges();
+                },
+              ),
+              _buildAboutField('Industry', 'industry', _industryController),
+              _buildAboutField('Type', 'type', _sizeController),
+              _buildAboutField('City', 'city', _cityController),
+              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: '--')),
               _buildAboutField('STATE/REGION', 'state', _stateController),
               _buildAboutField('COUNTRY', 'country', _countryController),
               _buildAboutField('POSTAL CODE', 'postalCode', TextEditingController(text: '--')),
@@ -1435,7 +1507,51 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              // Show Create button ONLY on specific activity sub-tabs (Notes, Emails, Calls, Tasks, Meetings)
+              if (_selectedActivitySubTab != 0) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final tabName = _activitySubTabs[_selectedActivitySubTab];
+                      final modalType = tabName == 'Notes'
+                          ? 'Note'
+                          : (tabName == 'Emails'
+                              ? 'Email'
+                              : (tabName == 'Calls'
+                                  ? 'Call'
+                                  : (tabName == 'Tasks' ? 'Task' : 'Meeting')));
+                      _openActivityModal(modalType);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2B3A4A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      _selectedActivitySubTab == 1
+                          ? 'Create Note'
+                          : (_selectedActivitySubTab == 2
+                              ? 'Create Email'
+                              : (_selectedActivitySubTab == 3
+                                  ? 'Create Call'
+                                  : (_selectedActivitySubTab == 4
+                                      ? 'Create Task'
+                                      : 'Create Meeting'))),
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // 4. Activity Content Grouped by Time
               if (!_isActivitiesCollapsed) ...[
@@ -1491,8 +1607,19 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                     if (type.contains('NOTE')) actIcon = Icons.description_outlined;
                     if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
 
+                    final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
+                    final bool isExpanded = _expandedActivityIds.contains(actId);
+
                     return InkWell(
-                      onTap: () => _showActivityDetailsModal(act),
+                      onTap: () {
+                        setState(() {
+                          if (isExpanded) {
+                            _expandedActivityIds.remove(actId);
+                          } else {
+                            _expandedActivityIds.add(actId);
+                          }
+                        });
+                      },
                       borderRadius: BorderRadius.circular(10),
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -1500,7 +1627,10 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(
+                            color: isExpanded ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+                            width: isExpanded ? 1.5 : 1,
+                          ),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1525,10 +1655,14 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(
-                                        Icons.chevron_right_rounded,
+                                      Icon(
+                                        isExpanded
+                                            ? Icons.keyboard_arrow_down_rounded
+                                            : Icons.chevron_right_rounded,
                                         size: 18,
-                                        color: Color(0xFF64748B),
+                                        color: isExpanded
+                                            ? const Color(0xFF00A884)
+                                            : const Color(0xFF64748B),
                                       ),
                                       const SizedBox(width: 2),
                                       Expanded(
@@ -1581,14 +1715,43 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                       ],
                                     ],
                                   ),
-                                  if (act['notes'] != null && act['notes'].toString().isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      act['notes'].toString(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: const Color(0xFF475569),
+                                  if (isExpanded) ...[
+                                    const SizedBox(height: 10),
+                                    const Divider(color: Color(0xFFE2E8F0), height: 1),
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFFE2E8F0)),
                                       ),
+                                      child: Text(
+                                        (act['description'] ?? act['notes'] ?? title).toString(),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          color: const Color(0xFF334155),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          '0 associations ',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: const Color(0xFF00A884),
+                                          ),
+                                        ),
+                                        const Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          size: 16,
+                                          color: Color(0xFF00A884),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ],
@@ -1631,21 +1794,16 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
       }
     }
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
       builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            top: 20,
-            left: 20,
-            right: 20,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
+          elevation: 6,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1709,9 +1867,10 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
               const SizedBox(height: 16),
             ],
           ),
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
   }
 
   Widget _buildDetailRow(String label, String value) {

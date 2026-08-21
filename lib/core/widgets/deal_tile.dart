@@ -5,11 +5,17 @@ import '../../features/deals/data/models/deal_model.dart';
 class DealTile extends StatelessWidget {
   final DealModel deal;
   final VoidCallback? onTap;
+  final bool isSelected;
+  final bool showCheckbox;
+  final ValueChanged<bool?>? onSelectionChanged;
 
   const DealTile({
     super.key,
     required this.deal,
     this.onTap,
+    this.isSelected = false,
+    this.showCheckbox = true,
+    this.onSelectionChanged,
   });
 
   @override
@@ -20,30 +26,35 @@ class DealTile extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: const BoxDecoration(
-          border: Border(
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFF1F5F9) : Colors.white,
+          border: const Border(
             bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1),
           ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Dot Indicator + Deal Title + Trailing Chevron
+            // 1. Checkbox + Dot Indicator + Deal Title + Trailing Chevron
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: deal.dotColor,
-                      shape: BoxShape.circle,
+                if (showCheckbox) ...[
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: isSelected,
+                      onChanged: onSelectionChanged,
+                      activeColor: const Color(0xFF00A884),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
+                  const SizedBox(width: 10),
+                ],
                 Expanded(
                   child: Text(
                     deal.title,

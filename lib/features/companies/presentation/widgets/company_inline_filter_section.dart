@@ -166,14 +166,19 @@ class _CompanyInlineFilterSectionState extends State<CompanyInlineFilterSection>
 
           return InkWell(
             onTap: () async {
-              final result = await showModalBottomSheet<T>(
+              final result = await showDialog<T>(
                 context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (modalContext) => _InlineCompanyDropdownSearchModal<T>(
-                  title: title,
-                  items: items,
-                  selectedValue: state.value,
+                barrierColor: Colors.black12,
+                builder: (dialogContext) => Dialog(
+                  alignment: Alignment.topCenter,
+                  insetPadding: const EdgeInsets.only(top: 140, left: 16, right: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 6,
+                  child: _InlineCompanyDropdownSearchModal<T>(
+                    title: title,
+                    items: items,
+                    selectedValue: state.value,
+                  ),
                 ),
               );
 
@@ -254,60 +259,30 @@ class _InlineCompanyDropdownSearchModalState<T>
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.55,
-      decoration: const BoxDecoration(
+      width: 320,
+      constraints: const BoxConstraints(maxHeight: 420),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFFCBD5E1),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Header
+          // 1. Top Search Field (Matching User Image)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  widget.title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1E293B),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Color(0xFF64748B)),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-
-          // Search Field
-          Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
             child: TextField(
               controller: _searchController,
               onChanged: _filterItems,
+              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF1E293B)),
               decoration: InputDecoration(
-                hintText: 'Search...',
+                hintText: 'Search',
                 hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
                 prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF94A3B8)),
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 filled: true,
                 fillColor: const Color(0xFFF8FAFC),
+                isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
@@ -316,41 +291,64 @@ class _InlineCompanyDropdownSearchModalState<T>
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFF00A884)),
+                ),
               ),
             ),
           ),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
 
-          // Item List
-          Expanded(
-            child: ListView.separated(
+          // 2. Options List View (Matching User Image)
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
               itemCount: _filteredItems.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
               itemBuilder: (context, index) {
                 final item = _filteredItems[index];
                 final isSelected = item.value == widget.selectedValue;
 
-                return ListTile(
-                  title: Text(
-                    item.label,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? const Color(0xFF00A884) : const Color(0xFF1E293B),
+                return InkWell(
+                  onTap: () => Navigator.pop(context, item.value),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.label,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13.5,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                  color: isSelected ? const Color(0xFF00A884) : const Color(0xFF334155),
+                                ),
+                              ),
+                              if (item.subtext != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  item.subtext!,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 11.5,
+                                    color: const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(
+                            Icons.check_rounded,
+                            color: Color(0xFF00A884),
+                            size: 18,
+                          ),
+                      ],
                     ),
                   ),
-                  subtitle: item.subtext != null
-                      ? Text(
-                          item.subtext!,
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: const Color(0xFF64748B),
-                          ),
-                        )
-                      : null,
-                  trailing: isSelected
-                      ? const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18)
-                      : null,
-                  onTap: () => Navigator.pop(context, item.value),
                 );
               },
             ),

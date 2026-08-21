@@ -31,6 +31,7 @@ abstract class DealRemoteDataSource {
   });
   Future<DealModel> createDeal(Map<String, dynamic> dealData);
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData);
+  Future<bool> deleteDeal(String id);
   Future<DealModel> getDealById(String id);
 }
 
@@ -242,5 +243,11 @@ class DealRemoteDataSourceImpl implements DealRemoteDataSource {
       return DealModel.fromJson(data);
     }
     throw Exception('Invalid response format for getDealById');
+  }
+
+  @override
+  Future<bool> deleteDeal(String id) async {
+    final response = await _apiService.delete('${ApiConstants.deals}/$id');
+    return response.statusCode == 200 || response.statusCode == 204;
   }
 }

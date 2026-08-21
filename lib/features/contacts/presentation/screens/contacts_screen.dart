@@ -24,6 +24,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
   bool _isFilterExpanded = false;
+  final Set<String> _selectedContactIds = {};
 
   @override
   void initState() {
@@ -36,6 +37,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _loadContactsForSegment(int segmentIndex) {
+    setState(() {
+      _selectedContactIds.clear();
+    });
     final auth = context.read<AuthProvider>();
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
@@ -54,6 +58,55 @@ class _ContactsScreenState extends State<ContactsScreen> {
             departmentId: deptId,
             ignorePermissions: true,
           );
+    }
+  }
+
+  Future<void> _confirmDeleteSelectedContacts() async {
+    if (_selectedContactIds.isEmpty) return;
+    final count = _selectedContactIds.length;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Contact${count > 1 ? 's' : ''}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete $count selected contact${count > 1 ? 's' : ''}? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final provider = context.read<ContactProvider>();
+    final idsToDelete = List<String>.from(_selectedContactIds);
+
+    for (final id in idsToDelete) {
+      await provider.deleteContact(id);
+    }
+
+    if (mounted) {
+      setState(() {
+        _selectedContactIds.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$count contact${count > 1 ? 's' : ''} deleted successfully!', style: GoogleFonts.poppins()),
+          backgroundColor: const Color(0xFF00A884),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -110,10 +163,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     },
                     isFilterActive: contactProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
-                    onToggleFilterExpanded: () {
-                      setState(() {
-                        _isFilterExpanded = !_isFilterExpanded;
-                      });
+                    onRefreshTap: () {
+                      context.read<ContactProvider>().fetchContacts();
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,20 +203,71 @@ class _ContactsScreenState extends State<ContactsScreen> {
               ),
             ),
 
-            // 2. Summary Count Sub-header
+            // 2. Summary Count & Table Header Row matching reference screenshot
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: const Color(0xFFF8FAFC),
-              child: Text(
-                contactProvider.isLoading && contacts.isEmpty
-                    ? 'Loading contacts...'
-                    : '${_formatCount(totalCount > 0 ? totalCount : contacts.length)} contacts',
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF64748B),
-                ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: contacts.isNotEmpty && _selectedContactIds.length == contacts.length,
+                      onChanged: (val) {
+                        setState(() {
+                          if (val == true) {
+                            _selectedContactIds.addAll(contacts.map((c) => c.id));
+                          } else {
+                            _selectedContactIds.clear();
+                          }
+                        });
+                      },
+                      activeColor: const Color(0xFF00A884),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Text(
+                    'NAME',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF2563EB),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_selectedContactIds.isNotEmpty) ...[
+                    ElevatedButton.icon(
+                      onPressed: _confirmDeleteSelectedContacts,
+                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white),
+                      label: Text(
+                        'Delete (${_selectedContactIds.length})',
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ] else
+                    Text(
+                      contactProvider.isLoading && contacts.isEmpty
+                          ? 'Loading contacts...'
+                          : '${_formatCount(totalCount > 0 ? totalCount : contacts.length)} contacts',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                ],
               ),
             ),
 
@@ -285,8 +387,20 @@ class _ContactsScreenState extends State<ContactsScreen> {
                               }
 
                               final contact = contacts[index];
+                              final isSelected = _selectedContactIds.contains(contact.id);
                               return ContactTile(
                                 contact: contact,
+                                isSelected: isSelected,
+                                showCheckbox: true,
+                                onSelectionChanged: (val) {
+                                  setState(() {
+                                    if (val == true) {
+                                      _selectedContactIds.add(contact.id);
+                                    } else {
+                                      _selectedContactIds.remove(contact.id);
+                                    }
+                                  });
+                                },
                                 onTap: () async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(

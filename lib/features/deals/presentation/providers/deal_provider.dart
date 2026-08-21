@@ -336,4 +336,28 @@ class DealProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<bool> deleteDeal(String id) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final success = await _repository.deleteDeal(id);
+      if (success) {
+        _deals.removeWhere((d) => d.id == id);
+        _totalCount = (_totalCount - 1).clamp(0, 999999);
+        if (_selectedDeal?.id == id) {
+          _selectedDeal = null;
+        }
+      }
+      return success;
+    } catch (e) {
+      _error = e.toString();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 }

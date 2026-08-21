@@ -25,6 +25,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
   bool _isFilterExpanded = false;
+  final Set<String> _selectedCompanyIds = {};
 
   @override
   void initState() {
@@ -37,6 +38,9 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   }
 
   void _loadCompaniesForSegment(int segmentIndex) {
+    setState(() {
+      _selectedCompanyIds.clear();
+    });
     final auth = context.read<AuthProvider>();
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
@@ -55,6 +59,55 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
             departmentId: deptId,
             ignorePermissions: true,
           );
+    }
+  }
+
+  Future<void> _confirmDeleteSelectedCompanies() async {
+    if (_selectedCompanyIds.isEmpty) return;
+    final count = _selectedCompanyIds.length;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Compan${count > 1 ? 'ies' : 'y'}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete $count selected compan${count > 1 ? 'ies' : 'y'}? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final provider = context.read<CompanyProvider>();
+    final idsToDelete = List<String>.from(_selectedCompanyIds);
+
+    for (final id in idsToDelete) {
+      await provider.deleteCompany(id);
+    }
+
+    if (mounted) {
+      setState(() {
+        _selectedCompanyIds.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$count compan${count > 1 ? 'ies' : 'y'} deleted successfully!', style: GoogleFonts.poppins()),
+          backgroundColor: const Color(0xFF00A884),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -111,10 +164,8 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                     },
                     isFilterActive: companyProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
-                    onToggleFilterExpanded: () {
-                      setState(() {
-                        _isFilterExpanded = !_isFilterExpanded;
-                      });
+                    onRefreshTap: () {
+                      context.read<CompanyProvider>().fetchCompanies();
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -153,20 +204,71 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
               ),
             ),
 
-            // 2. Summary Count Sub-header
+            // 2. Summary Count & Table Header Row matching reference screenshot
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: const Color(0xFFF8FAFC),
-              child: Text(
-                companyProvider.isLoading && companies.isEmpty
-                    ? 'Loading companies...'
-                    : '${_formatCount(totalCount > 0 ? totalCount : companies.length)} companies',
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF64748B),
-                ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: companies.isNotEmpty && _selectedCompanyIds.length == companies.length,
+                      onChanged: (val) {
+                        setState(() {
+                          if (val == true) {
+                            _selectedCompanyIds.addAll(companies.map((c) => c.id));
+                          } else {
+                            _selectedCompanyIds.clear();
+                          }
+                        });
+                      },
+                      activeColor: const Color(0xFF00A884),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Text(
+                    'NAME',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF2563EB),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_selectedCompanyIds.isNotEmpty) ...[
+                    ElevatedButton.icon(
+                      onPressed: _confirmDeleteSelectedCompanies,
+                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white),
+                      label: Text(
+                        'Delete (${_selectedCompanyIds.length})',
+                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ] else
+                    Text(
+                      companyProvider.isLoading && companies.isEmpty
+                          ? 'Loading companies...'
+                          : '${_formatCount(totalCount > 0 ? totalCount : companies.length)} companies',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                ],
               ),
             ),
 
@@ -286,8 +388,20 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                               }
 
                               final company = companies[index];
+                              final isSelected = _selectedCompanyIds.contains(company.id);
                               return CompanyTile(
                                 company: company,
+                                isSelected: isSelected,
+                                showCheckbox: true,
+                                onSelectionChanged: (val) {
+                                  setState(() {
+                                    if (val == true) {
+                                      _selectedCompanyIds.add(company.id);
+                                    } else {
+                                      _selectedCompanyIds.remove(company.id);
+                                    }
+                                  });
+                                },
                                 onTap: () async {
                                   await Navigator.of(context).push(
                                     MaterialPageRoute(

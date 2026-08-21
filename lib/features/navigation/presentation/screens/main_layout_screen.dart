@@ -15,7 +15,6 @@ import '../../../activities/presentation/screens/meeting_scheduler_screen.dart';
 import '../../../activities/presentation/screens/meetings_screen.dart';
 import '../../../activities/presentation/screens/quarter_view_screen.dart';
 import '../../../activities/presentation/screens/reports_screen.dart';
-import '../../../activities/presentation/screens/sequences_screen.dart';
 import '../../../activities/presentation/screens/tasks_screen.dart';
 import '../../../activities/presentation/screens/templates_screen.dart';
 import '../../../companies/presentation/screens/companies_screen.dart';
@@ -24,7 +23,6 @@ import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../deals/presentation/screens/deals_screen.dart';
 import '../../../notifications/presentation/screens/notifications_screen.dart';
 import '../../../activities/presentation/screens/master_dropdowns_screen.dart';
-import '../../../authentication/presentation/screens/user_management_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../departments/data/models/department_model.dart';
 import '../../../departments/presentation/screens/departments_screen.dart';
@@ -53,15 +51,15 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     MeetingSchedulerScreen(),   // 8
     CallsScreen(),              // 9
     EmailsScreen(),             // 10
-    SequencesScreen(),          // 11
+    TasksScreen(),              // 11 (was Sequences)
     TasksScreen(),              // 12
     CalendarScreen(),           // 13
     QuarterViewScreen(),        // 14
     DocumentsScreen(),          // 15
     TemplatesScreen(),          // 16
-    UserManagementScreen(),     // 17 User Management
-    MasterDropdownsScreen(),    // 18 Master Dropdowns
-    DepartmentsScreen(),        // 19 Departments
+    DashboardScreen(),          // 17 (was User Management)
+    MasterDropdownsScreen(),    // 18
+    DepartmentsScreen(),        // 19
   ];
 
   final List<String> _tabTitles = const [
@@ -76,13 +74,13 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     'Meeting Scheduler',
     'Calls',
     'Emails',
-    'Sequences',
+    'Tasks',
     'Tasks',
     'Calendar',
     'Quarter View',
     'Documents',
     'Templates',
-    'User Management',
+    'Dashboard',
     'Master Dropdowns',
     'Departments Configuration',
   ];

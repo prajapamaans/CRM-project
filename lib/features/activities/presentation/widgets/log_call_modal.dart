@@ -531,15 +531,43 @@ class _LogCallModalState extends State<LogCallModal> {
                     ),
                   ],
                 ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(null),
-                  icon: const Icon(
-                    Icons.close_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _titleController.clear();
+                          _notesController.clear();
+                          _createFollowUpTask = false;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Call form data refreshed'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      tooltip: 'Refresh Form Data',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1220,6 +1248,25 @@ class _LogCallModalState extends State<LogCallModal> {
         }
       } else {
         await ApiService().post(ApiConstants.activities, data: callData);
+      }
+
+      if (_createFollowUpTask) {
+        try {
+          final taskPayload = {
+            'title': 'Follow-up: ${_titleController.text.trim()}',
+            'subject': 'Follow-up: ${_titleController.text.trim()}',
+            'type': 'task',
+            'status': 'PENDING',
+            'priority': 'Medium',
+            'description': _notesController.text.trim(),
+            if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
+            if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
+            if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
+          };
+          await ApiService().post('/tasks', data: taskPayload);
+        } catch (e) {
+          debugPrint('[Create Follow-up Task Error]: $e');
+        }
       }
     } catch (e) {
       debugPrint('[LOG/EDIT CALL ERROR]: $e');

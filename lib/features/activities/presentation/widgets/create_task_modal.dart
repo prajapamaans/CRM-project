@@ -425,15 +425,42 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                     ),
                   ],
                 ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(null),
-                  icon: const Icon(
-                    Icons.close_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _titleController.clear();
+                          _notesController.clear();
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Task form data refreshed'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      tooltip: 'Refresh Form Data',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1231,6 +1258,12 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       }
 
       debugPrint('[POST /api/activities SUCCESS]: ${res.statusCode} -> ${res.data}');
+
+      try {
+        await ApiService().post('/tasks', data: taskPayload);
+      } catch (e) {
+        debugPrint('[POST /api/tasks ERROR]: $e');
+      }
 
       if (mounted) {
         final Map<String, dynamic> dataMap = res.data is Map<String, dynamic>

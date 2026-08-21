@@ -44,6 +44,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   late TextEditingController _probabilityController;
   late TextEditingController _companyController;
   late TextEditingController _ownerController;
+  late TextEditingController _priorityController;
   late TextEditingController _searchActivitiesController;
   late TextEditingController _startDateController;
   late TextEditingController _endDateController;
@@ -111,7 +112,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   final List<String> _activitySubTabs = const [
-    'All activities',
+    'All',
     'Notes',
     'Emails',
     'Calls',
@@ -142,6 +143,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   ];
 
   List<Map<String, dynamic>> _userList = [];
+  final Set<String> _expandedActivityIds = {};
 
   @override
   void initState() {
@@ -158,10 +160,11 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       text: d?.date ?? '',
     );
     _probabilityController = TextEditingController(
-      text: d != null ? '${d.probability}%' : '',
+      text: d != null && d.probability > 0 ? '${d.probability}%' : '0%',
     );
     _companyController = TextEditingController(text: d?.company ?? '');
     _ownerController = TextEditingController(text: d?.owner ?? 'Admin User');
+    _priorityController = TextEditingController(text: 'Medium');
 
     _searchActivitiesController = TextEditingController();
     _startDateController = TextEditingController();
@@ -410,6 +413,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     _probabilityController.dispose();
     _companyController.dispose();
     _ownerController.dispose();
+    _priorityController.dispose();
     _searchActivitiesController.dispose();
     _startDateController.dispose();
     _endDateController.dispose();
@@ -437,6 +441,19 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     return '08/04/2026\n2:12 PM\nGMT...';
   }
 
+  void _updateStageAndProbability(String stage) {
+    final index = _dealStages.indexWhere((s) => s.trim().toLowerCase() == stage.trim().toLowerCase());
+    final stageIndex = index >= 0 ? index : 0;
+    final probabilities = [10, 20, 40, 60, 80, 90, 100, 0];
+    final prob = stageIndex < probabilities.length ? probabilities[stageIndex] : 20;
+
+    setState(() {
+      _dealStage = stage;
+      _probabilityController.text = '$prob%';
+    });
+    _saveDealChanges();
+  }
+
   Future<void> _saveDealChanges() async {
     final dealId = widget.deal?.id ?? context.read<DealProvider>().selectedDeal?.id;
     final amountNum = double.tryParse(_amountController.text.trim());
@@ -445,6 +462,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     final closeDateStr = _closeDateController.text.trim();
     final companyStr = _companyController.text.trim();
     final ownerStr = _ownerController.text.trim();
+    final probNum = int.tryParse(_probabilityController.text.replaceAll('%', '').trim()) ?? 20;
 
     final payload = <String, dynamic>{
       'title': titleStr.isNotEmpty ? titleStr : 'Deal',
@@ -455,6 +473,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       'stage': _dealStage,
       'stage_name': _dealStage,
       'status': _dealStage,
+      'probability': probNum,
       if (amountNum != null) ...{
         'amount': amountNum,
         'value': amountNum,
@@ -543,6 +562,26 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           ),
         ),
         actions: [
+          IconButton(
+            onPressed: () {
+              _fetchActivities();
+              _fetchUsers();
+              _fetchDealDetails();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Refreshing deal data...'),
+                  backgroundColor: Color(0xFF00A884),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            icon: const Icon(
+              Icons.refresh_rounded,
+              color: Color(0xFF00A884),
+              size: 24,
+            ),
+            tooltip: 'Refresh Deal Data',
+          ),
           IconButton(
             onPressed: () {},
             icon: Stack(
@@ -814,13 +853,46 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _displayName,
-                          style: GoogleFonts.poppins(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF1E293B),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _displayName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF1E293B),
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () {
+                                _fetchActivities();
+                                _fetchUsers();
+                                _fetchDealDetails();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Refreshing deal data...'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE6F4F1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF64D2B7), width: 1),
+                                ),
+                                child: const Icon(
+                                  Icons.refresh_rounded,
+                                  size: 18,
+                                  color: Color(0xFF00A884),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 2),
                         Row(
@@ -906,10 +978,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   ),
                   PopupMenuButton<String>(
                     onSelected: (val) {
-                      setState(() {
-                        _dealStage = val;
-                      });
-                      _saveDealChanges();
+                      _updateStageAndProbability(val);
                     },
                     offset: const Offset(0, 30),
                     shape: RoundedRectangleBorder(
@@ -959,10 +1028,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     child: InkWell(
                       onTap: () {
                         if (index < _dealStages.length) {
-                          setState(() {
-                            _dealStage = _dealStages[index];
-                          });
-                          _saveDealChanges();
+                          _updateStageAndProbability(_dealStages[index]);
                         }
                       },
                       child: Container(
@@ -1134,32 +1200,27 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                 ),
               ),
               const SizedBox(height: 16),
-              _buildAboutField('DEAL OWNER', 'owner', _ownerController),
-              _buildAboutField('LAST CONTACTED', 'lastContacted', TextEditingController(text: '--')),
-              _buildAboutField('DEAL TYPE', 'dealType', TextEditingController(text: '--')),
-              _buildAboutField('PRIORITY', 'priority', TextEditingController(text: 'Medium')),
-              _buildAboutField('RECORD SOURCE', 'recordSource', TextEditingController(text: '--')),
-              _buildAboutField('FORECAST PROBABILITY', 'probability', _probabilityController),
-              _buildAboutField('COMMENTS', 'comments', TextEditingController(text: '--')),
-              _buildAboutField('APIDEL REVENUE', 'apidelRevenue', TextEditingController(text: '--')),
-              _buildAboutField('CLIENT TYPE', 'clientType', TextEditingController(text: '--')),
-              _buildAboutField('DEAL NAME', 'title', _nameController),
-              _buildAboutField('AMOUNT', 'amount', _amountController),
+              _buildAboutField('Deal Owner', 'owner', _ownerController),
+              _buildAboutField('Amount', 'amount', _amountController),
+              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: '--')),
+              _buildAboutField('Deal Type', 'dealType', TextEditingController(text: '--')),
               _buildAboutField(
-                'DEAL STAGE',
-                'stage',
-                TextEditingController(text: _dealStage),
-                options: _dealStages,
+                'Priority',
+                'priority',
+                _priorityController,
+                options: const ['Low', 'Medium', 'High'],
                 onSelectedOption: (selected) {
                   setState(() {
-                    _dealStage = selected;
+                    _priorityController.text = selected;
                   });
                   _saveDealChanges();
                 },
               ),
-              _buildAboutField('CLOSE DATE', 'closeDate', _closeDateController),
-              _buildAboutField('COMPANY', 'company', _companyController),
-              _buildAboutField('PIPELINE', 'pipeline', _pipelineController),
+              _buildAboutField('Record Source', 'recordSource', TextEditingController(text: '--')),
+              _buildAboutField('Forecast Probability', 'probability', _probabilityController),
+              _buildAboutField('Comments', 'comments', TextEditingController(text: '--')),
+              _buildAboutField('Apidel Revenue', 'apidelRevenue', TextEditingController(text: '--')),
+              _buildAboutField('Client Type', 'clientType', TextEditingController(text: '--')),
             ],
           ),
         ),
@@ -1369,7 +1430,51 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              // Show Create button ONLY on specific activity sub-tabs (Notes, Emails, Calls, Tasks, Meetings)
+              if (_selectedActivitySubTab != 0) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final tabName = _activitySubTabs[_selectedActivitySubTab];
+                      final modalType = tabName == 'Notes'
+                          ? 'Note'
+                          : (tabName == 'Emails'
+                              ? 'Email'
+                              : (tabName == 'Calls'
+                                  ? 'Call'
+                                  : (tabName == 'Tasks' ? 'Task' : 'Meeting')));
+                      _openActivityModal(modalType);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2B3A4A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      _selectedActivitySubTab == 1
+                          ? 'Create Note'
+                          : (_selectedActivitySubTab == 2
+                              ? 'Create Email'
+                              : (_selectedActivitySubTab == 3
+                                  ? 'Create Call'
+                                  : (_selectedActivitySubTab == 4
+                                      ? 'Create Task'
+                                      : 'Create Meeting'))),
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // 4. Activity Content Grouped by Time
               if (!_isActivitiesCollapsed) ...[
@@ -1425,8 +1530,19 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     if (type.contains('NOTE')) actIcon = Icons.description_outlined;
                     if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
 
+                    final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
+                    final bool isExpanded = _expandedActivityIds.contains(actId);
+
                     return InkWell(
-                      onTap: () => _showActivityDetailsModal(act),
+                      onTap: () {
+                        setState(() {
+                          if (isExpanded) {
+                            _expandedActivityIds.remove(actId);
+                          } else {
+                            _expandedActivityIds.add(actId);
+                          }
+                        });
+                      },
                       borderRadius: BorderRadius.circular(10),
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -1434,7 +1550,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(
+                            color: isExpanded ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+                            width: isExpanded ? 1.5 : 1,
+                          ),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1459,10 +1578,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(
-                                        Icons.chevron_right_rounded,
+                                      Icon(
+                                        isExpanded
+                                            ? Icons.keyboard_arrow_down_rounded
+                                            : Icons.chevron_right_rounded,
                                         size: 18,
-                                        color: Color(0xFF64748B),
+                                        color: isExpanded
+                                            ? const Color(0xFF00A884)
+                                            : const Color(0xFF64748B),
                                       ),
                                       const SizedBox(width: 2),
                                       Expanded(
@@ -1515,14 +1638,43 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                       ],
                                     ],
                                   ),
-                                  if (act['notes'] != null && act['notes'].toString().isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      act['notes'].toString(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: const Color(0xFF475569),
+                                  if (isExpanded) ...[
+                                    const SizedBox(height: 10),
+                                    const Divider(color: Color(0xFFE2E8F0), height: 1),
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFFE2E8F0)),
                                       ),
+                                      child: Text(
+                                        (act['description'] ?? act['notes'] ?? title).toString(),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          color: const Color(0xFF334155),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          '0 associations ',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: const Color(0xFF00A884),
+                                          ),
+                                        ),
+                                        const Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          size: 16,
+                                          color: Color(0xFF00A884),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ],
@@ -1565,21 +1717,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       }
     }
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
       builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            top: 20,
-            left: 20,
-            right: 20,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
+          elevation: 6,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1643,9 +1790,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               const SizedBox(height: 16),
             ],
           ),
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
   }
 
   Widget _buildDetailRow(String label, String value) {

@@ -312,6 +312,30 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 ),
                 Row(
                   children: [
+                    IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _titleController.clear();
+                          _notesController.clear();
+                          _createFollowUpTask = false;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Meeting form data refreshed'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      tooltip: 'Refresh Form Data',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 14),
                     const Icon(Icons.drag_indicator_rounded, color: Colors.white70, size: 18),
                     const SizedBox(width: 14),
                     IconButton(
@@ -768,6 +792,25 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                         }
                       } catch (e) {
                         debugPrint('[SAVE ${ApiConstants.activities} ERROR]: $e');
+                      }
+
+                      if (_createFollowUpTask) {
+                        try {
+                          final taskPayload = {
+                            'title': 'Follow-up: ${_titleController.text.trim()}',
+                            'subject': 'Follow-up: ${_titleController.text.trim()}',
+                            'type': 'task',
+                            'status': 'PENDING',
+                            'priority': 'Medium',
+                            'description': _notesController.text.trim(),
+                            if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
+                            if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
+                            if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
+                          };
+                          await ApiService().post('/tasks', data: taskPayload);
+                        } catch (e) {
+                          debugPrint('[Create Follow-up Task Error]: $e');
+                        }
                       }
 
                       final meeting = MeetingModel(

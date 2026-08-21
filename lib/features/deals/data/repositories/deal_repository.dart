@@ -18,6 +18,7 @@ abstract class DealRepository {
   });
   Future<DealModel> createDeal(Map<String, dynamic> dealData);
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData);
+  Future<bool> deleteDeal(String id);
   Future<DealModel> getDealById(String id);
 }
 
@@ -101,6 +102,19 @@ class DealRepositoryImpl implements DealRepository {
       return await _remoteDataSource.getDealById(id);
     } catch (e) {
       debugPrint('[GET /api/deals/$id ERROR]: $e');
+      if (e is DioException) {
+        throw NetworkException.fromDioException(e);
+      }
+      throw NetworkException(message: e.toString());
+    }
+  }
+
+  @override
+  Future<bool> deleteDeal(String id) async {
+    try {
+      return await _remoteDataSource.deleteDeal(id);
+    } catch (e) {
+      debugPrint('[DELETE /api/deals/$id ERROR]: $e');
       if (e is DioException) {
         throw NetworkException.fromDioException(e);
       }

@@ -30,7 +30,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   bool _salesEngagementExpanded = true;
   bool _productivityExpanded = true;
   bool _contentExpanded = true;
-  bool _adminExpanded = true;
   bool _reportingExpanded = true;
 
   @override
@@ -121,7 +120,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'meeting_scheduler', index: 8, icon: Icons.access_time_outlined, label: 'Meeting Scheduler'),
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'calls', index: 9, icon: Icons.phone_outlined, label: 'Calls'),
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'emails', index: 10, icon: Icons.mail_outline_rounded, label: 'Emails'),
-                          _buildSubTile(context, navProvider: navProvider, itemKey: 'sequences', index: 11, icon: Icons.bolt_outlined, label: 'Sequences'),
                         ]),
 
                       const SizedBox(height: 4),
@@ -152,22 +150,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                         _buildSubItemsTreeContainer([
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'documents', index: 15, icon: Icons.folder_open_outlined, label: 'Documents'),
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'templates', index: 16, icon: Icons.grid_view_outlined, label: 'Templates'),
-                        ]),
-
-                      const SizedBox(height: 4),
-
-                      // Admin Group
-                      _buildGroupTile(
-                        icon: Icons.settings_outlined,
-                        label: 'Admin',
-                        isExpanded: _adminExpanded,
-                        onToggle: () => setState(() => _adminExpanded = !_adminExpanded),
-                      ),
-                      if (_adminExpanded)
-                        _buildSubItemsTreeContainer([
-                          _buildSubTile(context, navProvider: navProvider, itemKey: 'user_management', index: 17, icon: Icons.manage_accounts_outlined, label: 'User Management', showPinButton: false),
-                          _buildSubTile(context, navProvider: navProvider, itemKey: 'master_dropdowns', index: 18, icon: Icons.tune_rounded, label: 'Master Dropdowns', showPinButton: false),
-                          _buildSubTile(context, navProvider: navProvider, itemKey: 'departments', index: 19, icon: Icons.domain_outlined, label: 'Departments', showPinButton: false),
                         ]),
 
                       const SizedBox(height: 4),

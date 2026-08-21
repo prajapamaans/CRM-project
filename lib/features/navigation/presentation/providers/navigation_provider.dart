@@ -80,13 +80,6 @@ class NavigationProvider extends ChangeNotifier {
       screenIndex: 10,
     ),
     NavItem(
-      key: 'sequences',
-      title: 'Sequences',
-      icon: Icons.bolt_outlined,
-      selectedIcon: Icons.bolt_rounded,
-      screenIndex: 11,
-    ),
-    NavItem(
       key: 'tasks',
       title: 'Tasks',
       icon: Icons.check_box_outlined,
@@ -134,27 +127,6 @@ class NavigationProvider extends ChangeNotifier {
       icon: Icons.auto_awesome_outlined,
       selectedIcon: Icons.auto_awesome_rounded,
       screenIndex: 5,
-    ),
-    NavItem(
-      key: 'user_management',
-      title: 'User Management',
-      icon: Icons.manage_accounts_outlined,
-      selectedIcon: Icons.manage_accounts_rounded,
-      screenIndex: 17,
-    ),
-    NavItem(
-      key: 'master_dropdowns',
-      title: 'Master Dropdowns',
-      icon: Icons.tune_rounded,
-      selectedIcon: Icons.tune_rounded,
-      screenIndex: 18,
-    ),
-    NavItem(
-      key: 'departments',
-      title: 'Departments',
-      icon: Icons.domain_outlined,
-      selectedIcon: Icons.domain_rounded,
-      screenIndex: 19,
     ),
   ];
 

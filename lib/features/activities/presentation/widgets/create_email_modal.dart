@@ -321,6 +321,25 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
       };
 
       await api.post(ApiConstants.activities, data: payload);
+
+      if (_createFollowUpTask) {
+        try {
+          final taskPayload = {
+            'title': 'Follow-up: ${subject.isNotEmpty ? subject : "Email"}',
+            'subject': 'Follow-up: ${subject.isNotEmpty ? subject : "Email"}',
+            'type': 'task',
+            'status': 'PENDING',
+            'priority': 'Medium',
+            'description': body,
+            if (widget.contactId != null) 'contactId': widget.contactId,
+            if (widget.companyId != null) 'companyId': widget.companyId,
+            if (widget.dealId != null) 'dealId': widget.dealId,
+          };
+          await api.post('/tasks', data: taskPayload);
+        } catch (e) {
+          debugPrint('[Create Follow-up Task Error]: $e');
+        }
+      }
     } catch (_) {}
 
     if (mounted) {
@@ -372,11 +391,35 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                       ),
                     ),
                     const Spacer(),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () {
+                            setState(() {
+                              _subjectController.clear();
+                              _bodyController.clear();
+                              _createFollowUpTask = false;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Email form data refreshed'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
+                          tooltip: 'Refresh Form Data',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
                     ),
                   ],
                 ),

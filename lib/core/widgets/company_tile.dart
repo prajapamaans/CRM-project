@@ -4,11 +4,17 @@ import '../../features/companies/data/models/company_model.dart';
 class CompanyTile extends StatelessWidget {
   final CompanyModel company;
   final VoidCallback? onTap;
+  final bool isSelected;
+  final bool showCheckbox;
+  final ValueChanged<bool?>? onSelectionChanged;
 
   const CompanyTile({
     super.key,
     required this.company,
     this.onTap,
+    this.isSelected = false,
+    this.showCheckbox = true,
+    this.onSelectionChanged,
   });
 
   @override
@@ -17,38 +23,31 @@ class CompanyTile extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: const BoxDecoration(
-          border: Border(
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFF1F5F9) : Colors.white,
+          border: const Border(
             bottom: BorderSide(color: Color(0xFFF3F4F6), width: 1),
           ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 1. Company Logo/Initials Container Box
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: company.logoBgColor,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: const Color(0xFFE5E7EB),
-                  width: 1,
-                ),
-              ),
-              child: Center(
-                child: Text(
-                  company.initials,
-                  style: TextStyle(
-                    color: company.logoTextColor,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
+            if (showCheckbox) ...[
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Checkbox(
+                  value: isSelected,
+                  onChanged: onSelectionChanged,
+                  activeColor: const Color(0xFF00A884),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
                   ),
+                  side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
                 ),
               ),
-            ),
-            const SizedBox(width: 14),
+              const SizedBox(width: 12),
+            ],
 
             // 2. Company Details Column
             Expanded(

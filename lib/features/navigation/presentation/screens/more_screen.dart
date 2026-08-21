@@ -145,13 +145,6 @@ class _MoreSheetContent extends StatelessWidget {
                       title: 'Emails',
                       screenIndex: 10,
                     ),
-                    _buildMenuItem(
-                      context,
-                      navProvider: navProvider,
-                      icon: Icons.bolt_outlined,
-                      title: 'Sequences',
-                      screenIndex: 11,
-                    ),
 
                     const SizedBox(height: 20),
 
@@ -196,32 +189,6 @@ class _MoreSheetContent extends StatelessWidget {
                       icon: Icons.grid_view_outlined,
                       title: 'Templates',
                       screenIndex: 16,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // SECTION 4: ADMIN
-                    _buildSectionTitle('ADMIN'),
-                    _buildMenuItem(
-                      context,
-                      navProvider: navProvider,
-                      icon: Icons.manage_accounts_outlined,
-                      title: 'User Management',
-                      screenIndex: 17,
-                    ),
-                    _buildMenuItem(
-                      context,
-                      navProvider: navProvider,
-                      icon: Icons.tune_rounded,
-                      title: 'Master Dropdowns',
-                      screenIndex: 18,
-                    ),
-                    _buildMenuItem(
-                      context,
-                      navProvider: navProvider,
-                      icon: Icons.domain_outlined,
-                      title: 'Departments',
-                      screenIndex: 19,
                     ),
 
                     const SizedBox(height: 20),

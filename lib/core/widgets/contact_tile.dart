@@ -4,11 +4,17 @@ import '../../features/contacts/data/models/contact_model.dart';
 class ContactTile extends StatelessWidget {
   final ContactModel contact;
   final VoidCallback? onTap;
+  final bool isSelected;
+  final bool showCheckbox;
+  final ValueChanged<bool?>? onSelectionChanged;
 
   const ContactTile({
     super.key,
     required this.contact,
     this.onTap,
+    this.isSelected = false,
+    this.showCheckbox = true,
+    this.onSelectionChanged,
   });
 
   @override
@@ -17,28 +23,31 @@ class ContactTile extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: const BoxDecoration(
-          border: Border(
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFF1F5F9) : Colors.white,
+          border: const Border(
             bottom: BorderSide(color: Color(0xFFF3F4F6), width: 1),
           ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 1. Contact Avatar Initial Circle
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: contact.avatarBgColor,
-              child: Text(
-                contact.initials,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
+            if (showCheckbox) ...[
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Checkbox(
+                  value: isSelected,
+                  onChanged: onSelectionChanged,
+                  activeColor: const Color(0xFF00A884),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  side: const BorderSide(color: Color(0xFF94A3B8), width: 1.5),
                 ),
               ),
-            ),
-            const SizedBox(width: 14),
+              const SizedBox(width: 12),
+            ],
 
             // 2. Contact Details Column
             Expanded(

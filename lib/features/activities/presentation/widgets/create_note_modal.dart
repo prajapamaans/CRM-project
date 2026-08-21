@@ -162,6 +162,25 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
       };
 
       await api.post(ApiConstants.activities, data: payload);
+
+      if (_createFollowUpTask) {
+        try {
+          final taskPayload = {
+            'title': 'Follow-up: ${title.isNotEmpty ? title : "Note"}',
+            'subject': 'Follow-up: ${title.isNotEmpty ? title : "Note"}',
+            'type': 'task',
+            'status': 'PENDING',
+            'priority': 'Medium',
+            'description': body,
+            if (widget.contactId != null) 'contactId': widget.contactId,
+            if (widget.companyId != null) 'companyId': widget.companyId,
+            if (widget.dealId != null) 'dealId': widget.dealId,
+          };
+          await api.post('/tasks', data: taskPayload);
+        } catch (e) {
+          debugPrint('[Create Follow-up Task Error]: $e');
+        }
+      }
     } catch (_) {}
 
     if (mounted) {
@@ -207,11 +226,34 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
                     ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _titleController.clear();
+                            _contentController.clear();
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Note form data refreshed'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
+                        tooltip: 'Refresh Form Data',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
                   ),
                 ],
               ),

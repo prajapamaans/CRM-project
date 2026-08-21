@@ -717,34 +717,8 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                           children: [
                             const Icon(Icons.swap_vert_rounded, size: 18, color: Color(0xFF64748B)),
                             const SizedBox(width: 10),
-                            Text(
+                             Text(
                               'Sort',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'import',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.file_upload_outlined, size: 18, color: Color(0xFF64748B)),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Import',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'export',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.file_download_outlined, size: 18, color: Color(0xFF64748B)),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Export',
                               style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155)),
                             ),
                           ],
