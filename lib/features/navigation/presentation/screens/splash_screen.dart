@@ -12,7 +12,6 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/providers/master_data_provider.dart';
@@ -72,12 +71,14 @@ class _SplashScreenState extends State<SplashScreen>
   /// Runs minimum 5-second splash duration concurrently with CRM data pre-fetching.
   Future<void> _startAppInitialization() async {
     final minSplashTimer = Future.delayed(const Duration(seconds: 5));
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     bool isLoggedIn = false;
 
     final initTask = Future<void>(() async {
       try {
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        isLoggedIn = authProvider.isAuthenticated;
+        isLoggedIn = await authProvider.tryRestoreSession();
+
+        if (!mounted) return;
 
         if (isLoggedIn) {
           final currentUser = authProvider.currentUser;

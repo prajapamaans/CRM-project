@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../network/api_constants.dart';
 import '../network/api_service.dart';
 import '../models/master_dropdown_model.dart';
+import '../models/email_template_models.dart';
 
 abstract class MasterDataRemoteDataSource {
   Future<List<LifecycleStageModel>> getLifecycleStages({required String entityType});
@@ -23,6 +24,9 @@ abstract class MasterDataRemoteDataSource {
     String? companyId,
     String? dealId,
     String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -32,7 +36,9 @@ abstract class MasterDataRemoteDataSource {
     int? limit,
   });
   Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true});
+  Future<EmailTemplatesResponse> getEmailTemplatesFull();
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
+  Future<Map<String, dynamic>> createEmailTemplateFolder(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
   Future<Map<String, dynamic>> getSequences({int page = 1, int limit = 20});
@@ -249,6 +255,9 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? companyId,
     String? dealId,
     String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
   }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
@@ -256,6 +265,9 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     if (limit != null) queryParameters['limit'] = limit.toString();
     if (page != null) queryParameters['page'] = page.toString();
     if (type != null && type.isNotEmpty) queryParameters['type'] = type;
+    if (sort != null && sort.isNotEmpty) queryParameters['sort'] = sort;
+    if (order != null && order.isNotEmpty) queryParameters['order'] = order;
+    if (search != null && search.isNotEmpty) queryParameters['search'] = search;
     if (contactId != null && contactId.isNotEmpty) {
       queryParameters['contactId'] = contactId;
       queryParameters['contact_id'] = contactId;
@@ -372,6 +384,23 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   }
 
   @override
+  Future<EmailTemplatesResponse> getEmailTemplatesFull() async {
+    final response = await _apiService.get(ApiConstants.emailTemplatesList);
+    debugPrint('[GET ${ApiConstants.emailTemplatesList} SUCCESS]: ${response.data}');
+
+    final dynamic rawData = response.data;
+    if (rawData is Map<String, dynamic>) {
+      return EmailTemplatesResponse.fromJson(rawData);
+    }
+    return const EmailTemplatesResponse(
+      success: false,
+      folders: [],
+      templates: [],
+      path: [],
+    );
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true}) async {
     final response = await _apiService.get(
       ApiConstants.emailTemplatesList,
@@ -402,36 +431,98 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
 
   @override
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data) async {
-    final response = await _apiService.post(
-      ApiConstants.emailTemplatesList,
-      data: data,
-    );
-    debugPrint('[POST ${ApiConstants.emailTemplatesList} SUCCESS]: ${response.data}');
-    final dynamic rawData = response.data;
-    if (rawData is Map<String, dynamic>) {
-      if (rawData['data'] is Map<String, dynamic>) {
-        return rawData['data'] as Map<String, dynamic>;
+    try {
+      final response = await _apiService.post(
+        ApiConstants.emailTemplates,
+        data: data,
+      );
+      debugPrint('[POST ${ApiConstants.emailTemplates} SUCCESS]: ${response.data}');
+      final dynamic rawData = response.data;
+      if (rawData is Map<String, dynamic>) {
+        if (rawData['data'] is Map<String, dynamic>) {
+          return rawData['data'] as Map<String, dynamic>;
+        }
+        return rawData;
       }
-      return rawData;
+      return {};
+    } catch (e) {
+      debugPrint('[POST ${ApiConstants.emailTemplates} fallback to list]: $e');
+      final response = await _apiService.post(
+        ApiConstants.emailTemplatesList,
+        data: data,
+      );
+      final dynamic rawData = response.data;
+      if (rawData is Map<String, dynamic>) {
+        if (rawData['data'] is Map<String, dynamic>) {
+          return rawData['data'] as Map<String, dynamic>;
+        }
+        return rawData;
+      }
+      return {};
     }
-    return {};
+  }
+
+  @override
+  Future<Map<String, dynamic>> createEmailTemplateFolder(Map<String, dynamic> data) async {
+    try {
+      final response = await _apiService.post(
+        '${ApiConstants.emailTemplates}/folders',
+        data: data,
+      );
+      debugPrint('[POST ${ApiConstants.emailTemplates}/folders SUCCESS]: ${response.data}');
+      final dynamic rawData = response.data;
+      if (rawData is Map<String, dynamic>) {
+        return rawData;
+      }
+      return {};
+    } catch (e) {
+      debugPrint('[POST ${ApiConstants.emailTemplates}/folders error, fallback]: $e');
+      try {
+        final response = await _apiService.post(
+          '${ApiConstants.emailTemplatesList}/folders',
+          data: data,
+        );
+        final dynamic rawData = response.data;
+        if (rawData is Map<String, dynamic>) {
+          return rawData;
+        }
+      } catch (_) {}
+      return {};
+    }
   }
 
   @override
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data) async {
-    final response = await _apiService.put(
-      '${ApiConstants.emailTemplatesList}/$id',
-      data: data,
-    );
-    debugPrint('[PUT ${ApiConstants.emailTemplatesList}/$id SUCCESS]: ${response.data}');
-    final dynamic rawData = response.data;
-    if (rawData is Map<String, dynamic>) {
-      if (rawData['data'] is Map<String, dynamic>) {
-        return rawData['data'] as Map<String, dynamic>;
+    try {
+      final response = await _apiService.put(
+        '${ApiConstants.emailTemplates}/$id',
+        data: data,
+      );
+      debugPrint('[PUT ${ApiConstants.emailTemplates}/$id SUCCESS]: ${response.data}');
+      final dynamic rawData = response.data;
+      if (rawData is Map<String, dynamic>) {
+        if (rawData['data'] is Map<String, dynamic>) {
+          return rawData['data'] as Map<String, dynamic>;
+        }
+        return rawData;
       }
-      return rawData;
+      return {};
+    } catch (e) {
+      debugPrint('[PUT ${ApiConstants.emailTemplates}/$id fallback]: $e');
+      final response = await _apiService.put(
+        '${ApiConstants.emailTemplatesList}/$id',
+        data: data,
+      );
+      debugPrint('[PUT ${ApiConstants.emailTemplatesList}/$id SUCCESS]: ${response.data}');
+      final dynamic rawData = response.data;
+      if (rawData is Map<String, dynamic>) {
+        if (rawData['data'] is Map<String, dynamic>) {
+          return rawData['data'] as Map<String, dynamic>;
+        }
+        return rawData;
+      }
+      return {};
     }
-    return {};
   }
 
   @override

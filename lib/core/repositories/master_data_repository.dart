@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../datasources/master_data_remote_datasource.dart';
+import '../models/email_template_models.dart';
 import '../models/master_dropdown_model.dart';
 
 abstract class MasterDataRepository {
@@ -22,6 +23,9 @@ abstract class MasterDataRepository {
     String? companyId,
     String? dealId,
     String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -31,6 +35,7 @@ abstract class MasterDataRepository {
     int? limit,
   });
   Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true});
+  Future<EmailTemplatesResponse> getEmailTemplatesFull();
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
@@ -128,6 +133,9 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     String? companyId,
     String? dealId,
     String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
   }) async {
     try {
       return await _remoteDataSource.getActivities(
@@ -140,6 +148,9 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
         companyId: companyId,
         dealId: dealId,
         departmentId: departmentId,
+        sort: sort,
+        order: order,
+        search: search,
       );
     } catch (e) {
       debugPrint('[GET /api/activities ERROR]: $e');
@@ -166,6 +177,21 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     } catch (e) {
       debugPrint('[GET /api/activities/unified-timeline ERROR]: $e');
       return [];
+    }
+  }
+
+  @override
+  Future<EmailTemplatesResponse> getEmailTemplatesFull() async {
+    try {
+      return await _remoteDataSource.getEmailTemplatesFull();
+    } catch (e) {
+      debugPrint('[GET /api/email-templates/list ERROR]: $e');
+      return const EmailTemplatesResponse(
+        success: false,
+        folders: [],
+        templates: [],
+        path: [],
+      );
     }
   }
 

@@ -1127,6 +1127,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   firstName: '',
                   lastName: '',
                 ),
+                initialTabIndex: 1,
               ),
             ),
           );
@@ -1141,6 +1142,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   id: meeting.companyId!,
                   name: '',
                 ),
+                initialTabIndex: 1,
               ),
             ),
           );
@@ -1158,6 +1160,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   stage: '',
                   probability: 0,
                 ),
+                initialTabIndex: 1,
               ),
             ),
           );

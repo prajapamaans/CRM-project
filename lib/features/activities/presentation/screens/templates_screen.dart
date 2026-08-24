@@ -1,9 +1,11 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
 import '../../../../core/datasources/master_data_remote_datasource.dart';
-import '../../../../core/storage/secure_storage_service.dart';
+import '../../../../core/models/email_template_models.dart';
+import '../../../../core/repositories/master_data_repository.dart';
+import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../widgets/create_template_modal.dart';
 
 class TemplatesScreen extends StatefulWidget {
@@ -14,145 +16,118 @@ class TemplatesScreen extends StatefulWidget {
 }
 
 class _TemplatesScreenState extends State<TemplatesScreen> {
-  final List<EmailTemplateModel> _templates = [
-    EmailTemplateModel(
-      id: '1',
-      name: 'Test',
-      subject: 'Test Subject',
-      body: 'Hi, this is a test template content.',
-      owner: 'Admin User',
-      folder: 'Root',
-      createdAt: '1 second ago',
-    ),
-  ];
+  final MasterDataRepository _repository = MasterDataRepositoryImpl();
 
-  final List<String> _folders = ['Root', 'Sales', 'Follow-ups'];
-  String _selectedFolder = 'Root';
+  List<EmailTemplateFolder> _allFolders = [];
+  List<EmailTemplate> _allTemplates = [];
+
+  String? _selectedFolderId; // null = Root level
+  String _selectedFolderName = 'Root';
+
   String _selectedOwner = 'Any';
   String _searchQuery = '';
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _loadTemplatesFromApi();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AuthProvider>().fetchTeamMembers();
+      }
+    });
   }
 
   Future<void> _loadTemplatesFromApi() async {
     try {
-      setState(() => _isLoading = true);
-      
-      final ds = MasterDataRemoteDataSourceImpl();
-      final apiList = await ds.getEmailTemplates(flat: true);
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+
+      final response = await _repository.getEmailTemplatesFull();
+
+      debugPrint(
+        '[GET /api/email-templates/list SUCCESS]: success=${response.success}, folders=${response.folders.length}, templates=${response.templates.length}',
+      );
 
       if (mounted) {
-        final loadedTemplates = <EmailTemplateModel>[];
-
-        for (var item in apiList) {
-          final name = (item['name'] ?? item['title'] ?? 'Template').toString();
-          loadedTemplates.add(
-            EmailTemplateModel(
-              id: item['id']?.toString() ?? item['_id']?.toString(),
-              name: name,
-              subject: (item['subject'] ?? '').toString(),
-              body: (item['body'] ?? item['content'] ?? '').toString(),
-              owner: (item['ownerName'] ?? item['owner'] ?? item['createdBy'] ?? 'Admin User').toString(),
-              folder: (item['folder'] ?? 'Root').toString(),
-              privacy: item['sharedSetting'] == 'shared' || item['privacy'] == 'Shared' ? 'Shared' : 'Private',
-              createdAt: item['createdAt'] != null ? 'Recently' : 'Just now',
-            ),
-          );
-        }
-
-        // Also check locally cached custom templates if API returned empty
-        if (loadedTemplates.isEmpty) {
-          final storage = SecureStorageService();
-          final savedJson = await storage.getString('custom_email_templates');
-          if (savedJson != null && savedJson.isNotEmpty) {
-            try {
-              final List<dynamic> decoded = jsonDecode(savedJson);
-              for (var item in decoded) {
-                loadedTemplates.add(
-                  EmailTemplateModel(
-                    id: item['id']?.toString(),
-                    name: (item['name'] ?? '').toString(),
-                    subject: (item['subject'] ?? '').toString(),
-                    body: (item['body'] ?? '').toString(),
-                    owner: (item['owner'] ?? 'Admin User').toString(),
-                    folder: (item['folder'] ?? 'Root').toString(),
-                    privacy: (item['privacy'] ?? 'Private').toString(),
-                    createdAt: (item['createdAt'] ?? 'Just now').toString(),
-                  ),
-                );
-              }
-            } catch (e) {
-              debugPrint('[TemplatesScreen local parse error]: $e');
-            }
-          }
-        }
-
         setState(() {
-          _templates.clear();
-          if (loadedTemplates.isNotEmpty) {
-            _templates.addAll(loadedTemplates);
-          }
+          _allFolders = response.folders;
+          _allTemplates = response.templates;
+          _isLoading = false;
         });
       }
     } catch (e) {
       debugPrint('[TemplatesScreen API load error]: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load message templates from server.';
+        });
+      }
     }
   }
 
-  Future<void> _saveCustomTemplatesToStorage(EmailTemplateModel newTemplate) async {
-    try {
-      final storage = SecureStorageService();
-      final savedJson = await storage.getString('custom_email_templates');
-      List<dynamic> list = [];
-      if (savedJson != null && savedJson.isNotEmpty) {
-        try {
-          list = jsonDecode(savedJson);
-        } catch (_) {}
+  void _navigateToFolder(String? folderId, String folderName) {
+    setState(() {
+      _selectedFolderId = folderId;
+      _selectedFolderName = folderName;
+    });
+  }
+
+  List<EmailTemplateFolder> _getBreadcrumbPath() {
+    final List<EmailTemplateFolder> path = [];
+    String? currentId = _selectedFolderId;
+
+    while (currentId != null && currentId.isNotEmpty && currentId != 'null') {
+      final matches = _allFolders.where((f) => f.id == currentId).toList();
+      if (matches.isNotEmpty) {
+        final folder = matches.first;
+        path.insert(0, folder);
+        currentId = folder.parentId;
+      } else {
+        break;
       }
-      list.insert(0, {
-        'id': newTemplate.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        'name': newTemplate.name,
-        'subject': newTemplate.subject,
-        'body': newTemplate.body,
-        'owner': newTemplate.owner,
-        'folder': newTemplate.folder,
-        'privacy': newTemplate.privacy,
-        'createdAt': newTemplate.createdAt,
-      });
-      await storage.saveString('custom_email_templates', jsonEncode(list));
-    } catch (e) {
-      debugPrint('[TemplatesScreen storage save error]: $e');
     }
+    return path;
   }
 
   void _createNewTemplate() async {
-    final newTemplate = await CreateTemplateModal.show(context);
-    if (newTemplate != null) {
-      // Optimistic UI update
+    final newTemplateModel = await CreateTemplateModal.show(
+      context,
+      initialFolderId: _selectedFolderId,
+    );
+    if (newTemplateModel != null) {
+      final targetFolderId = newTemplateModel.folderId ?? _selectedFolderId;
+      final createdTemplate = EmailTemplate(
+        id: newTemplateModel.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        name: newTemplateModel.name,
+        subject: newTemplateModel.subject,
+        body: newTemplateModel.body,
+        sharedSetting:
+            newTemplateModel.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
+        folderId: targetFolderId,
+        ownerName: newTemplateModel.owner,
+        createdAt: 'Just now',
+      );
+
       setState(() {
-        _templates.insert(0, newTemplate);
+        _allTemplates.insert(0, createdTemplate);
       });
 
-      // Save to local storage as well so local refreshes retain it
-      await _saveCustomTemplatesToStorage(newTemplate);
-
-      // Call API to persist created template on backend
       try {
         final ds = MasterDataRemoteDataSourceImpl();
         await ds.createEmailTemplate({
-          'name': newTemplate.name,
-          'subject': newTemplate.subject,
-          'body': newTemplate.body.isNotEmpty ? newTemplate.body : '<p></p>',
-          'sharedSetting': newTemplate.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
-          'folderId': null,
+          'name': newTemplateModel.name,
+          'subject': newTemplateModel.subject,
+          'body': newTemplateModel.body.isNotEmpty ? newTemplateModel.body : '<p></p>',
+          'sharedSetting':
+              newTemplateModel.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
+          'folderId': targetFolderId,
         });
-        // Reload fresh list from server after creating
         await _loadTemplatesFromApi();
       } catch (e) {
         debugPrint('[TemplatesScreen create template API error]: $e');
@@ -161,42 +136,62 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Template "${newTemplate.name}" created successfully!'),
+          content: Text('Template "${newTemplateModel.name}" created successfully!'),
           backgroundColor: const Color(0xFF00A884),
         ),
       );
     }
   }
 
-  void _editTemplate(EmailTemplateModel template) async {
-    final updatedTemplate = await CreateTemplateModal.show(
-      context,
-      templateToEdit: template,
+  void _editTemplate(EmailTemplate template) async {
+    final templateModel = EmailTemplateModel(
+      id: template.id,
+      name: template.name,
+      subject: template.subject,
+      body: template.body,
+      owner: template.ownerName,
+      folder: _selectedFolderName,
+      folderId: template.folderId,
+      privacy: template.sharedSetting.toLowerCase() == 'shared' ? 'Shared' : 'Private',
+      createdAt: template.createdAt ?? 'Just now',
     );
-    if (updatedTemplate != null) {
-      setState(() {
-        final index = _templates.indexWhere((t) => t.id == template.id);
-        if (index != -1) {
-          _templates[index] = updatedTemplate;
-        } else {
-          _templates.insert(0, updatedTemplate);
-        }
-      });
 
-      if (template.id != null && template.id != '1') {
+    final updatedTemplateModel = await CreateTemplateModal.show(
+      context,
+      templateToEdit: templateModel,
+    );
+
+    if (updatedTemplateModel != null) {
+      final targetId = updatedTemplateModel.id ?? template.id;
+      if (targetId != null && targetId.isNotEmpty) {
         try {
           final ds = MasterDataRemoteDataSourceImpl();
-          await ds.updateEmailTemplate(template.id!, {
-            'name': updatedTemplate.name,
-            'subject': updatedTemplate.subject,
-            'body': updatedTemplate.body,
-            'sharedSetting': updatedTemplate.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
-            'folderId': null,
+          await ds.updateEmailTemplate(targetId, {
+            'name': updatedTemplateModel.name,
+            'subject': updatedTemplateModel.subject,
+            'body': updatedTemplateModel.body.isNotEmpty
+                ? updatedTemplateModel.body
+                : '<p></p>',
+            'sharedSetting':
+                updatedTemplateModel.privacy.toLowerCase() == 'shared'
+                    ? 'shared'
+                    : 'private',
+            'folderId': template.folderId,
           });
           await _loadTemplatesFromApi();
         } catch (e) {
           debugPrint('[TemplatesScreen update template API error]: $e');
         }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Template "${updatedTemplateModel.name}" updated successfully!'),
+            backgroundColor: const Color(0xFF00A884),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -230,291 +225,551 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
               backgroundColor: const Color(0xFFFF7A59),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
-            onPressed: () {
+            onPressed: () async {
               final name = folderController.text.trim();
               if (name.isNotEmpty) {
-                setState(() {
-                  if (!_folders.contains(name)) _folders.add(name);
-                  _selectedFolder = name;
-                });
                 Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Folder "$name" created.')),
-                );
+                try {
+                  final ds = MasterDataRemoteDataSourceImpl();
+                  await ds.createEmailTemplateFolder({
+                    'name': name,
+                    'parentId': _selectedFolderId,
+                  });
+                  await _loadTemplatesFromApi();
+                } catch (e) {
+                  debugPrint('[Create folder error]: $e');
+                }
               }
             },
-            child: Text('Create', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Text('Create',
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
   }
 
-  void _exportTemplates() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Exported ${_templates.length} template(s) successfully!'),
-        backgroundColor: const Color(0xFF009688),
-      ),
-    );
+  String _cleanHtml(String html) {
+    final clean = html
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .trim();
+    return clean.isNotEmpty ? clean : html;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Filter templates based on folder, owner, and search query
-    final filteredTemplates = _templates.where((t) {
-      final matchesFolder = t.folder == _selectedFolder || _selectedFolder == 'Root';
-      final matchesOwner = _selectedOwner == 'Any' || t.owner == _selectedOwner;
+    // 1. Current level child folders (parentId == selectedFolderId)
+    final currentFolders = _allFolders.where((f) {
+      if (_selectedFolderId == null) {
+        return f.parentId == null || f.parentId == 'null' || f.parentId == '';
+      } else {
+        return f.parentId == _selectedFolderId;
+      }
+    }).toList();
+
+    // 2. Current level templates (folderId == selectedFolderId or folderId == selectedFolderName)
+    final currentTemplates = _allTemplates.where((t) {
+      final matchesFolder = (_selectedFolderId == null)
+          ? (t.folderId == null ||
+              t.folderId == 'null' ||
+              t.folderId == '' ||
+              t.folderId == 'Root')
+          : (t.folderId == _selectedFolderId ||
+              t.folderId == _selectedFolderName);
+      final matchesOwner =
+          _selectedOwner == 'Any' || t.ownerName == _selectedOwner;
       final q = _searchQuery.toLowerCase();
-      final matchesSearch = t.name.toLowerCase().contains(q) || t.subject.toLowerCase().contains(q);
+      final matchesSearch = _searchQuery.isEmpty ||
+          t.name.toLowerCase().contains(q) ||
+          t.subject.toLowerCase().contains(q);
       return matchesFolder && matchesOwner && matchesSearch;
     }).toList();
 
-    final ownersList = ['Any', ...{..._templates.map((t) => t.owner)}];
+    final authProvider = context.watch<AuthProvider>();
+    final teamMembers = authProvider.teamMembers;
+
+    final fetchedUsers = <String>{};
+    if (authProvider.currentUser != null) {
+      final name = authProvider.currentUser!.fullName.isNotEmpty
+          ? authProvider.currentUser!.fullName
+          : 'Admin User';
+      fetchedUsers.add(name);
+    }
+    for (var member in teamMembers) {
+      if (member.fullName.isNotEmpty) {
+        fetchedUsers.add(member.fullName);
+      }
+    }
+    for (var template in _allTemplates) {
+      if (template.ownerName.isNotEmpty) {
+        fetchedUsers.add(template.ownerName);
+      }
+    }
+
+    final ownersList = ['Any', ...fetchedUsers];
+    final breadcrumbPath = _getBreadcrumbPath();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // 1. Title Header & New Button (Image 1)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Message templates',
-                      style: GoogleFonts.poppins(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF1E293B),
+        child: RefreshIndicator(
+          onRefresh: _loadTemplatesFromApi,
+          color: const Color(0xFFFF7A59),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              // 1. Title Header & New Button
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Message templates',
+                        style: GoogleFonts.poppins(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF1E293B),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${filteredTemplates.length} template${filteredTemplates.length == 1 ? '' : 's'} in this folder',
+                      const SizedBox(height: 2),
+                      Text(
+                        '${currentTemplates.length} template${currentTemplates.length == 1 ? '' : 's'} in this folder',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _createNewTemplate,
+                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                    label: Text(
+                      'New',
                       style: GoogleFonts.poppins(
                         fontSize: 13,
-                        color: const Color(0xFF64748B),
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
                     ),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: _createNewTemplate,
-                  icon: const Icon(Icons.add, size: 18, color: Colors.white),
-                  label: Text(
-                    'New',
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF7A59), // Coral / Orange button
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // 2. Action Buttons Row: New folder & Export (Image 1)
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _showNewFolderDialog,
-                  icon: const Icon(Icons.create_new_folder_outlined, size: 16, color: Color(0xFF334155)),
-                  label: Text(
-                    'New folder',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF334155),
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    side: const BorderSide(color: Color(0xFFCBD5E1)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _exportTemplates,
-                  icon: const Icon(Icons.download_outlined, size: 16, color: Color(0xFF334155)),
-                  label: Text(
-                    'Export',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF334155),
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    side: const BorderSide(color: Color(0xFFCBD5E1)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // 3. Folder Breadcrumb Card (Image 1)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.home_outlined, size: 18, color: Color(0xFF009688)),
-                  const SizedBox(width: 8),
-                  Text(
-                    _selectedFolder,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF009688),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7A59),
+                      elevation: 0,
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
 
-            // 4. Search and Filter Box (Image 1)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Column(
+              // 2. Action Buttons Row: New folder button
+              Row(
                 children: [
-                  // Search TextField
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                  OutlinedButton.icon(
+                    onPressed: _showNewFolderDialog,
+                    icon: const Icon(Icons.create_new_folder_outlined,
+                        size: 16, color: Color(0xFF334155)),
+                    label: Text(
+                      'New folder',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF334155),
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, size: 18, color: Color(0xFF94A3B8)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            onChanged: (val) => setState(() => _searchQuery = val),
-                            style: GoogleFonts.poppins(fontSize: 13),
-                            decoration: InputDecoration(
-                              hintText: 'Search templates',
-                              hintStyle: GoogleFonts.poppins(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // 3. Dynamic Breadcrumb Card (Root > Folder > Subfolder)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      InkWell(
+                        onTap: () => _navigateToFolder(null, 'Root'),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.home_outlined,
+                                size: 18, color: Color(0xFF009688)),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Root',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF009688),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      ...breadcrumbPath.map((folder) {
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '  >  ',
+                              style: GoogleFonts.poppins(
                                 fontSize: 13,
+                                fontWeight: FontWeight.w600,
                                 color: const Color(0xFF94A3B8),
                               ),
-                              border: InputBorder.none,
+                            ),
+                            InkWell(
+                              onTap: () =>
+                                  _navigateToFolder(folder.id, folder.name),
+                              child: Text(
+                                folder.name,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: const Color(0xFF009688),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // 4. Search and Filter Box
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.search,
+                              size: 18, color: Color(0xFF94A3B8)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              onChanged: (val) =>
+                                  setState(() => _searchQuery = val),
+                              style: GoogleFonts.poppins(fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText: 'Search templates',
+                                hintStyle: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: const Color(0xFF94A3B8),
+                                ),
+                                border: InputBorder.none,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text(
+                          'Owner: ',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF475569),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 2),
+                            decoration: BoxDecoration(
+                              border:
+                                  Border.all(color: const Color(0xFFCBD5E1)),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: DropdownButton<String>(
+                              value: _selectedOwner,
+                              isExpanded: true,
+                              underline: const SizedBox(),
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: const Color(0xFF1E293B),
+                              ),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() => _selectedOwner = val);
+                                }
+                              },
+                              items: ownersList
+                                  .map((o) => DropdownMenuItem(
+                                      value: o, child: Text(o)))
+                                  .toList(),
                             ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
 
-                  // Owner Filter Row
-                  Row(
+              // 5. Template & Folder List / Loading / Error / Empty View
+              if (_isLoading)
+                Container(
+                  padding: const EdgeInsets.all(40),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(Color(0xFFFF7A59)),
+                    ),
+                  ),
+                )
+              else if (_errorMessage != null)
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
                     children: [
+                      const Icon(Icons.error_outline_rounded,
+                          size: 36, color: Color(0xFFEF4444)),
+                      const SizedBox(height: 10),
                       Text(
-                        'Owner: ',
+                        _errorMessage!,
                         style: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w500,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
                           color: const Color(0xFF475569),
                         ),
+                        textAlign: TextAlign.center,
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                      const SizedBox(height: 14),
+                      ElevatedButton.icon(
+                        onPressed: _loadTemplatesFromApi,
+                        icon: const Icon(Icons.refresh_rounded,
+                            size: 16, color: Colors.white),
+                        label: Text(
+                          'Retry',
+                          style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7A59),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6)),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (currentFolders.isEmpty && currentTemplates.isEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF1F5F9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.folder_outlined,
+                          size: 32,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'This folder is empty',
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF1E293B),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Create a template here, or add a subfolder to organise your content.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          color: const Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      ElevatedButton(
+                        onPressed: _createNewTemplate,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7A59),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 10),
+                          shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: DropdownButton<String>(
-                            value: _selectedOwner,
-                            isExpanded: true,
-                            underline: const SizedBox(),
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF1E293B),
-                            ),
-                            onChanged: (val) {
-                              if (val != null) setState(() => _selectedOwner = val);
-                            },
-                            items: ownersList
-                                .map((o) => DropdownMenuItem(value: o, child: Text(o)))
-                                .toList(),
+                        ),
+                        child: Text(
+                          'New template',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
+                )
+              else
+                Container(
+                  constraints: const BoxConstraints(minHeight: 180),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      // 5a. Current Level Child Folders
+                      if (currentFolders.isNotEmpty)
+                        ...currentFolders.map((folder) {
+                          return InkWell(
+                            onTap: () =>
+                                _navigateToFolder(folder.id, folder.name),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.folder_outlined,
+                                    color: Color(0xFF009688),
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          folder.name,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: const Color(0xFF009688),
+                                          ),
+                                        ),
+                                        Text(
+                                          'Folder · ${folder.ownerName ?? 'Admin User'}',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 11.5,
+                                            color: const Color(0xFF94A3B8),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Color(0xFFCBD5E1),
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
 
-            // 5. Template List Card (Image 1)
-            Container(
-              constraints: const BoxConstraints(minHeight: 200),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF7A59)),
-                      ),
-                    )
-                  : filteredTemplates.isNotEmpty
-                      ? ListView.separated(
+                      if (currentFolders.isNotEmpty &&
+                          currentTemplates.isNotEmpty)
+                        const Divider(height: 20, color: Color(0xFFE2E8F0)),
+
+                      // 5b. Current Level Templates
+                      if (currentTemplates.isNotEmpty)
+                        ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: filteredTemplates.length,
-                          separatorBuilder: (_, __) => const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                          itemCount: currentTemplates.length,
+                          separatorBuilder: (_, __) => const Divider(
+                              height: 16, color: Color(0xFFF1F5F9)),
                           itemBuilder: (context, index) {
-                            final item = filteredTemplates[index];
+                            final item = currentTemplates[index];
+                            final cleanBodyText = _cleanHtml(item.body);
+
                             return InkWell(
                               onTap: () => _editTemplate(item),
                               borderRadius: BorderRadius.circular(8),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 4, horizontal: 4),
                                 child: Row(
                                   children: [
-                                    // Mail Icon Container (Image 1)
                                     Container(
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFFFF1F0), // Light red / coral background
+                                        color: const Color(0xFFFFF1F0),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: const Icon(
@@ -524,11 +779,10 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 12),
-
-                                    // Template Title & Owner details
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             item.name,
@@ -540,17 +794,27 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            '${item.owner} · ${item.createdAt}',
+                                            item.subject.isNotEmpty
+                                                ? item.subject
+                                                : cleanBodyText,
                                             style: GoogleFonts.poppins(
                                               fontSize: 12,
+                                              color: const Color(0xFF64748B),
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${item.ownerName} · ${item.sharedSetting}',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 11,
                                               color: const Color(0xFF94A3B8),
                                             ),
                                           ),
                                         ],
                                       ),
                                     ),
-
-                                    // Chevron Right Icon
                                     const Icon(
                                       Icons.chevron_right_rounded,
                                       color: Color(0xFFCBD5E1),
@@ -561,26 +825,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                               ),
                             );
                           },
-                        )
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 40),
-                          child: Column(
-                            children: [
-                              const Icon(Icons.email_outlined, size: 36, color: Color(0xFF94A3B8)),
-                              const SizedBox(height: 10),
-                              Text(
-                                'No templates found',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: const Color(0xFF64748B),
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
-            ),
-          ],
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

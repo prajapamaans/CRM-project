@@ -1181,25 +1181,37 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     });
 
     // 2. Dynamic Associations array
+    String? targetCompanyId;
+    if (_associations['Companies'] != null && _associations['Companies']!.isNotEmpty) {
+      targetCompanyId = _associations['Companies']!.first['id'];
+    } else if (widget.companyId != null && widget.companyId!.isNotEmpty) {
+      targetCompanyId = widget.companyId;
+    }
+
+    String? targetContactId;
+    if (_associations['Contacts'] != null && _associations['Contacts']!.isNotEmpty) {
+      targetContactId = _associations['Contacts']!.first['id'];
+    } else if (widget.contactId != null && widget.contactId!.isNotEmpty) {
+      targetContactId = widget.contactId;
+    }
+
+    String? targetDealId;
+    if (_associations['Deals'] != null && _associations['Deals']!.isNotEmpty) {
+      targetDealId = _associations['Deals']!.first['id'];
+    } else if (widget.dealId != null && widget.dealId!.isNotEmpty) {
+      targetDealId = widget.dealId;
+    }
+
     final List<Map<String, String>> associations = [];
-    if (widget.contactId != null && widget.contactId!.isNotEmpty) {
-      associations.add({
-        'objectId': widget.contactId!,
-        'objectType': 'contact',
-      });
-    }
-    if (widget.companyId != null && widget.companyId!.isNotEmpty) {
-      associations.add({
-        'objectId': widget.companyId!,
-        'objectType': 'company',
-      });
-    }
-    if (widget.dealId != null && widget.dealId!.isNotEmpty) {
-      associations.add({
-        'objectId': widget.dealId!,
-        'objectType': 'deal',
-      });
-    }
+    _associations['Contacts']?.forEach((c) {
+      if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'contact'});
+    });
+    _associations['Companies']?.forEach((c) {
+      if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'company'});
+    });
+    _associations['Deals']?.forEach((d) {
+      if (d['id'] != null) associations.add({'objectId': d['id']!, 'objectType': 'deal'});
+    });
 
     // 3. Owner ID resolution
     String? ownerId;
@@ -1224,32 +1236,47 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     final scheduledDateTime = DateTime.now().add(const Duration(days: 3));
     final scheduledAtIso = scheduledDateTime.toUtc().toIso8601String();
 
-    String? targetCompanyId = widget.companyId;
-    if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
-        _associations['Companies'] != null &&
-        _associations['Companies']!.isNotEmpty) {
-      targetCompanyId = _associations['Companies']!.first['id'];
+
+
+    final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+    if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
+      companyIds.add(targetCompanyId);
     }
 
-    String? targetContactId = widget.contactId;
-    if ((targetContactId == null || targetContactId.isEmpty) &&
-        _associations['Contacts'] != null &&
-        _associations['Contacts']!.isNotEmpty) {
-      targetContactId = _associations['Contacts']!.first['id'];
+    final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+    if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
+      contactIds.add(targetContactId);
     }
 
-    String? targetDealId = widget.dealId;
-    if ((targetDealId == null || targetDealId.isEmpty) &&
-        _associations['Deals'] != null &&
-        _associations['Deals']!.isNotEmpty) {
-      targetDealId = _associations['Deals']!.first['id'];
+    final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+    if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
+      dealIds.add(targetDealId);
+    }
+
+    final List<Map<String, String>> assocList = [];
+    for (final id in companyIds) {
+      assocList.add({'objectId': id, 'objectType': 'company'});
+    }
+    for (final id in contactIds) {
+      assocList.add({'objectId': id, 'objectType': 'contact'});
+    }
+    for (final id in dealIds) {
+      assocList.add({'objectId': id, 'objectType': 'deal'});
     }
 
     // 5. Confirmed API payload structure
     final taskPayload = {
       'type': 'task',
       'title': finalTitle,
-      'associations': associations,
+      'associations': _associations,
+      'associationsList': assocList,
+      'associations_list': assocList,
+      'companyIds': companyIds,
+      'company_ids': companyIds,
+      'contactIds': contactIds,
+      'contact_ids': contactIds,
+      'dealIds': dealIds,
+      'deal_ids': dealIds,
       if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
         'companyId': targetCompanyId,
         'company_id': targetCompanyId,

@@ -5,10 +5,12 @@ import '../storage/secure_storage_service.dart';
 class AuthInterceptor extends Interceptor {
   final SecureStorageService _storageService;
   final String Function()? _departmentIdProvider;
+  final Function()? onUnauthenticated;
 
   AuthInterceptor({
     SecureStorageService? storageService,
     String Function()? departmentIdProvider,
+    this.onUnauthenticated,
   })  : _storageService = storageService ?? SecureStorageService(),
         _departmentIdProvider = departmentIdProvider;
 
@@ -42,5 +44,14 @@ class AuthInterceptor extends Interceptor {
     }
 
     super.onRequest(options, handler);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (err.response?.statusCode == 401) {
+      await _storageService.clear();
+      onUnauthenticated?.call();
+    }
+    super.onError(err, handler);
   }
 }

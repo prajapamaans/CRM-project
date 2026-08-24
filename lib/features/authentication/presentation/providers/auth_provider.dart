@@ -33,6 +33,56 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _state == AuthState.authenticated && _currentUser != null;
 
+  /// Checks persistent storage for a stored access token and validates/restores user session on app launch.
+  Future<bool> tryRestoreSession() async {
+    debugPrint('=== AUTH SESSION RESTORATION STARTED ===');
+    _isLoading = true;
+    _state = AuthState.loading;
+    notifyListeners();
+
+    final token = await _repository.getToken();
+    final hasToken = token != null && token.isNotEmpty;
+    debugPrint('Stored token exists: $hasToken');
+
+    if (!hasToken) {
+      debugPrint('No stored token found. Directing to Login screen.');
+      _state = AuthState.unauthenticated;
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+
+    debugPrint('Token validation started via GET /auth/me');
+    try {
+      final success = await fetchUserProfile();
+      if (success && _currentUser != null) {
+        debugPrint('Token validation result: SUCCESS');
+        debugPrint('Current user restored: ${_currentUser?.email}');
+        debugPrint('Authentication state changed: Authenticated');
+        _state = AuthState.authenticated;
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        debugPrint('Token validation result: FAILED. Clearing session.');
+        await logout();
+        return false;
+      }
+    } catch (e) {
+      debugPrint('[AuthRestoreSession Error]: $e');
+      if (e is NetworkException && e.statusCode == 401) {
+        debugPrint('401 Unauthorized detected during session restore. Clearing token.');
+        await logout();
+        return false;
+      } else {
+        _state = AuthState.unauthenticated;
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    }
+  }
+
   /// Fetches email details pre-login via POST /auth/email-details.
   Future<EmailDetailsResponseModel?> fetchEmailDetails(String email) async {
     _isLoading = true;

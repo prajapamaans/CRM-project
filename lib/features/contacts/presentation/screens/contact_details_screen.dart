@@ -8,6 +8,8 @@ import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/models/bingo_summary_model.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/add_association_modal.dart';
+import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/storage/activity_association_storage.dart';
 import '../../../../core/widgets/associate_msp_modal.dart';
 import '../../../../core/widgets/bottom_nav_bar.dart';
 import '../../../activities/presentation/widgets/create_task_modal.dart';
@@ -26,10 +28,12 @@ import 'package:crmproject/features/deals/data/models/deal_model.dart';
 
 class ContactDetailsScreen extends StatefulWidget {
   final ContactModel? contact;
+  final int initialTabIndex;
 
   const ContactDetailsScreen({
     super.key,
     this.contact,
+    this.initialTabIndex = 0,
   });
 
   @override
@@ -154,7 +158,11 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTabIndex,
+    );
 
     final c = widget.contact;
     _firstNameController = TextEditingController(text: c?.firstName ?? '');
@@ -387,6 +395,108 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     }).toList();
   }
 
+  Map<String, List<Map<String, String>>> _extractAssociations(
+    Map<String, dynamic> act, {
+    String? defaultCompId,
+    String? defaultCompName,
+    String? defaultContactId,
+    String? defaultContactName,
+    String? defaultDealId,
+    String? defaultDealName,
+  }) {
+    final Map<String, List<Map<String, String>>> result = {
+      'Companies': [],
+      'Contacts': [],
+      'Deals': [],
+    };
+
+    final rawAssoc = act['associations'];
+    if (rawAssoc is Map) {
+      if (rawAssoc['Companies'] is List) {
+        for (final item in rawAssoc['Companies']) {
+          if (item is Map) {
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
+            final name = (item['name'] ?? item['title'])?.toString() ?? 'Company';
+            if (id != null && id.isNotEmpty) {
+              if (!result['Companies']!.any((x) => x['id'] == id)) {
+                result['Companies']!.add({'id': id, 'name': name});
+              }
+            }
+          }
+        }
+      }
+      if (rawAssoc['Contacts'] is List) {
+        for (final item in rawAssoc['Contacts']) {
+          if (item is Map) {
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
+            final name = (item['name'] ?? item['title'])?.toString() ?? 'Contact';
+            if (id != null && id.isNotEmpty) {
+              if (!result['Contacts']!.any((x) => x['id'] == id)) {
+                result['Contacts']!.add({'id': id, 'name': name});
+              }
+            }
+          }
+        }
+      }
+      if (rawAssoc['Deals'] is List) {
+        for (final item in rawAssoc['Deals']) {
+          if (item is Map) {
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
+            final name = (item['name'] ?? item['title'])?.toString() ?? 'Deal';
+            if (id != null && id.isNotEmpty) {
+              if (!result['Deals']!.any((x) => x['id'] == id)) {
+                result['Deals']!.add({'id': id, 'name': name});
+              }
+            }
+          }
+        }
+      }
+    } else if (rawAssoc is List) {
+      for (final item in rawAssoc) {
+        if (item is Map) {
+          final id = (item['objectId'] ?? item['id'] ?? item['_id'])?.toString();
+          final type = (item['objectType'] ?? item['type'])?.toString().toLowerCase();
+          final name = (item['name'] ?? item['title'])?.toString();
+          if (id != null && id.isNotEmpty) {
+            if (type == 'company' || type == 'companies') {
+              if (!result['Companies']!.any((x) => x['id'] == id)) {
+                result['Companies']!.add({'id': id, 'name': name ?? 'Company'});
+              }
+            } else if (type == 'contact' || type == 'contacts') {
+              if (!result['Contacts']!.any((x) => x['id'] == id)) {
+                result['Contacts']!.add({'id': id, 'name': name ?? 'Contact'});
+              }
+            } else if (type == 'deal' || type == 'deals') {
+              if (!result['Deals']!.any((x) => x['id'] == id)) {
+                result['Deals']!.add({'id': id, 'name': name ?? 'Deal'});
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final cId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? defaultCompId)?.toString();
+    final cName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null) ?? defaultCompName ?? 'Company').toString();
+    if (cId != null && cId.isNotEmpty && !result['Companies']!.any((x) => x['id'] == cId)) {
+      result['Companies']!.add({'id': cId, 'name': cName});
+    }
+
+    final cntId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null) ?? defaultContactId)?.toString();
+    final cntName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['name'] : null) ?? defaultContactName ?? 'Contact').toString();
+    if (cntId != null && cntId.isNotEmpty && !result['Contacts']!.any((x) => x['id'] == cntId)) {
+      result['Contacts']!.add({'id': cntId, 'name': cntName});
+    }
+
+    final dId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null) ?? defaultDealId)?.toString();
+    final dName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['name'] : null) ?? defaultDealName ?? 'Deal').toString();
+    if (dId != null && dId.isNotEmpty && !result['Deals']!.any((x) => x['id'] == dId)) {
+      result['Deals']!.add({'id': dId, 'name': dName});
+    }
+
+    return ActivityAssociationStorage.mergeAssociations(act, result);
+  }
+
   Future<void> _fetchActivities() async {
     final contactId = widget.contact?.id;
     if (contactId == null || contactId.isEmpty) return;
@@ -400,11 +510,28 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       final results = await Future.wait([
         repo.getActivities(contactId: contactId, limit: 100),
         repo.getUnifiedTimeline(contactId: contactId, limit: 100),
+        repo.getActivities(limit: 100),
       ]);
       final activitiesList = results[0];
       final timelineList = results[1];
+      final allActivitiesList = results[2];
 
-      final combined = <Map<String, dynamic>>[...activitiesList, ...timelineList];
+      final associatedList = allActivitiesList.where((act) {
+        final cntId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
+        if (cntId == contactId) return true;
+        if (ActivityAssociationStorage.isAssociatedWithEntity(act, 'contact', contactId)) return true;
+        if (act['associations'] is Map) {
+          final cnts = (act['associations'] as Map)['Contacts'];
+          if (cnts is List) {
+            return cnts.any((item) => (item is Map ? item['id']?.toString() : item?.toString()) == contactId);
+          }
+        } else if (act['associations'] is List) {
+          return (act['associations'] as List).any((item) => item is Map && (item['objectId']?.toString() == contactId || item['id']?.toString() == contactId));
+        }
+        return false;
+      }).toList();
+
+      final combined = <Map<String, dynamic>>[...activitiesList, ...timelineList, ...associatedList];
       // Deduplicate by id if available
       final seenIds = <String>{};
       final uniqueList = <Map<String, dynamic>>[];
@@ -1936,22 +2063,128 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                       ),
                                     ),
                                     const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Text(
-                                          '0 associations ',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: const Color(0xFF00A884),
+                                    InkWell(
+                                      onTap: () async {
+                                        final initialAssoc = _extractAssociations(
+                                          act,
+                                          defaultContactId: widget.contact?.id,
+                                          defaultContactName: widget.contact?.name,
+                                        );
+
+                                        final result = await RecordAssociationSheet.show(
+                                          context,
+                                          initialAssociations: initialAssoc,
+                                        );
+                                        if (result != null) {
+                                          final actId = (act['id'] ?? act['_id'])?.toString();
+                                          final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
+                                          final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
+                                          final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
+                                          final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
+                                          final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
+                                          final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+
+                                          setState(() {
+                                            act['associations'] = result;
+                                            act['companyId'] = newCompId;
+                                            act['company_id'] = newCompId;
+                                            act['companyName'] = newCompName;
+                                            act['contactId'] = newCntId;
+                                            act['contact_id'] = newCntId;
+                                            act['contactName'] = newCntName;
+                                            act['dealId'] = newDealId;
+                                            act['deal_id'] = newDealId;
+                                            act['dealName'] = newDealName;
+                                          });
+
+                                          if (actId != null && actId.isNotEmpty) {
+                                            await ActivityAssociationStorage.saveAssociations(actId, result);
+                                            try {
+                                              final api = ApiService();
+                                              final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                              final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                              final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+
+                                              final List<Map<String, String>> assocList = [];
+                                              for (final id in compIds) {
+                                                assocList.add({'objectId': id, 'objectType': 'company'});
+                                              }
+                                              for (final id in cntIds) {
+                                                assocList.add({'objectId': id, 'objectType': 'contact'});
+                                              }
+                                              for (final id in dealIds) {
+                                                assocList.add({'objectId': id, 'objectType': 'deal'});
+                                              }
+
+                                              final updatePayload = Map<String, dynamic>.from(act);
+                                              updatePayload['companyId'] = newCompId;
+                                              updatePayload['company_id'] = newCompId;
+                                              updatePayload['companyIds'] = compIds;
+                                              updatePayload['company_ids'] = compIds;
+                                              updatePayload['contactId'] = newCntId;
+                                              updatePayload['contact_id'] = newCntId;
+                                              updatePayload['contactIds'] = cntIds;
+                                              updatePayload['contact_ids'] = cntIds;
+                                              updatePayload['dealId'] = newDealId;
+                                              updatePayload['deal_id'] = newDealId;
+                                              updatePayload['dealIds'] = dealIds;
+                                              updatePayload['deal_ids'] = dealIds;
+                                              updatePayload['associations'] = result;
+                                              updatePayload['associationsList'] = assocList;
+                                              updatePayload['associations_list'] = assocList;
+
+                                              try {
+                                                await api.put('${ApiConstants.activities}/$actId', data: updatePayload);
+                                              } catch (_) {
+                                                try {
+                                                  await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
+                                                } catch (_) {
+                                                  await api.post('${ApiConstants.activities}/$actId', data: updatePayload);
+                                                }
+                                              }
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text('Associations updated successfully'),
+                                                    duration: Duration(seconds: 1),
+                                                  ),
+                                                );
+                                              }
+                                              await _fetchActivities();
+                                            } catch (e) {
+                                              debugPrint('[Update Association Error]: $e');
+                                            }
+                                          }
+                                        }
+                                      },
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Builder(
+                                            builder: (context) {
+                                              final assocMap = _extractAssociations(
+                                                act,
+                                                defaultContactId: widget.contact?.id,
+                                                defaultContactName: widget.contact?.name,
+                                              );
+                                              final cnt = assocMap['Companies']!.length + assocMap['Contacts']!.length + assocMap['Deals']!.length;
+                                              return Text(
+                                                '$cnt association${cnt == 1 ? '' : 's'} ',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: const Color(0xFF00A884),
+                                                ),
+                                              );
+                                            },
                                           ),
-                                        ),
-                                        const Icon(
-                                          Icons.keyboard_arrow_down_rounded,
-                                          size: 16,
-                                          color: Color(0xFF00A884),
-                                        ),
-                                      ],
+                                          const Icon(
+                                            Icons.keyboard_arrow_down_rounded,
+                                            size: 16,
+                                            color: Color(0xFF00A884),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ],

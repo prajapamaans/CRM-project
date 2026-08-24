@@ -8,6 +8,7 @@ class EmailTemplateModel {
   final String body;
   final String owner;
   final String folder;
+  final String? folderId;
   final String privacy;
   final String createdAt;
 
@@ -18,6 +19,7 @@ class EmailTemplateModel {
     required this.body,
     this.owner = 'Admin User',
     this.folder = 'Root',
+    this.folderId,
     this.privacy = 'Private',
     String? createdAt,
   }) : createdAt = createdAt ?? 'Just now';
@@ -25,18 +27,27 @@ class EmailTemplateModel {
 
 class CreateTemplateModal extends StatefulWidget {
   final EmailTemplateModel? templateToEdit;
+  final String? initialFolderId;
 
-  const CreateTemplateModal({super.key, this.templateToEdit});
+  const CreateTemplateModal({
+    super.key,
+    this.templateToEdit,
+    this.initialFolderId,
+  });
 
   static Future<EmailTemplateModel?> show(
     BuildContext context, {
     EmailTemplateModel? templateToEdit,
+    String? initialFolderId,
   }) {
     return showModalBottomSheet<EmailTemplateModel>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => CreateTemplateModal(templateToEdit: templateToEdit),
+      builder: (context) => CreateTemplateModal(
+        templateToEdit: templateToEdit,
+        initialFolderId: initialFolderId,
+      ),
     );
   }
 
@@ -129,13 +140,56 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
 
   Map<String, String>? _selectedPreviewContact;
   String _contactSearchQuery = '';
-
   final List<String> _variables = const [
     '{{contact.first_name}}',
     '{{contact.email}}',
     '{{company.name}}',
     '{{owner.name}}',
   ];
+
+  // Undo & Redo state management
+  final List<String> _undoHistory = [];
+  int _undoIndex = -1;
+  bool _isUndoRedoProcessing = false;
+
+  void _pushUndoState(String newText) {
+    if (_isUndoRedoProcessing) return;
+    if (_undoHistory.isNotEmpty && _undoIndex >= 0 && _undoIndex < _undoHistory.length && _undoHistory[_undoIndex] == newText) return;
+
+    if (_undoIndex < _undoHistory.length - 1) {
+      _undoHistory.removeRange(_undoIndex + 1, _undoHistory.length);
+    }
+    _undoHistory.add(newText);
+    _undoIndex = _undoHistory.length - 1;
+  }
+
+  void _undo() {
+    if (_undoIndex > 0) {
+      _isUndoRedoProcessing = true;
+      _undoIndex--;
+      final prev = _undoHistory[_undoIndex];
+      _bodyController.value = TextEditingValue(
+        text: prev,
+        selection: TextSelection.collapsed(offset: prev.length),
+      );
+      _isUndoRedoProcessing = false;
+      setState(() {});
+    }
+  }
+
+  void _redo() {
+    if (_undoIndex < _undoHistory.length - 1) {
+      _isUndoRedoProcessing = true;
+      _undoIndex++;
+      final next = _undoHistory[_undoIndex];
+      _bodyController.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+      _isUndoRedoProcessing = false;
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -150,6 +204,11 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
       _selectedFolder = template.folder;
       _ownerName = template.owner;
     }
+
+    _bodyController.addListener(() {
+      _pushUndoState(_bodyController.text);
+    });
+    _pushUndoState(_bodyController.text);
   }
 
   @override
@@ -191,14 +250,100 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
     setState(() {});
   }
 
+  Future<void> _showInsertVariableDialog(
+    BuildContext btnContext,
+    ValueChanged<String> onSelected,
+  ) async {
+    final RenderBox button = btnContext.findRenderObject() as RenderBox;
+    final RenderBox overlay =
+        Navigator.of(btnContext).overlay!.context.findRenderObject() as RenderBox;
+    final RelativeRect position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(Offset.zero, ancestor: overlay),
+        button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
+
+    final selectedTag = await showDialog<String>(
+      context: btnContext,
+      barrierColor: Colors.black12,
+      builder: (context) {
+        return Stack(
+          children: [
+            Positioned(
+              left: position.left.clamp(16.0, MediaQuery.of(context).size.width - 340.0),
+              top: position.top.clamp(80.0, MediaQuery.of(context).size.height - 400.0),
+              child: const Material(
+                color: Colors.transparent,
+                child: _InsertVariableModal(),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (selectedTag != null && selectedTag.isNotEmpty) {
+      onSelected(selectedTag);
+    }
+  }
+
   String _resolveVariables(String rawText) {
-    if (_selectedPreviewContact == null) return rawText;
-    final contact = _selectedPreviewContact!;
-    return rawText
-        .replaceAll('{{contact.first_name}}', contact['first_name'] ?? 'Contact')
-        .replaceAll('{{contact.email}}', contact['email'] ?? 'contact@example.com')
-        .replaceAll('{{company.name}}', contact['company'] ?? 'Company')
-        .replaceAll('{{owner.name}}', _ownerName);
+    final contact = _selectedPreviewContact ?? _sampleContacts.first;
+    final firstName = contact['first_name'] ?? 'Alex';
+    final contactName = contact['name'] ?? 'Alex Rivera';
+    final email = contact['email'] ?? 'alex@example.com';
+    final companyName = contact['company'] ?? 'Northwind Ltd';
+    final companyDomain = '${companyName.toLowerCase().replaceAll(' ', '')}.com';
+    const phone = '+1 555 0142';
+    const jobTitle = 'Head of Ops';
+    const lastName = 'Rivera';
+    const industry = 'Logistics';
+
+    String text = rawText
+        .replaceAll('{{contact.first_name}}', firstName)
+        .replaceAll('contact.first_name', firstName)
+        .replaceAll('{{contact.last_name}}', lastName)
+        .replaceAll('contact.last_name', lastName)
+        .replaceAll('{{contact.full_name}}', contactName)
+        .replaceAll('contact.full_name', contactName)
+        .replaceAll('{{contact.email}}', email)
+        .replaceAll('contact.email', email)
+        .replaceAll('{{contact.phone}}', phone)
+        .replaceAll('contact.phone', phone)
+        .replaceAll('{{contact.job_title}}', jobTitle)
+        .replaceAll('contact.job_title', jobTitle)
+        .replaceAll('{{company.name}}', companyName)
+        .replaceAll('company.name', companyName)
+        .replaceAll('{{company.domain}}', companyDomain)
+        .replaceAll('company.domain', companyDomain)
+        .replaceAll('{{company.industry}}', industry)
+        .replaceAll('company.industry', industry)
+        .replaceAll('{{deal.name}}', 'Q3 Renewal')
+        .replaceAll('deal.name', 'Q3 Renewal')
+        .replaceAll('{{deal.stage}}', 'Negotiation')
+        .replaceAll('deal.stage', 'Negotiation')
+        .replaceAll('{{deal.amount}}', '\$12,000')
+        .replaceAll('deal.amount', '\$12,000')
+        .replaceAll('{{sender.first_name}}', _ownerName.split(' ').first)
+        .replaceAll('sender.first_name', _ownerName.split(' ').first)
+        .replaceAll('{{sender.full_name}}', _ownerName)
+        .replaceAll('sender.full_name', _ownerName)
+        .replaceAll('{{sender.email}}', 'dev@apideltech.com')
+        .replaceAll('sender.email', 'dev@apideltech.com')
+        .replaceAll('{{sender.job_title}}', 'Account Executive')
+        .replaceAll('sender.job_title', 'Account Executive')
+        .replaceAll('{{system.date}}', '1 Aug 2026')
+        .replaceAll('system.date', '1 Aug 2026')
+        .replaceAll('{{system.unsubscribe}}', 'Unsubscribe')
+        .replaceAll('system.unsubscribe', 'Unsubscribe')
+        .replaceAll('{{system.view_in_browser}}', 'View in browser')
+        .replaceAll('system.view_in_browser', 'View in browser')
+        .replaceAll('{{owner.name}}', _ownerName)
+        .replaceAll('owner.name', _ownerName);
+
+    return text;
   }
 
   void _saveTemplate() {
@@ -211,14 +356,15 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
     }
 
     final newTemplate = EmailTemplateModel(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: widget.templateToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
       name: name,
       subject: _subjectController.text.trim(),
       body: _bodyController.text.trim(),
       owner: _ownerName,
       folder: _selectedFolder,
+      folderId: widget.initialFolderId ?? widget.templateToEdit?.folderId,
       privacy: _selectedPrivacy,
-      createdAt: '1 second ago',
+      createdAt: widget.templateToEdit?.createdAt ?? 'Just now',
     );
 
     Navigator.of(context).pop(newTemplate);
@@ -625,27 +771,28 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
                   ),
                 ),
               ),
-              PopupMenuButton<String>(
-                onSelected: _insertVariableIntoSubject,
-                child: Row(
-                  children: [
-                    Text(
-                      'Insert',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF475569),
+              Builder(
+                builder: (btnContext) {
+                  return InkWell(
+                    onTap: () => _showInsertVariableDialog(btnContext, _insertVariableIntoSubject),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Insert',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF475569),
+                            ),
+                          ),
+                          const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF64748B)),
+                        ],
                       ),
                     ),
-                    const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF64748B)),
-                  ],
-                ),
-                itemBuilder: (context) => _variables
-                    .map((v) => PopupMenuItem(
-                          value: v,
-                          child: Text(v, style: GoogleFonts.poppins(fontSize: 12.5)),
-                        ))
-                    .toList(),
+                  );
+                },
               ),
             ],
           ),
@@ -672,50 +819,86 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
           ),
           child: Column(
             children: [
-              // Rich Text Toolbar
+              // Rich Text Toolbar with exact spacing, dividers & working Undo/Redo
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: const BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
                   border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _toolbarTextBtn('B', isActive: _isBold, bold: true, onTap: () {
-                      setState(() => _isBold = !_isBold);
-                    }),
-                    _toolbarTextBtn('I', isActive: _isItalic, italic: true, onTap: () {
-                      setState(() => _isItalic = !_isItalic);
-                    }),
-                    _toolbarTextBtn('U', isActive: _isUnderline, underline: true, onTap: () {
-                      setState(() => _isUnderline = !_isUnderline);
-                    }),
-                    const SizedBox(width: 8),
-                    _toolbarHeading('H1'),
-                    _toolbarHeading('H2'),
-                    _toolbarHeading('T'),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => _applyFormatPrefix('• ', ''),
-                      child: const Icon(Icons.format_list_bulleted, size: 16, color: Color(0xFF64748B)),
+                    // Row 1: Formatting options with vertical dividers
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: [
+                          _toolbarTextBtn('B', isActive: _isBold, bold: true, onTap: () {
+                            setState(() => _isBold = !_isBold);
+                          }),
+                          const SizedBox(width: 12),
+                          _toolbarTextBtn('I', isActive: _isItalic, italic: true, onTap: () {
+                            setState(() => _isItalic = !_isItalic);
+                          }),
+                          const SizedBox(width: 12),
+                          _toolbarTextBtn('U', isActive: _isUnderline, underline: true, onTap: () {
+                            setState(() => _isUnderline = !_isUnderline);
+                          }),
+                          const SizedBox(width: 10),
+                          Container(width: 1, height: 16, color: const Color(0xFFCBD5E1)),
+                          const SizedBox(width: 10),
+                          _toolbarHeading('H1'),
+                          const SizedBox(width: 12),
+                          _toolbarHeading('H2'),
+                          const SizedBox(width: 12),
+                          _toolbarHeading('T'),
+                          const SizedBox(width: 10),
+                          Container(width: 1, height: 16, color: const Color(0xFFCBD5E1)),
+                          const SizedBox(width: 10),
+                          InkWell(
+                            onTap: () => _applyFormatPrefix('• ', ''),
+                            child: const Icon(Icons.format_list_bulleted, size: 17, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(width: 14),
+                          InkWell(
+                            onTap: () => _applyFormatPrefix('1. ', ''),
+                            child: const Icon(Icons.format_list_numbered, size: 17, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(width: 14),
+                          const Icon(Icons.attach_file, size: 17, color: Color(0xFF64748B)),
+                          const SizedBox(width: 10),
+                          Container(width: 1, height: 16, color: const Color(0xFFCBD5E1)),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 6),
-                    InkWell(
-                      onTap: () => _applyFormatPrefix('1. ', ''),
-                      child: const Icon(Icons.format_list_numbered, size: 16, color: Color(0xFF64748B)),
+                    const SizedBox(height: 8),
+                    // Row 2: Working Undo & Redo buttons
+                    Row(
+                      children: [
+                        InkWell(
+                          onTap: _undoIndex > 0 ? _undo : null,
+                          child: Icon(
+                            Icons.undo_rounded,
+                            size: 17,
+                            color: _undoIndex > 0 ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        InkWell(
+                          onTap: _undoIndex < _undoHistory.length - 1 ? _redo : null,
+                          child: Icon(
+                            Icons.redo_rounded,
+                            size: 17,
+                            color: _undoIndex < _undoHistory.length - 1
+                                ? const Color(0xFF475569)
+                                : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.attach_file, size: 16, color: Color(0xFF64748B)),
-                    const Spacer(),
-                    InkWell(
-                      onTap: () {
-                        if (_bodyController.text.isNotEmpty) _bodyController.clear();
-                      },
-                      child: const Icon(Icons.undo, size: 16, color: Color(0xFF64748B)),
-                    ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.redo, size: 16, color: Color(0xFF64748B)),
                   ],
                 ),
               ),
@@ -745,36 +928,34 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
         // Insert Variable & Insert Draft Buttons Row (Image 2)
         Row(
           children: [
-            PopupMenuButton<String>(
-              onSelected: _insertVariableIntoBody,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
-                  borderRadius: BorderRadius.circular(6),
-                  color: Colors.white,
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'Insert variable',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF475569),
-                      ),
+            Builder(
+              builder: (btnContext) {
+                return InkWell(
+                  onTap: () => _showInsertVariableDialog(btnContext, _insertVariableIntoBody),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      borderRadius: BorderRadius.circular(6),
+                      color: Colors.white,
                     ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF64748B)),
-                  ],
-                ),
-              ),
-              itemBuilder: (context) => _variables
-                  .map((v) => PopupMenuItem(
-                        value: v,
-                        child: Text(v, style: GoogleFonts.poppins(fontSize: 12.5)),
-                      ))
-                  .toList(),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Insert variable',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF475569),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.keyboard_arrow_down, size: 16, color: Color(0xFF64748B)),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(width: 10),
             ElevatedButton.icon(
@@ -1038,6 +1219,199 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _VariableOption {
+  final String category;
+  final String label;
+  final String tag;
+  final String sample;
+
+  const _VariableOption({
+    required this.category,
+    required this.label,
+    required this.tag,
+    required this.sample,
+  });
+}
+
+const List<_VariableOption> _allVariables = [
+  // CONTACT
+  _VariableOption(category: 'CONTACT', label: 'First name', tag: '{{contact.first_name}}', sample: 'Alex'),
+  _VariableOption(category: 'CONTACT', label: 'Last name', tag: '{{contact.last_name}}', sample: 'Rivera'),
+  _VariableOption(category: 'CONTACT', label: 'Full name', tag: '{{contact.full_name}}', sample: 'Alex Rivera'),
+  _VariableOption(category: 'CONTACT', label: 'Email address', tag: '{{contact.email}}', sample: 'alex@example.com'),
+  _VariableOption(category: 'CONTACT', label: 'Phone number', tag: '{{contact.phone}}', sample: '+1 555 0142'),
+  _VariableOption(category: 'CONTACT', label: 'Job title', tag: '{{contact.job_title}}', sample: 'Head of Ops'),
+
+  // COMPANY
+  _VariableOption(category: 'COMPANY', label: 'Company name', tag: '{{company.name}}', sample: 'Northwind Ltd'),
+  _VariableOption(category: 'COMPANY', label: 'Company domain', tag: '{{company.domain}}', sample: 'northwind.com'),
+  _VariableOption(category: 'COMPANY', label: 'Industry', tag: '{{company.industry}}', sample: 'Logistics'),
+
+  // DEAL
+  _VariableOption(category: 'DEAL', label: 'Deal name', tag: '{{deal.name}}', sample: 'Q3 Renewal'),
+  _VariableOption(category: 'DEAL', label: 'Deal stage', tag: '{{deal.stage}}', sample: 'Negotiation'),
+  _VariableOption(category: 'DEAL', label: 'Deal amount', tag: '{{deal.amount}}', sample: '\$12,000'),
+
+  // SENDER
+  _VariableOption(category: 'SENDER', label: 'My first name', tag: '{{sender.first_name}}', sample: 'Sam'),
+  _VariableOption(category: 'SENDER', label: 'My full name', tag: '{{sender.full_name}}', sample: 'Sam Patel'),
+  _VariableOption(category: 'SENDER', label: 'My email address', tag: '{{sender.email}}', sample: 'sam@apideltech.com'),
+  _VariableOption(category: 'SENDER', label: 'My job title', tag: '{{sender.job_title}}', sample: 'Account Executive'),
+
+  // SYSTEM
+  _VariableOption(category: 'SYSTEM', label: "Today's date", tag: '{{system.date}}', sample: '1 Aug 2026'),
+  _VariableOption(category: 'SYSTEM', label: 'Unsubscribe link', tag: '{{system.unsubscribe}}', sample: 'Unsubscribe'),
+  _VariableOption(category: 'SYSTEM', label: 'View in browser', tag: '{{system.view_in_browser}}', sample: 'View in browser'),
+];
+
+class _InsertVariableModal extends StatefulWidget {
+  const _InsertVariableModal();
+
+  @override
+  State<_InsertVariableModal> createState() => _InsertVariableModalState();
+}
+
+class _InsertVariableModalState extends State<_InsertVariableModal> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _allVariables.where((v) {
+      if (_query.isEmpty) return true;
+      final q = _query.toLowerCase();
+      return v.label.toLowerCase().contains(q) ||
+          v.tag.toLowerCase().contains(q) ||
+          v.category.toLowerCase().contains(q) ||
+          v.sample.toLowerCase().contains(q);
+    }).toList();
+
+    final categories = <String>[];
+    for (var v in filtered) {
+      if (!categories.contains(v.category)) {
+        categories.add(v.category);
+      }
+    }
+
+    return Container(
+      width: 320,
+      height: 380,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFCBD5E1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Search Input Bar (Images 3, 4, 5)
+          Container(
+            margin: const EdgeInsets.all(10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF009688), width: 1.5),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (val) => setState(() => _query = val),
+                    autofocus: true,
+                    style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF1E293B)),
+                    decoration: InputDecoration(
+                      hintText: 'Search variables',
+                      hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Categories & Options List (Images 3, 4, 5)
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              itemCount: categories.length,
+              itemBuilder: (context, catIdx) {
+                final cat = categories[catIdx];
+                final items = filtered.where((v) => v.category == cat).toList();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 4),
+                      child: Text(
+                        cat,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    ...items.map((item) {
+                      return InkWell(
+                        onTap: () => Navigator.of(context).pop(item.tag),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                item.label,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF1E293B),
+                                ),
+                              ),
+                              Text(
+                                item.sample,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: const Color(0xFF94A3B8),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

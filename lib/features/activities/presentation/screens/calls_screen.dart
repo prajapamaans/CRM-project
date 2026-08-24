@@ -6,6 +6,14 @@ import '../../../../core/repositories/master_data_repository.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/log_call_modal.dart';
+import '../../../companies/data/models/company_model.dart';
+import '../../../companies/presentation/screens/company_details_screen.dart';
+import '../../../contacts/data/models/contact_model.dart';
+import '../../../contacts/presentation/screens/contact_details_screen.dart';
+import '../../../deals/data/models/deal_model.dart';
+import '../../../deals/presentation/screens/deal_details_screen.dart';
+import '../../../../core/widgets/search_and_filter_bar.dart';
+import '../../../contacts/presentation/providers/contact_provider.dart';
 import 'call_details_screen.dart';
 
 class CallsScreen extends StatefulWidget {
@@ -18,6 +26,9 @@ class CallsScreen extends StatefulWidget {
 class _CallsScreenState extends State<CallsScreen> {
   int _selectedTab = 0; // 0: All calls, 1: My calls
   String _searchQuery = '';
+  ContactSortOption _currentSort = ContactSortOption.mostRecent;
+  bool _isFilterExpanded = false;
+  String? _selectedOutcomeFilter;
   final List<CallModel> _calls = [];
   bool _isLoadingCalls = false;
 
@@ -146,9 +157,18 @@ class _CallsScreenState extends State<CallsScreen> {
 
       final filteredCalls = _calls.where((c) {
         if (_selectedTab == 1 && (c.assignedTo ?? 'Admin User') != currentUserName) return false;
+        if (_selectedOutcomeFilter != null && _selectedOutcomeFilter!.isNotEmpty) {
+          if (!c.outcome.toLowerCase().contains(_selectedOutcomeFilter!.toLowerCase())) return false;
+        }
         if (_searchQuery.isEmpty) return true;
         return c.title.toLowerCase().contains(_searchQuery.toLowerCase());
       }).toList();
+
+      if (_currentSort == ContactSortOption.aToZ) {
+        filteredCalls.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      } else if (_currentSort == ContactSortOption.zToA) {
+        filteredCalls.sort((a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()));
+      }
 
       return Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
@@ -210,26 +230,39 @@ class _CallsScreenState extends State<CallsScreen> {
                 ),
               ),
 
-              // 2. Sub-header Segmented Pill: "All calls" | "My calls"
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: Colors.white,
-                child: Row(
+              // 2. Search & 3-Dot Filter/Sort Bar Section
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Column(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: Row(
-                        children: [
-                          _buildTabButton('All calls', 0, _calls.length),
-                          _buildTabButton('My calls', 1, myCallsCount),
-                        ],
-                      ),
+                    SearchAndFilterBar(
+                      searchHint: 'Search calls...',
+                      onSearchChanged: (val) {
+                        setState(() {
+                          _searchQuery = val.trim();
+                        });
+                      },
+                      onSegmentChanged: (index) {
+                        setState(() {
+                          _selectedTab = index;
+                        });
+                      },
+                      currentSort: _currentSort,
+                      onSortChanged: (ContactSortOption option) {
+                        setState(() {
+                          _currentSort = option;
+                        });
+                      },
+                      isFilterActive: _selectedOutcomeFilter != null,
+                      isFilterExpanded: _isFilterExpanded,
+                      onToggleFilterExpanded: () {
+                        setState(() {
+                          _isFilterExpanded = !_isFilterExpanded;
+                        });
+                      },
                     ),
+
+                    if (_isFilterExpanded) _buildCallsInlineFilter(),
                   ],
                 ),
               ),
@@ -457,66 +490,7 @@ class _CallsScreenState extends State<CallsScreen> {
     }
   }
 
-  Widget _buildTabButton(String label, int index, int count) {
-    final bool isSelected = _selectedTab == index;
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedTab = index;
-        });
-      },
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 12.5,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                color: isSelected
-                    ? const Color(0xFF00A884)
-                    : const Color(0xFF64748B),
-              ),
-            ),
-            if (count > 0) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '$count',
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildFilterPill(IconData icon, String label) {
     return Container(
@@ -547,13 +521,108 @@ class _CallsScreenState extends State<CallsScreen> {
   Widget _buildCallTile(CallModel call) {
     return InkWell(
       onTap: () async {
-        final refreshed = await Navigator.of(context).push<bool>(
-          MaterialPageRoute(
-            builder: (_) => CallDetailsScreen(call: call),
-          ),
-        );
-        if (refreshed == true) {
+        final act = call.rawMap ?? {};
+
+        String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? call.companyId)?.toString();
+        String? compName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null))?.toString();
+
+        String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null) ?? call.contactId)?.toString();
+        String? contactName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['firstName'] ?? act['contact']['name'] : null))?.toString();
+
+        String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null) ?? call.dealId)?.toString();
+        String? dealName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['title'] : null))?.toString();
+
+        if (act['associations'] is Map) {
+          final assocMap = act['associations'] as Map;
+          if ((compId == null || compId.isEmpty) && assocMap['Companies'] is List && (assocMap['Companies'] as List).isNotEmpty) {
+            final firstComp = (assocMap['Companies'] as List).first;
+            if (firstComp is Map) {
+              compId = (firstComp['id'] ?? firstComp['_id'] ?? firstComp['objectId'])?.toString();
+              compName = (firstComp['name'] ?? firstComp['title'])?.toString();
+            }
+          }
+          if ((contactId == null || contactId.isEmpty) && assocMap['Contacts'] is List && (assocMap['Contacts'] as List).isNotEmpty) {
+            final firstContact = (assocMap['Contacts'] as List).first;
+            if (firstContact is Map) {
+              contactId = (firstContact['id'] ?? firstContact['_id'] ?? firstContact['objectId'])?.toString();
+              contactName = (firstContact['name'] ?? firstContact['title'])?.toString();
+            }
+          }
+          if ((dealId == null || dealId.isEmpty) && assocMap['Deals'] is List && (assocMap['Deals'] as List).isNotEmpty) {
+            final firstDeal = (assocMap['Deals'] as List).first;
+            if (firstDeal is Map) {
+              dealId = (firstDeal['id'] ?? firstDeal['_id'] ?? firstDeal['objectId'])?.toString();
+              dealName = (firstDeal['name'] ?? firstDeal['title'])?.toString();
+            }
+          }
+        } else if (act['associations'] is List) {
+          for (final assoc in (act['associations'] as List)) {
+            if (assoc is Map) {
+              final id = (assoc['objectId'] ?? assoc['id'] ?? assoc['_id'])?.toString();
+              final type = (assoc['objectType'] ?? assoc['type'])?.toString().toLowerCase();
+              final name = (assoc['name'] ?? assoc['title'])?.toString();
+              if (id != null && id.isNotEmpty) {
+                if ((type == 'company' || type == 'companies') && (compId == null || compId.isEmpty)) {
+                  compId = id;
+                  compName = name;
+                } else if ((type == 'contact' || type == 'contacts') && (contactId == null || contactId.isEmpty)) {
+                  contactId = id;
+                  contactName = name;
+                } else if ((type == 'deal' || type == 'deals') && (dealId == null || dealId.isEmpty)) {
+                  dealId = id;
+                  dealName = name;
+                }
+              }
+            }
+          }
+        }
+
+        if (compId != null && compId.isNotEmpty) {
+          final companyModel = CompanyModel(
+            id: compId,
+            name: compName ?? 'Company',
+          );
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1),
+            ),
+          );
           _loadCalls();
+        } else if (contactId != null && contactId.isNotEmpty) {
+          final contactModel = ContactModel(
+            id: contactId,
+            firstName: contactName ?? 'Contact',
+            email: '',
+          );
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1),
+            ),
+          );
+          _loadCalls();
+        } else if (dealId != null && dealId.isNotEmpty) {
+          final dealModel = DealModel(
+            id: dealId,
+            title: dealName ?? 'Deal',
+            amount: 0.0,
+            stage: '',
+            probability: 0,
+          );
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1),
+            ),
+          );
+          _loadCalls();
+        } else {
+          final refreshed = await Navigator.of(context).push<bool>(
+            MaterialPageRoute(
+              builder: (_) => CallDetailsScreen(call: call),
+            ),
+          );
+          if (refreshed == true) {
+            _loadCalls();
+          }
         }
       },
       borderRadius: BorderRadius.circular(10),
@@ -622,5 +691,91 @@ class _CallsScreenState extends State<CallsScreen> {
       ),
     ),
   );
-}
+  }
+
+  Widget _buildCallsInlineFilter() {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Filter by Outcome',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF475569),
+                ),
+              ),
+              if (_selectedOutcomeFilter != null)
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedOutcomeFilter = null;
+                    });
+                  },
+                  child: Text(
+                    'Clear Filter',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF00A884),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildOutcomeChip('All', null),
+                const SizedBox(width: 6),
+                _buildOutcomeChip('Connected', 'Connected'),
+                const SizedBox(width: 6),
+                _buildOutcomeChip('Scheduled', 'Scheduled'),
+                const SizedBox(width: 6),
+                _buildOutcomeChip('Completed', 'Completed'),
+                const SizedBox(width: 6),
+                _buildOutcomeChip('No Answer', 'No Answer'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOutcomeChip(String label, String? val) {
+    final isSelected = _selectedOutcomeFilter == val;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 11.5,
+          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+          color: isSelected ? Colors.white : const Color(0xFF475569),
+        ),
+      ),
+      selected: isSelected,
+      selectedColor: const Color(0xFF00A884),
+      backgroundColor: const Color(0xFFF1F5F9),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      onSelected: (_) {
+        setState(() {
+          _selectedOutcomeFilter = val;
+        });
+      },
+    );
+  }
 }

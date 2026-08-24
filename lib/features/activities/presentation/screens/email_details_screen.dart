@@ -4,7 +4,23 @@ import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../widgets/create_email_modal.dart';
-import 'emails_screen.dart';
+class EmailModel {
+  final String? id;
+  final String title;
+  final String status;
+  final String startTime;
+  final String? assignedTo;
+  final String notes;
+
+  EmailModel({
+    this.id,
+    required this.title,
+    this.status = 'Logged',
+    this.startTime = '',
+    this.assignedTo = 'Admin User',
+    this.notes = '',
+  });
+}
 
 class EmailDetailsScreen extends StatefulWidget {
   final EmailModel email;

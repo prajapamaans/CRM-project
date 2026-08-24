@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
@@ -229,25 +229,57 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
 
     try {
       final api = ApiService();
-      String? selectedCompanyId = widget.companyId ?? widget.noteToEdit?['companyId'] ?? widget.noteToEdit?['company_id'];
-      if ((selectedCompanyId == null || selectedCompanyId.isEmpty) &&
-          _associations['Companies'] != null &&
-          _associations['Companies']!.isNotEmpty) {
+      String? selectedCompanyId;
+      if (_associations['Companies'] != null && _associations['Companies']!.isNotEmpty) {
         selectedCompanyId = _associations['Companies']!.first['id'];
+      } else if (widget.companyId != null && widget.companyId!.isNotEmpty) {
+        selectedCompanyId = widget.companyId;
+      } else {
+        selectedCompanyId = widget.noteToEdit?['companyId'] ?? widget.noteToEdit?['company_id'];
       }
 
-      String? selectedContactId = widget.contactId ?? widget.noteToEdit?['contactId'] ?? widget.noteToEdit?['contact_id'];
-      if ((selectedContactId == null || selectedContactId.isEmpty) &&
-          _associations['Contacts'] != null &&
-          _associations['Contacts']!.isNotEmpty) {
+      String? selectedContactId;
+      if (_associations['Contacts'] != null && _associations['Contacts']!.isNotEmpty) {
         selectedContactId = _associations['Contacts']!.first['id'];
+      } else if (widget.contactId != null && widget.contactId!.isNotEmpty) {
+        selectedContactId = widget.contactId;
+      } else {
+        selectedContactId = widget.noteToEdit?['contactId'] ?? widget.noteToEdit?['contact_id'];
       }
 
-      String? selectedDealId = widget.dealId ?? widget.noteToEdit?['dealId'] ?? widget.noteToEdit?['deal_id'];
-      if ((selectedDealId == null || selectedDealId.isEmpty) &&
-          _associations['Deals'] != null &&
-          _associations['Deals']!.isNotEmpty) {
+      String? selectedDealId;
+      if (_associations['Deals'] != null && _associations['Deals']!.isNotEmpty) {
         selectedDealId = _associations['Deals']!.first['id'];
+      } else if (widget.dealId != null && widget.dealId!.isNotEmpty) {
+        selectedDealId = widget.dealId;
+      } else {
+        selectedDealId = widget.noteToEdit?['dealId'] ?? widget.noteToEdit?['deal_id'];
+      }
+
+      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (selectedCompanyId != null && selectedCompanyId.isNotEmpty && !companyIds.contains(selectedCompanyId)) {
+        companyIds.add(selectedCompanyId);
+      }
+
+      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (selectedContactId != null && selectedContactId.isNotEmpty && !contactIds.contains(selectedContactId)) {
+        contactIds.add(selectedContactId);
+      }
+
+      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (selectedDealId != null && selectedDealId.isNotEmpty && !dealIds.contains(selectedDealId)) {
+        dealIds.add(selectedDealId);
+      }
+
+      final List<Map<String, String>> assocList = [];
+      for (final id in companyIds) {
+        assocList.add({'objectId': id, 'objectType': 'company'});
+      }
+      for (final id in contactIds) {
+        assocList.add({'objectId': id, 'objectType': 'contact'});
+      }
+      for (final id in dealIds) {
+        assocList.add({'objectId': id, 'objectType': 'deal'});
       }
 
       final payload = {
@@ -255,6 +287,15 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
         'type': 'note',
         'notes': body,
         'activityDate': DateTime.now().toIso8601String(),
+        'associations': _associations,
+        'associationsList': assocList,
+        'associations_list': assocList,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'contactIds': contactIds,
+        'contact_ids': contactIds,
+        'dealIds': dealIds,
+        'deal_ids': dealIds,
         if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
           'contactId': selectedContactId,
           'contact_id': selectedContactId,
