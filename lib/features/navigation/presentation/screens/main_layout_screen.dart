@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../../../core/widgets/user_profile_menu.dart';
 import '../../../../theme/app_theme.dart';
 import '../../../../core/widgets/bottom_nav_bar.dart';
 import '../../../../core/widgets/desktop_header.dart';
@@ -23,6 +22,7 @@ import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../deals/presentation/screens/deals_screen.dart';
 import '../../../notifications/presentation/screens/notifications_screen.dart';
 import '../../../activities/presentation/screens/master_dropdowns_screen.dart';
+import '../../../authentication/presentation/screens/user_management_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../departments/data/models/department_model.dart';
 import '../../../departments/presentation/screens/departments_screen.dart';
@@ -57,7 +57,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     QuarterViewScreen(),        // 14
     DocumentsScreen(),          // 15
     TemplatesScreen(),          // 16
-    DashboardScreen(),          // 17 (was User Management)
+    UserManagementScreen(),     // 17
     MasterDropdownsScreen(),    // 18
     DepartmentsScreen(),        // 19
   ];
@@ -80,7 +80,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     'Quarter View',
     'Documents',
     'Templates',
-    'Dashboard',
+    'User Management',
     'Master Dropdowns',
     'Departments Configuration',
   ];

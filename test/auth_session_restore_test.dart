@@ -66,6 +66,15 @@ class FakeAuthRepository implements AuthRepository {
 
   @override
   Future<bool> switchDepartment(String departmentId) async => true;
+
+  @override
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  }) async => true;
 }
 
 void main() {

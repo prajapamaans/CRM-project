@@ -256,9 +256,18 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     if (limit != null) queryParameters['limit'] = limit.toString();
     if (page != null) queryParameters['page'] = page.toString();
     if (type != null && type.isNotEmpty) queryParameters['type'] = type;
-    if (contactId != null && contactId.isNotEmpty) queryParameters['contactId'] = contactId;
-    if (companyId != null && companyId.isNotEmpty) queryParameters['companyId'] = companyId;
-    if (dealId != null && dealId.isNotEmpty) queryParameters['dealId'] = dealId;
+    if (contactId != null && contactId.isNotEmpty) {
+      queryParameters['contactId'] = contactId;
+      queryParameters['contact_id'] = contactId;
+    }
+    if (companyId != null && companyId.isNotEmpty) {
+      queryParameters['companyId'] = companyId;
+      queryParameters['company_id'] = companyId;
+    }
+    if (dealId != null && dealId.isNotEmpty) {
+      queryParameters['dealId'] = dealId;
+      queryParameters['deal_id'] = dealId;
+    }
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
     }
@@ -320,9 +329,18 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     int? limit,
   }) async {
     final queryParameters = <String, dynamic>{};
-    if (contactId != null && contactId.isNotEmpty) queryParameters['contactId'] = contactId;
-    if (companyId != null && companyId.isNotEmpty) queryParameters['companyId'] = companyId;
-    if (dealId != null && dealId.isNotEmpty) queryParameters['dealId'] = dealId;
+    if (contactId != null && contactId.isNotEmpty) {
+      queryParameters['contactId'] = contactId;
+      queryParameters['contact_id'] = contactId;
+    }
+    if (companyId != null && companyId.isNotEmpty) {
+      queryParameters['companyId'] = companyId;
+      queryParameters['company_id'] = companyId;
+    }
+    if (dealId != null && dealId.isNotEmpty) {
+      queryParameters['dealId'] = dealId;
+      queryParameters['deal_id'] = dealId;
+    }
     if (page != null) queryParameters['page'] = page.toString();
     if (limit != null) queryParameters['limit'] = limit.toString();
 

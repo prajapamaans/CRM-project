@@ -26,6 +26,13 @@ abstract class AuthRepository {
   Future<String?> getToken();
   Future<String?> getRefreshToken();
   Future<bool> switchDepartment(String departmentId);
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  });
 }
 
 class AuthRepositoryImpl implements AuthRepository {
@@ -170,6 +177,31 @@ class AuthRepositoryImpl implements AuthRepository {
     } catch (e) {
       debugPrint('[AuthRepository.switchDepartment ERROR]: $e');
       return false;
+    }
+  }
+
+  @override
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  }) async {
+    try {
+      return await _remoteDataSource.createUser(
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        role: role,
+        departmentId: departmentId,
+      );
+    } catch (e) {
+      debugPrint('[AuthRepository.createUser ERROR]: $e');
+      if (e is DioException) {
+        throw NetworkException.fromDioException(e);
+      }
+      throw NetworkException(message: e.toString());
     }
   }
 }

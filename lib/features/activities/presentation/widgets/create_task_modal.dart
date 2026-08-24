@@ -469,6 +469,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           // 2. Form Body
           Expanded(
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               children: [
                 // Enter task name... textfield container
@@ -1003,86 +1004,86 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-
-          // Follow-up task row
-          FollowUpTaskSection(
-            initialChecked: false,
-          ),
-
-          // 3. Footer Bar with Create button & Associated with 0 records
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                ElevatedButton(
-                  onPressed: !_isSubmitting ? _handleSubmit : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF70D1C4), // Teal background matching image 2
-                    disabledBackgroundColor: const Color(0xFFA5E3DB),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Text(
-                          isEditing ? 'Save' : 'Create',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
+                const SizedBox(height: 12),
+                FollowUpTaskSection(
+                  initialChecked: false,
                 ),
-                InkWell(
-                  onTap: () async {
-                    final result = await RecordAssociationSheet.show(
-                      context,
-                      initialAssociations: _associations,
-                    );
-                    if (result != null) {
-                      setState(() {
-                        _associations = result;
-                      });
-                    }
-                  },
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF00A884),
+                      ElevatedButton(
+                        onPressed: !_isSubmitting ? _handleSubmit : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF70D1C4),
+                          disabledBackgroundColor: const Color(0xFFA5E3DB),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                         ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                isEditing ? 'Save' : 'Create',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: Color(0xFF00A884),
-                        size: 18,
+                      InkWell(
+                        onTap: () async {
+                          final result = await RecordAssociationSheet.show(
+                            context,
+                            initialAssociations: _associations,
+                          );
+                          if (result != null) {
+                            setState(() {
+                              _associations = result;
+                            });
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Text(
+                              'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF00A884),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Color(0xFF00A884),
+                              size: 18,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(height: 160),
               ],
             ),
           ),
@@ -1223,14 +1224,44 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     final scheduledDateTime = DateTime.now().add(const Duration(days: 3));
     final scheduledAtIso = scheduledDateTime.toUtc().toIso8601String();
 
+    String? targetCompanyId = widget.companyId;
+    if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
+        _associations['Companies'] != null &&
+        _associations['Companies']!.isNotEmpty) {
+      targetCompanyId = _associations['Companies']!.first['id'];
+    }
+
+    String? targetContactId = widget.contactId;
+    if ((targetContactId == null || targetContactId.isEmpty) &&
+        _associations['Contacts'] != null &&
+        _associations['Contacts']!.isNotEmpty) {
+      targetContactId = _associations['Contacts']!.first['id'];
+    }
+
+    String? targetDealId = widget.dealId;
+    if ((targetDealId == null || targetDealId.isEmpty) &&
+        _associations['Deals'] != null &&
+        _associations['Deals']!.isNotEmpty) {
+      targetDealId = _associations['Deals']!.first['id'];
+    }
+
     // 5. Confirmed API payload structure
     final taskPayload = {
       'type': 'task',
       'title': finalTitle,
       'associations': associations,
-      'companyId': (widget.companyId != null && widget.companyId!.isNotEmpty) ? widget.companyId : null,
-      'contactId': (widget.contactId != null && widget.contactId!.isNotEmpty) ? widget.contactId : null,
-      'dealId': (widget.dealId != null && widget.dealId!.isNotEmpty) ? widget.dealId : null,
+      if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+        'companyId': targetCompanyId,
+        'company_id': targetCompanyId,
+      },
+      if (targetContactId != null && targetContactId.isNotEmpty) ...{
+        'contactId': targetContactId,
+        'contact_id': targetContactId,
+      },
+      if (targetDealId != null && targetDealId.isNotEmpty) ...{
+        'dealId': targetDealId,
+        'deal_id': targetDealId,
+      },
       'description': descriptionJson,
       if (ownerId != null && ownerId.isNotEmpty) 'ownerId': ownerId,
       'priority': _selectedPriority.toLowerCase(),

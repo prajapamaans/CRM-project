@@ -199,6 +199,18 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
 
                       const SizedBox(height: 4),
 
+                      // User Management Item
+                      _buildSubTile(
+                        context,
+                        navProvider: navProvider,
+                        itemKey: 'user_management',
+                        index: 17,
+                        icon: Icons.people_outline_rounded,
+                        label: 'User Management',
+                        showPinButton: false,
+                      ),
+                      const SizedBox(height: 4),
+
                       // Notifications Item
                       _buildStandaloneItem(
                         context,

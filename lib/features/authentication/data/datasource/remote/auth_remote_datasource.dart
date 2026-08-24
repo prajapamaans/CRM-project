@@ -27,6 +27,14 @@ abstract class AuthRemoteDataSource {
   });
 
   Future<String?> switchDepartment(String departmentId);
+
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  });
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -161,5 +169,57 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       return dataMap['access_token']?.toString() ?? dataMap['accessToken']?.toString();
     }
     return null;
+  }
+
+  @override
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  }) async {
+    final payload = <String, dynamic>{
+      'first_name': firstName,
+      'firstName': firstName,
+      'last_name': lastName,
+      'lastName': lastName,
+      'email': email,
+      'role': role,
+      'department_id': departmentId,
+      'departmentId': departmentId,
+      'department_ids': [departmentId],
+      'departmentIds': [departmentId],
+    };
+
+    final Options options = Options(headers: {
+      'X-Department-Id': departmentId,
+      'departmentId': departmentId,
+      'department_id': departmentId,
+    });
+
+    try {
+      final response = await _apiService.post(
+        '/users',
+        data: payload,
+        options: options,
+      );
+      debugPrint('[POST /users SUCCESS]: ${response.data}');
+      return true;
+    } catch (e) {
+      debugPrint('[POST /users WARNING]: $e. Retrying /auth/team...');
+      try {
+        final response = await _apiService.post(
+          ApiConstants.team,
+          data: payload,
+          options: options,
+        );
+        debugPrint('[POST /auth/team SUCCESS]: ${response.data}');
+        return true;
+      } catch (e2) {
+        debugPrint('[POST /auth/team WARNING]: $e2');
+        rethrow;
+      }
+    }
   }
 }

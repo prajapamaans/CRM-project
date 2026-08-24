@@ -186,6 +186,40 @@ class AuthProvider extends ChangeNotifier {
     }).toList();
   }
 
+  /// Creates a new user in backend under selected departmentId and refreshes member list.
+  Future<bool> createUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String role,
+    required String departmentId,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final success = await _repository.createUser(
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        role: role,
+        departmentId: departmentId,
+      );
+      if (success) {
+        await fetchTeamMembers();
+      }
+      _isLoading = false;
+      notifyListeners();
+      return success;
+    } catch (e) {
+      _error = e is NetworkException ? e.message : 'Failed to create user.';
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Clears active auth session locally.
   Future<void> logout() async {
     await _repository.logout();

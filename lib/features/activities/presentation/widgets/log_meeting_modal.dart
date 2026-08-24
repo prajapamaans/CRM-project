@@ -357,6 +357,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
           // 2. Form Body
           Expanded(
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               children: [
                 // "What is this meeting about?" Text Input Box matching Image 4
@@ -732,120 +733,158 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                     });
                   },
                 ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: canSubmit
+                        ? () async {
+                            final matchedOption = provider.meetingOutcomeOptions.firstWhere(
+                              (o) => o.label == _selectedOutcome,
+                              orElse: () => MasterDropdownOptionModel(
+                                id: '',
+                                value: _selectedOutcome.toLowerCase().replaceAll(' ', '_'),
+                                label: _selectedOutcome,
+                              ),
+                            );
+                            final outcomeValue = matchedOption.value;
 
-          // 3. Bottom Action Footer Button
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: ElevatedButton(
-              onPressed: canSubmit
-                  ? () async {
-                      final matchedOption = provider.meetingOutcomeOptions.firstWhere(
-                        (o) => o.label == _selectedOutcome,
-                        orElse: () => MasterDropdownOptionModel(
-                          id: '',
-                          value: _selectedOutcome.toLowerCase().replaceAll(' ', '_'),
-                          label: _selectedOutcome,
-                        ),
-                      );
-                      final outcomeValue = matchedOption.value;
+                            String? targetCompanyId = widget.companyId ?? widget.existingMeeting?.companyId;
+                            if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
+                                _associations['Companies'] != null &&
+                                _associations['Companies']!.isNotEmpty) {
+                              targetCompanyId = _associations['Companies']!.first['id'];
+                            }
 
-                      final contactId = widget.contactId ?? widget.existingMeeting?.contactId;
-                      final companyId = widget.companyId ?? widget.existingMeeting?.companyId;
-                      final dealId = widget.dealId ?? widget.existingMeeting?.dealId;
+                            String? targetContactId = widget.contactId ?? widget.existingMeeting?.contactId;
+                            if ((targetContactId == null || targetContactId.isEmpty) &&
+                                _associations['Contacts'] != null &&
+                                _associations['Contacts']!.isNotEmpty) {
+                              targetContactId = _associations['Contacts']!.first['id'];
+                            }
 
-                      final meetingData = {
-                        'title': _titleController.text.trim(),
-                        'type': 'meeting',
-                        'outcome': outcomeValue,
-                        'duration': _selectedDuration,
-                        'startTime': _startTimeController.text.trim(),
-                        'notes': _notesController.text.trim(),
-                        'createFollowUpTask': _createFollowUpTask,
-                        if (contactId != null) 'contactId': contactId,
-                        if (companyId != null) 'companyId': companyId,
-                        if (dealId != null) 'dealId': dealId,
-                      };
+                            String? targetDealId = widget.dealId ?? widget.existingMeeting?.dealId;
+                            if ((targetDealId == null || targetDealId.isEmpty) &&
+                                _associations['Deals'] != null &&
+                                _associations['Deals']!.isNotEmpty) {
+                              targetDealId = _associations['Deals']!.first['id'];
+                            }
 
-                      final existingId = widget.existingMeeting?.id;
-                      try {
-                        if (existingId != null && existingId.isNotEmpty) {
-                          try {
-                            final res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
-                            debugPrint('[PUT /api/activities/$existingId SUCCESS]: ${res.data}');
-                          } catch (e) {
-                            debugPrint('[PUT /api/activities/$existingId FAILED, TRYING PATCH]: $e');
-                            final res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
-                            debugPrint('[PATCH /api/activities/$existingId SUCCESS]: ${res.data}');
+                            final meetingData = {
+                              'title': _titleController.text.trim(),
+                              'type': 'meeting',
+                              'outcome': outcomeValue,
+                              'duration': _selectedDuration,
+                              'startTime': _startTimeController.text.trim(),
+                              'notes': _notesController.text.trim(),
+                              'description': _notesController.text.trim(),
+                              'createFollowUpTask': _createFollowUpTask,
+                              if (targetContactId != null && targetContactId.isNotEmpty) ...{
+                                'contactId': targetContactId,
+                                'contact_id': targetContactId,
+                              },
+                              if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+                                'companyId': targetCompanyId,
+                                'company_id': targetCompanyId,
+                              },
+                              if (targetDealId != null && targetDealId.isNotEmpty) ...{
+                                'dealId': targetDealId,
+                                'deal_id': targetDealId,
+                              },
+                            };
+
+                            final existingId = widget.existingMeeting?.id;
+                            try {
+                              if (existingId != null && existingId.isNotEmpty) {
+                                try {
+                                  final res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
+                                  debugPrint('[PUT /api/activities/$existingId SUCCESS]: ${res.data}');
+                                } catch (e) {
+                                  debugPrint('[PUT /api/activities/$existingId FAILED, TRYING PATCH]: $e');
+                                  final res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
+                                  debugPrint('[PATCH /api/activities/$existingId SUCCESS]: ${res.data}');
+                                }
+                              } else {
+                                final res = await ApiService().post(ApiConstants.activities, data: meetingData);
+                                debugPrint('[POST /api/activities SUCCESS]: ${res.data}');
+                              }
+                            } catch (e) {
+                              debugPrint('[SAVE ${ApiConstants.activities} ERROR]: $e');
+                            }
+
+                            if (_createFollowUpTask) {
+                              try {
+                                final taskPayload = {
+                                  'title': 'Follow-up: ${_titleController.text.trim()}',
+                                  'subject': 'Follow-up: ${_titleController.text.trim()}',
+                                  'type': 'task',
+                                  'status': 'PENDING',
+                                  'priority': 'Medium',
+                                  'notes': _notesController.text.trim(),
+                                  'description': _notesController.text.trim(),
+                                  'activityDate': DateTime.now().toIso8601String(),
+                                  'dueDate': 'Today',
+                                  if (targetContactId != null && targetContactId.isNotEmpty) ...{
+                                    'contactId': targetContactId,
+                                    'contact_id': targetContactId,
+                                  },
+                                  if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+                                    'companyId': targetCompanyId,
+                                    'company_id': targetCompanyId,
+                                  },
+                                  if (targetDealId != null && targetDealId.isNotEmpty) ...{
+                                    'dealId': targetDealId,
+                                    'deal_id': targetDealId,
+                                  },
+                                };
+                                try {
+                                  await ApiService().post(ApiConstants.activities, data: taskPayload);
+                                } catch (_) {}
+                                try {
+                                  await ApiService().post('/tasks', data: taskPayload);
+                                } catch (_) {}
+                              } catch (e) {
+                                debugPrint('[Create Follow-up Task Error]: $e');
+                              }
+                            }
+
+                            final meeting = MeetingModel(
+                              id: existingId,
+                              title: _titleController.text.trim(),
+                              outcome: _selectedOutcome,
+                              duration: _selectedDuration,
+                              startTime: _startTimeController.text.trim(),
+                              notes: _notesController.text.trim(),
+                              assignedTo: widget.existingMeeting?.assignedTo ?? 'Admin User',
+                              contactId: targetContactId,
+                              companyId: targetCompanyId,
+                              dealId: targetDealId,
+                            );
+                            if (context.mounted) {
+                              Navigator.of(context).pop(meeting);
+                            }
                           }
-                        } else {
-                          final res = await ApiService().post(ApiConstants.activities, data: meetingData);
-                          debugPrint('[POST /api/activities SUCCESS]: ${res.data}');
-                        }
-                      } catch (e) {
-                        debugPrint('[SAVE ${ApiConstants.activities} ERROR]: $e');
-                      }
-
-                      if (_createFollowUpTask) {
-                        try {
-                          final taskPayload = {
-                            'title': 'Follow-up: ${_titleController.text.trim()}',
-                            'subject': 'Follow-up: ${_titleController.text.trim()}',
-                            'type': 'task',
-                            'status': 'PENDING',
-                            'priority': 'Medium',
-                            'description': _notesController.text.trim(),
-                            if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
-                            if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
-                            if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
-                          };
-                          await ApiService().post('/tasks', data: taskPayload);
-                        } catch (e) {
-                          debugPrint('[Create Follow-up Task Error]: $e');
-                        }
-                      }
-
-                      final meeting = MeetingModel(
-                        id: existingId,
-                        title: _titleController.text.trim(),
-                        outcome: _selectedOutcome,
-                        duration: _selectedDuration,
-                        startTime: _startTimeController.text.trim(),
-                        notes: _notesController.text.trim(),
-                        assignedTo: widget.existingMeeting?.assignedTo ?? 'Admin User',
-                        contactId: contactId,
-                        companyId: companyId,
-                        dealId: dealId,
-                      );
-                      if (context.mounted) {
-                        Navigator.of(context).pop(meeting);
-                      }
-                    }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: canSubmit ? const Color(0xFF00A884) : const Color(0xFFF1F5F9),
-                foregroundColor: canSubmit ? Colors.white : const Color(0xFF94A3B8),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6),
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: canSubmit ? const Color(0xFF00A884) : const Color(0xFFF1F5F9),
+                      foregroundColor: canSubmit ? Colors.white : const Color(0xFF94A3B8),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    child: Text(
+                      widget.existingMeeting != null ? 'Save' : 'Log meeting',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              child: Text(
-                widget.existingMeeting != null ? 'Save' : 'Log meeting',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13.5,
-                ),
-              ),
+                const SizedBox(height: 160),
+              ],
             ),
           ),
         ],

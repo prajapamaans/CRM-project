@@ -576,6 +576,7 @@ class _LogCallModalState extends State<LogCallModal> {
           // 2. Form Body
           Expanded(
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               children: [
                 // "What was this call about?" Title Input Field matching Image 3
@@ -1042,81 +1043,80 @@ class _LogCallModalState extends State<LogCallModal> {
                   },
                 ),
                 const SizedBox(height: 12),
-              ],
-            ),
-          ),
-
-          // 3. Footer Bar: "Associated with 0 records v" + Save Button
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                InkWell(
-                  onTap: () async {
-                    final result = await RecordAssociationSheet.show(
-                      context,
-                      initialAssociations: _associations,
-                    );
-                    if (result != null) {
-                      setState(() {
-                        _associations = result;
-                      });
-                    }
-                  },
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF00A884),
+                      InkWell(
+                        onTap: () async {
+                          final result = await RecordAssociationSheet.show(
+                            context,
+                            initialAssociations: _associations,
+                          );
+                          if (result != null) {
+                            setState(() {
+                              _associations = result;
+                            });
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Text(
+                              'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF00A884),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Color(0xFF00A884),
+                              size: 20,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: Color(0xFF00A884),
-                        size: 20,
+                      ElevatedButton(
+                        onPressed: canSubmit ? _handleSubmit : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: canSubmit ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                'Log call',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
                       ),
                     ],
                   ),
                 ),
-
-                ElevatedButton(
-                  onPressed: canSubmit ? _handleSubmit : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: canSubmit ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Text(
-                          'Log call',
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                ),
+                const SizedBox(height: 160),
               ],
             ),
           ),
@@ -1206,10 +1206,30 @@ class _LogCallModalState extends State<LogCallModal> {
     final companyId = widget.companyId ?? widget.callToEdit?.companyId;
     final dealId = widget.dealId ?? widget.callToEdit?.dealId;
 
+    String? targetCompanyId = companyId ?? widget.callToEdit?.companyId;
+    if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
+        _associations['Companies'] != null &&
+        _associations['Companies']!.isNotEmpty) {
+      targetCompanyId = _associations['Companies']!.first['id'];
+    }
+
+    String? targetContactId = contactId ?? widget.callToEdit?.contactId;
+    if ((targetContactId == null || targetContactId.isEmpty) &&
+        _associations['Contacts'] != null &&
+        _associations['Contacts']!.isNotEmpty) {
+      targetContactId = _associations['Contacts']!.first['id'];
+    }
+
+    String? targetDealId = dealId ?? widget.callToEdit?.dealId;
+    if ((targetDealId == null || targetDealId.isEmpty) &&
+        _associations['Deals'] != null &&
+        _associations['Deals']!.isNotEmpty) {
+      targetDealId = _associations['Deals']!.first['id'];
+    }
+
     final callData = {
       'title': _titleController.text.trim(),
-      'subject': _titleController.text.trim(),
-      'type': widget.activityType.toLowerCase(),
+      'type': 'call',
       'outcome': outcomeValue,
       'duration': _selectedDuration,
       'startTime': _startTimeController.text.trim(),
@@ -1219,9 +1239,18 @@ class _LogCallModalState extends State<LogCallModal> {
       'direction': _selectedDirection,
       'createFollowUpTask': _createFollowUpTask,
       if (_selectedOwner != 'Select owner') 'ownerName': _selectedOwner,
-      if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
-      if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
-      if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
+      if (targetContactId != null && targetContactId.isNotEmpty) ...{
+        'contactId': targetContactId,
+        'contact_id': targetContactId,
+      },
+      if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+        'companyId': targetCompanyId,
+        'company_id': targetCompanyId,
+      },
+      if (targetDealId != null && targetDealId.isNotEmpty) ...{
+        'dealId': targetDealId,
+        'deal_id': targetDealId,
+      },
     };
 
     final isEditing = widget.callToEdit != null &&
@@ -1258,12 +1287,29 @@ class _LogCallModalState extends State<LogCallModal> {
             'type': 'task',
             'status': 'PENDING',
             'priority': 'Medium',
+            'notes': _notesController.text.trim(),
             'description': _notesController.text.trim(),
-            if (contactId != null && contactId.isNotEmpty) 'contactId': contactId,
-            if (companyId != null && companyId.isNotEmpty) 'companyId': companyId,
-            if (dealId != null && dealId.isNotEmpty) 'dealId': dealId,
+            'activityDate': DateTime.now().toIso8601String(),
+            'dueDate': 'Today',
+            if (targetContactId != null && targetContactId.isNotEmpty) ...{
+              'contactId': targetContactId,
+              'contact_id': targetContactId,
+            },
+            if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+              'companyId': targetCompanyId,
+              'company_id': targetCompanyId,
+            },
+            if (targetDealId != null && targetDealId.isNotEmpty) ...{
+              'dealId': targetDealId,
+              'deal_id': targetDealId,
+            },
           };
-          await ApiService().post('/tasks', data: taskPayload);
+          try {
+            await ApiService().post(ApiConstants.activities, data: taskPayload);
+          } catch (_) {}
+          try {
+            await ApiService().post('/tasks', data: taskPayload);
+          } catch (_) {}
         } catch (e) {
           debugPrint('[Create Follow-up Task Error]: $e');
         }

@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/network/api_constants.dart';
+import '../../../../core/network/api_service.dart';
+import '../../../activities/presentation/widgets/create_email_modal.dart';
+import '../../../activities/presentation/widgets/create_note_modal.dart';
+import '../../../activities/presentation/widgets/create_task_modal.dart';
+import '../../../activities/presentation/widgets/log_call_modal.dart';
+import '../../../activities/presentation/widgets/log_meeting_modal.dart';
 import '../../data/models/notification_model.dart';
 import '../providers/notification_provider.dart';
 import '../utils/notification_utils.dart';
@@ -403,6 +410,144 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  Future<void> _handleDeleteNotificationActivity(NotificationModel item) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Activity', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to delete this activity?', style: GoogleFonts.poppins()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final actId = item.entityId ?? item.id;
+      final actType = (item.activityType ?? item.type).toLowerCase();
+      final api = ApiService();
+      try {
+        if (actType.contains('task')) {
+          await api.delete('/tasks/$actId');
+        } else {
+          await api.delete('${ApiConstants.activities}/$actId');
+        }
+      } catch (_) {
+        try {
+          await api.delete('${ApiConstants.activities}/$actId');
+        } catch (e) {
+          debugPrint('[DELETE NOTIFICATION ACTIVITY ERROR]: $e');
+        }
+      }
+
+      if (mounted) {
+        context.read<NotificationProvider>().fetchNotifications();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Activity deleted successfully'),
+            backgroundColor: Color(0xFF00A884),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleEditNotificationActivity(NotificationModel item) async {
+    final actId = item.entityId ?? item.id;
+    final actType = (item.activityType ?? item.type).toLowerCase();
+
+    if (actType.contains('task')) {
+      await CreateTaskModal.show(
+        context,
+        taskToEdit: TaskModel(
+          id: actId,
+          title: item.message,
+          dueDate: 'Today',
+          priority: 'Medium',
+          status: 'PENDING',
+          assignedTo: 'Admin User',
+          notes: item.message,
+        ),
+        companyId: item.companyId,
+        contactId: item.contactId,
+        dealId: item.dealId,
+      );
+    } else if (actType.contains('email')) {
+      await CreateEmailModal.show(
+        context,
+        emailToEdit: {
+          'id': actId,
+          'title': item.message,
+          'notes': item.message,
+        },
+        companyId: item.companyId,
+        contactId: item.contactId,
+        dealId: item.dealId,
+      );
+    } else if (actType.contains('note')) {
+      await CreateNoteModal.show(
+        context,
+        noteToEdit: {
+          'id': actId,
+          'title': item.message,
+          'notes': item.message,
+        },
+        companyId: item.companyId,
+        contactId: item.contactId,
+        dealId: item.dealId,
+      );
+    } else if (actType.contains('call')) {
+      await LogCallModal.show(
+        context,
+        callToEdit: CallModel(
+          id: actId,
+          title: item.message,
+          outcome: 'Connected',
+          duration: '5m',
+          startTime: '10:00 AM',
+          notes: item.message,
+          companyId: item.companyId,
+          contactId: item.contactId,
+          dealId: item.dealId,
+        ),
+        companyId: item.companyId,
+        contactId: item.contactId,
+        dealId: item.dealId,
+      );
+    } else if (actType.contains('meeting')) {
+      await LogMeetingModal.show(
+        context,
+        existingMeeting: MeetingModel(
+          id: actId,
+          title: item.message,
+          outcome: 'Completed',
+          duration: '30m',
+          startTime: '10:00 AM',
+          notes: item.message,
+          companyId: item.companyId,
+          contactId: item.contactId,
+          dealId: item.dealId,
+        ),
+        companyId: item.companyId,
+        contactId: item.contactId,
+        dealId: item.dealId,
+      );
+    }
+
+    if (mounted) {
+      context.read<NotificationProvider>().fetchNotifications();
+    }
+  }
+
   Widget _buildNotificationItem({
     required NotificationModel item,
   }) {
@@ -470,9 +615,47 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               ],
             ),
           ),
+          PopupMenuButton<String>(
+            icon: const Icon(
+              Icons.more_vert_rounded,
+              color: Color(0xFF94A3B8),
+              size: 20,
+            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF00A884)),
+                    const SizedBox(width: 8),
+                    Text('Edit Activity', style: GoogleFonts.poppins(fontSize: 13)),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
+                    const SizedBox(width: 8),
+                    Text('Delete Activity', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
+                  ],
+                ),
+              ),
+            ],
+            onSelected: (action) {
+              if (action == 'delete') {
+                _handleDeleteNotificationActivity(item);
+              } else if (action == 'edit') {
+                _handleEditNotificationActivity(item);
+              }
+            },
+          ),
         ],
       ),
     );
   }
 }
+
 

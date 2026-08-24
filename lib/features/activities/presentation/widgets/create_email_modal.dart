@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,6 +11,7 @@ import 'create_template_modal.dart';
 import 'follow_up_task_section.dart';
 
 class CreateEmailModal extends StatefulWidget {
+  final Map<String, dynamic>? emailToEdit;
   final String? contactId;
   final String? companyId;
   final String? dealId;
@@ -18,6 +20,7 @@ class CreateEmailModal extends StatefulWidget {
 
   const CreateEmailModal({
     super.key,
+    this.emailToEdit,
     this.contactId,
     this.companyId,
     this.dealId,
@@ -27,6 +30,7 @@ class CreateEmailModal extends StatefulWidget {
 
   static Future<bool?> show(
     BuildContext context, {
+    Map<String, dynamic>? emailToEdit,
     String? contactId,
     String? companyId,
     String? dealId,
@@ -38,6 +42,7 @@ class CreateEmailModal extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => CreateEmailModal(
+        emailToEdit: emailToEdit,
         contactId: contactId,
         companyId: companyId,
         dealId: dealId,
@@ -196,6 +201,12 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
   // Associations state
   late Map<String, List<Map<String, String>>> _associations;
 
+  // Undo/Redo state stack
+  final List<String> _undoHistory = [];
+  final List<String> _redoHistory = [];
+  bool _isProgrammaticChange = false;
+  Timer? _undoDebounceTimer;
+
   @override
   void initState() {
     super.initState();
@@ -204,10 +215,77 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
       'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
+
+    if (widget.emailToEdit != null) {
+      _subjectController.text = (widget.emailToEdit!['title'] ?? widget.emailToEdit!['subject'] ?? '').toString();
+      _bodyController.text = (widget.emailToEdit!['notes'] ?? widget.emailToEdit!['body'] ?? widget.emailToEdit!['content'] ?? '').toString();
+    }
+
+    _undoHistory.add(_bodyController.text);
+    _bodyController.addListener(_onContentChanged);
+  }
+
+  void _onContentChanged() {
+    if (_isProgrammaticChange) return;
+    final currentText = _bodyController.text;
+
+    // Check if user hit space, newline, or a punctuation mark
+    final bool isWordBoundary = currentText.endsWith(' ') || currentText.endsWith('\n') || currentText.endsWith('.') || currentText.endsWith(',');
+
+    _undoDebounceTimer?.cancel();
+    if (isWordBoundary) {
+      _saveUndoCheckpoint(currentText);
+    } else {
+      _undoDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+        _saveUndoCheckpoint(currentText);
+      });
+    }
+  }
+
+  void _saveUndoCheckpoint(String text) {
+    if (_undoHistory.isEmpty || _undoHistory.last != text) {
+      if (_undoHistory.length > 200) {
+        _undoHistory.removeAt(0);
+      }
+      _undoHistory.add(text);
+      _redoHistory.clear();
+      setState(() {});
+    }
+  }
+
+  void _undo() {
+    if (_undoHistory.length > 1) {
+      _isProgrammaticChange = true;
+      final current = _undoHistory.removeLast();
+      _redoHistory.add(current);
+      final previous = _undoHistory.last;
+      _bodyController.value = TextEditingValue(
+        text: previous,
+        selection: TextSelection.collapsed(offset: previous.length),
+      );
+      _isProgrammaticChange = false;
+      setState(() {});
+    }
+  }
+
+  void _redo() {
+    if (_redoHistory.isNotEmpty) {
+      _isProgrammaticChange = true;
+      final next = _redoHistory.removeLast();
+      _undoHistory.add(next);
+      _bodyController.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+      _isProgrammaticChange = false;
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    _undoDebounceTimer?.cancel();
+    _bodyController.removeListener(_onContentChanged);
     _subjectController.dispose();
     _bodyController.dispose();
     super.dispose();
@@ -310,17 +388,56 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
 
     try {
       final api = ApiService();
+      String? selectedCompanyId = widget.companyId ?? widget.emailToEdit?['companyId'] ?? widget.emailToEdit?['company_id'];
+      if ((selectedCompanyId == null || selectedCompanyId.isEmpty) &&
+          _associations['Companies'] != null &&
+          _associations['Companies']!.isNotEmpty) {
+        selectedCompanyId = _associations['Companies']!.first['id'];
+      }
+
+      String? selectedContactId = widget.contactId ?? widget.emailToEdit?['contactId'] ?? widget.emailToEdit?['contact_id'];
+      if ((selectedContactId == null || selectedContactId.isEmpty) &&
+          _associations['Contacts'] != null &&
+          _associations['Contacts']!.isNotEmpty) {
+        selectedContactId = _associations['Contacts']!.first['id'];
+      }
+
+      String? selectedDealId = widget.dealId ?? widget.emailToEdit?['dealId'] ?? widget.emailToEdit?['deal_id'];
+      if ((selectedDealId == null || selectedDealId.isEmpty) &&
+          _associations['Deals'] != null &&
+          _associations['Deals']!.isNotEmpty) {
+        selectedDealId = _associations['Deals']!.first['id'];
+      }
+
       final payload = {
         'title': subject.isNotEmpty ? subject : 'Email Activity',
         'type': 'email',
         'notes': body,
         'activityDate': DateTime.now().toIso8601String(),
-        if (widget.contactId != null) 'contactId': widget.contactId,
-        if (widget.companyId != null) 'companyId': widget.companyId,
-        if (widget.dealId != null) 'dealId': widget.dealId,
+        if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
+          'contactId': selectedContactId,
+          'contact_id': selectedContactId,
+        },
+        if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) ...{
+          'companyId': selectedCompanyId,
+          'company_id': selectedCompanyId,
+        },
+        if (selectedDealId != null && selectedDealId.isNotEmpty) ...{
+          'dealId': selectedDealId,
+          'deal_id': selectedDealId,
+        },
       };
 
-      await api.post(ApiConstants.activities, data: payload);
+      final emailId = widget.emailToEdit?['id'] ?? widget.emailToEdit?['_id'];
+      if (emailId != null && emailId.toString().isNotEmpty) {
+        try {
+          await api.put('${ApiConstants.activities}/$emailId', data: payload);
+        } catch (_) {
+          await api.patch('${ApiConstants.activities}/$emailId', data: payload);
+        }
+      } else {
+        await api.post(ApiConstants.activities, data: payload);
+      }
 
       if (_createFollowUpTask) {
         try {
@@ -330,12 +447,29 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
             'type': 'task',
             'status': 'PENDING',
             'priority': 'Medium',
+            'notes': body,
             'description': body,
-            if (widget.contactId != null) 'contactId': widget.contactId,
-            if (widget.companyId != null) 'companyId': widget.companyId,
-            if (widget.dealId != null) 'dealId': widget.dealId,
+            'activityDate': DateTime.now().toIso8601String(),
+            'dueDate': 'Today',
+            if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
+              'contactId': selectedContactId,
+              'contact_id': selectedContactId,
+            },
+            if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) ...{
+              'companyId': selectedCompanyId,
+              'company_id': selectedCompanyId,
+            },
+            if (selectedDealId != null && selectedDealId.isNotEmpty) ...{
+              'dealId': selectedDealId,
+              'deal_id': selectedDealId,
+            },
           };
-          await api.post('/tasks', data: taskPayload);
+          try {
+            await api.post(ApiConstants.activities, data: taskPayload);
+          } catch (_) {}
+          try {
+            await api.post('/tasks', data: taskPayload);
+          } catch (_) {}
         } catch (e) {
           debugPrint('[Create Follow-up Task Error]: $e');
         }
@@ -428,7 +562,7 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
               // Scrollable content area so form remains scrollable & responsive with keyboard
               Expanded(
                 child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
+                  physics: const AlwaysScrollableScrollPhysics(),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -681,18 +815,27 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                               ),
                               const SizedBox(width: 10),
                               InkWell(
-                                onTap: () {
-                                  if (_bodyController.text.isNotEmpty) _bodyController.clear();
-                                },
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  child: Icon(Icons.undo_rounded, size: 20, color: Color(0xFF64748B)),
+                                onTap: _undoHistory.length > 1 ? _undo : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  child: Icon(
+                                    Icons.undo_rounded,
+                                    size: 20,
+                                    color: _undoHistory.length > 1 ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                child: Icon(Icons.redo_rounded, size: 20, color: Color(0xFF94A3B8)),
+                              InkWell(
+                                onTap: _redoHistory.isNotEmpty ? _redo : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  child: Icon(
+                                    Icons.redo_rounded,
+                                    size: 20,
+                                    color: _redoHistory.isNotEmpty ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -853,6 +996,7 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 160),
                     ],
                   ),
                 ),

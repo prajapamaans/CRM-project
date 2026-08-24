@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
@@ -6,6 +7,7 @@ import '../../../../core/widgets/record_association_sheet.dart';
 import 'follow_up_task_section.dart';
 
 class CreateNoteModal extends StatefulWidget {
+  final Map<String, dynamic>? noteToEdit;
   final String? contactId;
   final String? companyId;
   final String? dealId;
@@ -13,6 +15,7 @@ class CreateNoteModal extends StatefulWidget {
 
   const CreateNoteModal({
     super.key,
+    this.noteToEdit,
     this.contactId,
     this.companyId,
     this.dealId,
@@ -21,6 +24,7 @@ class CreateNoteModal extends StatefulWidget {
 
   static Future<bool?> show(
     BuildContext context, {
+    Map<String, dynamic>? noteToEdit,
     String? contactId,
     String? companyId,
     String? dealId,
@@ -31,6 +35,7 @@ class CreateNoteModal extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => CreateNoteModal(
+        noteToEdit: noteToEdit,
         contactId: contactId,
         companyId: companyId,
         dealId: dealId,
@@ -60,6 +65,12 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
   // Associations state
   late Map<String, List<Map<String, String>>> _associations;
 
+  // Undo/Redo state stack
+  final List<String> _undoHistory = [];
+  final List<String> _redoHistory = [];
+  bool _isProgrammaticChange = false;
+  Timer? _undoDebounceTimer;
+
   @override
   void initState() {
     super.initState();
@@ -68,10 +79,77 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
       'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
+
+    if (widget.noteToEdit != null) {
+      _titleController.text = (widget.noteToEdit!['title'] ?? widget.noteToEdit!['subject'] ?? '').toString();
+      _contentController.text = (widget.noteToEdit!['notes'] ?? widget.noteToEdit!['content'] ?? widget.noteToEdit!['description'] ?? '').toString();
+    }
+
+    _undoHistory.add(_contentController.text);
+    _contentController.addListener(_onContentChanged);
+  }
+
+  void _onContentChanged() {
+    if (_isProgrammaticChange) return;
+    final currentText = _contentController.text;
+    
+    // Check if user hit space, newline, or a punctuation mark
+    final bool isWordBoundary = currentText.endsWith(' ') || currentText.endsWith('\n') || currentText.endsWith('.') || currentText.endsWith(',');
+
+    _undoDebounceTimer?.cancel();
+    if (isWordBoundary) {
+      _saveUndoCheckpoint(currentText);
+    } else {
+      _undoDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+        _saveUndoCheckpoint(currentText);
+      });
+    }
+  }
+
+  void _saveUndoCheckpoint(String text) {
+    if (_undoHistory.isEmpty || _undoHistory.last != text) {
+      if (_undoHistory.length > 200) {
+        _undoHistory.removeAt(0);
+      }
+      _undoHistory.add(text);
+      _redoHistory.clear();
+      setState(() {});
+    }
+  }
+
+  void _undo() {
+    if (_undoHistory.length > 1) {
+      _isProgrammaticChange = true;
+      final current = _undoHistory.removeLast();
+      _redoHistory.add(current);
+      final previous = _undoHistory.last;
+      _contentController.value = TextEditingValue(
+        text: previous,
+        selection: TextSelection.collapsed(offset: previous.length),
+      );
+      _isProgrammaticChange = false;
+      setState(() {});
+    }
+  }
+
+  void _redo() {
+    if (_redoHistory.isNotEmpty) {
+      _isProgrammaticChange = true;
+      final next = _redoHistory.removeLast();
+      _undoHistory.add(next);
+      _contentController.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+      _isProgrammaticChange = false;
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    _undoDebounceTimer?.cancel();
+    _contentController.removeListener(_onContentChanged);
     _titleController.dispose();
     _contentController.dispose();
     super.dispose();
@@ -151,17 +229,56 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
 
     try {
       final api = ApiService();
+      String? selectedCompanyId = widget.companyId ?? widget.noteToEdit?['companyId'] ?? widget.noteToEdit?['company_id'];
+      if ((selectedCompanyId == null || selectedCompanyId.isEmpty) &&
+          _associations['Companies'] != null &&
+          _associations['Companies']!.isNotEmpty) {
+        selectedCompanyId = _associations['Companies']!.first['id'];
+      }
+
+      String? selectedContactId = widget.contactId ?? widget.noteToEdit?['contactId'] ?? widget.noteToEdit?['contact_id'];
+      if ((selectedContactId == null || selectedContactId.isEmpty) &&
+          _associations['Contacts'] != null &&
+          _associations['Contacts']!.isNotEmpty) {
+        selectedContactId = _associations['Contacts']!.first['id'];
+      }
+
+      String? selectedDealId = widget.dealId ?? widget.noteToEdit?['dealId'] ?? widget.noteToEdit?['deal_id'];
+      if ((selectedDealId == null || selectedDealId.isEmpty) &&
+          _associations['Deals'] != null &&
+          _associations['Deals']!.isNotEmpty) {
+        selectedDealId = _associations['Deals']!.first['id'];
+      }
+
       final payload = {
         'title': title.isNotEmpty ? title : 'Note',
         'type': 'note',
         'notes': body,
         'activityDate': DateTime.now().toIso8601String(),
-        if (widget.contactId != null) 'contactId': widget.contactId,
-        if (widget.companyId != null) 'companyId': widget.companyId,
-        if (widget.dealId != null) 'dealId': widget.dealId,
+        if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
+          'contactId': selectedContactId,
+          'contact_id': selectedContactId,
+        },
+        if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) ...{
+          'companyId': selectedCompanyId,
+          'company_id': selectedCompanyId,
+        },
+        if (selectedDealId != null && selectedDealId.isNotEmpty) ...{
+          'dealId': selectedDealId,
+          'deal_id': selectedDealId,
+        },
       };
 
-      await api.post(ApiConstants.activities, data: payload);
+      final noteId = widget.noteToEdit?['id'] ?? widget.noteToEdit?['_id'];
+      if (noteId != null && noteId.toString().isNotEmpty) {
+        try {
+          await api.put('${ApiConstants.activities}/$noteId', data: payload);
+        } catch (_) {
+          await api.patch('${ApiConstants.activities}/$noteId', data: payload);
+        }
+      } else {
+        await api.post(ApiConstants.activities, data: payload);
+      }
 
       if (_createFollowUpTask) {
         try {
@@ -171,12 +288,29 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
             'type': 'task',
             'status': 'PENDING',
             'priority': 'Medium',
+            'notes': body,
             'description': body,
-            if (widget.contactId != null) 'contactId': widget.contactId,
-            if (widget.companyId != null) 'companyId': widget.companyId,
-            if (widget.dealId != null) 'dealId': widget.dealId,
+            'activityDate': DateTime.now().toIso8601String(),
+            'dueDate': 'Today',
+            if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
+              'contactId': selectedContactId,
+              'contact_id': selectedContactId,
+            },
+            if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) ...{
+              'companyId': selectedCompanyId,
+              'company_id': selectedCompanyId,
+            },
+            if (selectedDealId != null && selectedDealId.isNotEmpty) ...{
+              'dealId': selectedDealId,
+              'deal_id': selectedDealId,
+            },
           };
-          await api.post('/tasks', data: taskPayload);
+          try {
+            await api.post(ApiConstants.activities, data: taskPayload);
+          } catch (_) {}
+          try {
+            await api.post('/tasks', data: taskPayload);
+          } catch (_) {}
         } catch (e) {
           debugPrint('[Create Follow-up Task Error]: $e');
         }
@@ -384,20 +518,27 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
                     const SizedBox(height: 24, child: VerticalDivider(color: Color(0xFFCBD5E1), width: 1)),
                     const SizedBox(width: 10),
                     InkWell(
-                      onTap: () {
-                        if (_contentController.text.isNotEmpty) {
-                          _contentController.clear();
-                        }
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        child: Icon(Icons.undo_rounded, size: 24, color: Color(0xFF64748B)),
+                      onTap: _undoHistory.length > 1 ? _undo : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Icon(
+                          Icons.undo_rounded,
+                          size: 24,
+                          color: _undoHistory.length > 1 ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      child: Icon(Icons.redo_rounded, size: 24, color: Color(0xFF94A3B8)),
+                    InkWell(
+                      onTap: _redoHistory.isNotEmpty ? _redo : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Icon(
+                          Icons.redo_rounded,
+                          size: 24,
+                          color: _redoHistory.isNotEmpty ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -407,120 +548,126 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
 
             // 5. Dynamic Note Content Field
             Expanded(
-              child: Container(
-                color: const Color(0xFFF8FAFC),
-                padding: const EdgeInsets.all(16),
-                child: TextField(
-                  controller: _contentController,
-                  maxLines: null,
-                  expands: true,
-                  style: _getContentStyle(),
-                  decoration: InputDecoration(
-                    hintText: 'Start typing to leave a note...',
-                    hintStyle: GoogleFonts.poppins(
-                      fontSize: 14,
-                      color: const Color(0xFF94A3B8),
-                    ),
-                    border: InputBorder.none,
-                  ),
-                ),
-              ),
-            ),
-
-            // 6. Dynamic Associated Record Link Row (Opens Image 2 Layout)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              color: Colors.white,
-              child: InkWell(
-                onTap: () async {
-                  final result = await RecordAssociationSheet.show(
-                    context,
-                    initialAssociations: _associations,
-                  );
-                  if (result != null) {
-                    setState(() {
-                      _associations = result;
-                    });
-                  }
-                },
-                child: Row(
-                  children: [
-                    Text(
-                      'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF00A884),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: Color(0xFF00A884),
-                      size: 20,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
-
-            // 7. Follow-up Task Row
-            FollowUpTaskSection(
-              initialChecked: _createFollowUpTask,
-              onCheckedChanged: (val) {
-                setState(() {
-                  _createFollowUpTask = val;
-                });
-              },
-            ),
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
-
-            // 8. Footer Action Bar (Create Note Button & Save to Activities API)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 children: [
-                  ElevatedButton(
-                    onPressed: _isSubmitting ? null : _submitNote,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00A884),
-                      disabledBackgroundColor: const Color(0xFFCBD5E1),
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    ),
-                    child: Text(
-                      'Create note',
-                      style: GoogleFonts.poppins(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  Row(
-                    children: [
-                      const Icon(Icons.check, color: Color(0xFF00A884), size: 18),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Draft saved',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          color: const Color(0xFF64748B),
+                  Container(
+                    color: const Color(0xFFF8FAFC),
+                    constraints: const BoxConstraints(minHeight: 180),
+                    padding: const EdgeInsets.all(16),
+                    child: TextField(
+                      controller: _contentController,
+                      maxLines: null,
+                      style: _getContentStyle(),
+                      decoration: InputDecoration(
+                        hintText: 'Start typing to leave a note...',
+                        hintStyle: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: const Color(0xFF94A3B8),
                         ),
+                        border: InputBorder.none,
                       ),
-                      const SizedBox(width: 14),
-                      InkWell(
-                        onTap: () {
-                          _titleController.clear();
-                          _contentController.clear();
-                        },
-                        child: const Icon(Icons.delete_outline, color: Color(0xFF64748B), size: 20),
-                      ),
-                    ],
+                    ),
                   ),
+                  const SizedBox(height: 12),
+                  // 6. Dynamic Associated Record Link Row
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    color: Colors.white,
+                    child: InkWell(
+                      onTap: () async {
+                        final result = await RecordAssociationSheet.show(
+                          context,
+                          initialAssociations: _associations,
+                        );
+                        if (result != null) {
+                          setState(() {
+                            _associations = result;
+                          });
+                        }
+                      },
+                      child: Row(
+                        children: [
+                          Text(
+                            'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF00A884),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Color(0xFF00A884),
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+                  // 7. Follow-up Task Row
+                  FollowUpTaskSection(
+                    initialChecked: _createFollowUpTask,
+                    onCheckedChanged: (val) {
+                      setState(() {
+                        _createFollowUpTask = val;
+                      });
+                    },
+                  ),
+                  const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+                  // 8. Footer Action Bar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: Row(
+                      children: [
+                        ElevatedButton(
+                          onPressed: _isSubmitting ? null : _submitNote,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00A884),
+                            disabledBackgroundColor: const Color(0xFFCBD5E1),
+                            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          child: Text(
+                            'Create note',
+                            style: GoogleFonts.poppins(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Row(
+                          children: [
+                            const Icon(Icons.check, color: Color(0xFF00A884), size: 18),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Draft saved',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                color: const Color(0xFF64748B),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            InkWell(
+                              onTap: () {
+                                _titleController.clear();
+                                _contentController.clear();
+                              },
+                              child: const Icon(Icons.delete_outline, color: Color(0xFF64748B), size: 20),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 160),
                 ],
               ),
             ),

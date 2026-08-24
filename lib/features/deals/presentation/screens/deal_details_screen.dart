@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
+import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/models/bingo_summary_model.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/add_association_modal.dart';
@@ -144,6 +146,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
+  String _lastActivityDateStr = '--';
 
   @override
   void initState() {
@@ -170,7 +173,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     _startDateController = TextEditingController();
     _endDateController = TextEditingController();
 
-    _dealStage = d?.stage.isNotEmpty == true ? d!.stage : 'Prospect';
+    _dealStage = _normalizeStage(d?.stage ?? 'Prospect');
 
     _fetchActivities();
     _fetchUsers();
@@ -195,7 +198,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         setState(() {
           if (dealModel.title.isNotEmpty) _nameController.text = dealModel.title;
           if (dealModel.amount > 0) _amountController.text = dealModel.amount.toStringAsFixed(0);
-          if (dealModel.stage.isNotEmpty) _dealStage = dealModel.stage;
+          if (dealModel.stage.isNotEmpty) _dealStage = _normalizeStage(dealModel.stage);
           if (dealModel.companyName != null) _companyController.text = dealModel.companyName!;
           if (dealModel.ownerName != null) _ownerController.text = dealModel.ownerName!;
 
@@ -387,11 +390,30 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         return dtB.compareTo(dtA);
       });
 
-      if (mounted) {
-        setState(() {
-          _activities = uniqueList;
-        });
-      }
+        String updatedLastDate = '--';
+        if (uniqueList.isNotEmpty) {
+          final first = uniqueList.first;
+          final rawDate = first['activityDate'] ?? first['createdAt'] ?? first['scheduledAt'] ?? first['date'];
+          if (rawDate != null && rawDate.toString().isNotEmpty) {
+            try {
+              final dt = DateTime.parse(rawDate.toString()).toLocal();
+              updatedLastDate = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+            } catch (_) {
+              updatedLastDate = rawDate.toString();
+            }
+          }
+        }
+
+        if (mounted) {
+          final oldDate = _lastActivityDateStr;
+          setState(() {
+            _activities = uniqueList;
+            _lastActivityDateStr = updatedLastDate;
+          });
+          if (updatedLastDate != oldDate && updatedLastDate != '--') {
+            _saveDealChanges();
+          }
+        }
     } catch (e) {
       debugPrint('[DealDetailsScreen _fetchActivities ERROR]: $e');
     } finally {
@@ -439,6 +461,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
   String get _formattedLastActivityDate {
     return '08/04/2026\n2:12 PM\nGMT...';
+  }
+
+  String _normalizeStage(String rawStage) {
+    final idx = _dealStages.indexWhere((s) => s.trim().toLowerCase() == rawStage.trim().toLowerCase() || s.trim().replaceAll(' ', '_').toLowerCase() == rawStage.trim().toLowerCase());
+    if (idx >= 0) {
+      return _dealStages[idx];
+    }
+    return _dealStages.first;
   }
 
   void _updateStageAndProbability(String stage) {
@@ -492,6 +522,11 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         'owner': ownerStr,
         'ownerName': ownerStr,
       },
+      if (_lastActivityDateStr.isNotEmpty && _lastActivityDateStr != '--') ...{
+        'lastContacted': _lastActivityDateStr,
+        'lastActivityDate': _lastActivityDateStr,
+        'last_activity_date': _lastActivityDateStr,
+      },
     };
 
     bool success = true;
@@ -504,7 +539,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       if (updatedDeal != null) {
         if (updatedDeal.title.isNotEmpty) _nameController.text = updatedDeal.title;
         if (updatedDeal.amount > 0) _amountController.text = updatedDeal.amount.toStringAsFixed(0);
-        if (updatedDeal.stage.isNotEmpty) _dealStage = updatedDeal.stage;
+        if (updatedDeal.stage.isNotEmpty) _dealStage = _normalizeStage(updatedDeal.stage);
         if (updatedDeal.date.isNotEmpty) _closeDateController.text = updatedDeal.date;
         if (updatedDeal.company.isNotEmpty) _companyController.text = updatedDeal.company;
         if (updatedDeal.owner.isNotEmpty) _ownerController.text = updatedDeal.owner;
@@ -1202,7 +1237,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               const SizedBox(height: 16),
               _buildAboutField('Deal Owner', 'owner', _ownerController),
               _buildAboutField('Amount', 'amount', _amountController),
-              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: '--')),
+              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: _lastActivityDateStr)),
+              _buildAboutField('Last Activity Date', 'lastActivityDate', TextEditingController(text: _lastActivityDateStr)),
               _buildAboutField('Deal Type', 'dealType', TextEditingController(text: '--')),
               _buildAboutField(
                 'Priority',
@@ -1226,6 +1262,127 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         ),
       ],
     );
+  }
+
+  Future<void> _confirmAndDeleteActivity(Map<String, dynamic> act) async {
+    final actId = (act['id'] ?? act['_id'] ?? '').toString();
+    if (actId.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Activity', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to delete this activity?', style: GoogleFonts.poppins()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final type = (act['type'] ?? '').toString().toLowerCase();
+      try {
+        if (type.contains('task')) {
+          await ApiService().delete('/tasks/$actId');
+        } else {
+          await ApiService().delete('${ApiConstants.activities}/$actId');
+        }
+      } catch (_) {
+        try {
+          await ApiService().delete('${ApiConstants.activities}/$actId');
+        } catch (e) {
+          debugPrint('[DELETE ACTIVITY ERROR]: $e');
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Activity deleted successfully'),
+            backgroundColor: Color(0xFF00A884),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _fetchActivities();
+      }
+    }
+  }
+
+  Future<void> _editActivityModal(Map<String, dynamic> act) async {
+    final actId = (act['id'] ?? act['_id'] ?? '').toString();
+    final type = (act['type'] ?? '').toString().toLowerCase();
+    final title = (act['title'] ?? act['notes'] ?? act['description'] ?? 'Activity').toString();
+
+    if (type.contains('task')) {
+      await CreateTaskModal.show(
+        context,
+        taskToEdit: TaskModel(
+          id: actId,
+          title: title,
+          dueDate: 'Today',
+          priority: (act['priority'] ?? 'Medium').toString(),
+          status: (act['status'] ?? 'PENDING').toString(),
+          assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
+          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+        ),
+        dealId: widget.deal?.id,
+        associatedRecordName: widget.deal?.title ?? 'Deal',
+      );
+    } else if (type.contains('email')) {
+      await CreateEmailModal.show(
+        context,
+        emailToEdit: act,
+        dealId: widget.deal?.id,
+        associatedRecordName: widget.deal?.title ?? 'Deal',
+      );
+    } else if (type.contains('note')) {
+      await CreateNoteModal.show(
+        context,
+        noteToEdit: act,
+        dealId: widget.deal?.id,
+        associatedRecordName: widget.deal?.title ?? 'Deal',
+      );
+    } else if (type.contains('call')) {
+      await LogCallModal.show(
+        context,
+        callToEdit: CallModel(
+          id: actId,
+          title: title,
+          outcome: (act['outcome'] ?? 'Connected').toString(),
+          duration: (act['duration'] ?? '5m').toString(),
+          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+        ),
+        dealId: widget.deal?.id,
+        associatedRecordName: widget.deal?.title ?? 'Deal',
+      );
+    } else if (type.contains('meeting')) {
+      await LogMeetingModal.show(
+        context,
+        existingMeeting: MeetingModel(
+          id: actId,
+          title: title,
+          outcome: (act['outcome'] ?? 'Completed').toString(),
+          duration: (act['duration'] ?? '30m').toString(),
+          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+        ),
+        dealId: widget.deal?.id,
+        associatedRecordName: widget.deal?.title ?? 'Deal',
+      );
+    }
+
+    if (mounted) {
+      _fetchActivities();
+    }
   }
 
   // ==========================================
@@ -1530,6 +1687,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     if (type.contains('NOTE')) actIcon = Icons.description_outlined;
                     if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
 
+                    final bool isTask = type.contains('TASK') || act['type']?.toString().toLowerCase() == 'task';
+                    final String statusVal = (act['status'] ?? 'PENDING').toString().toUpperCase();
+                    final bool isTaskCompleted = statusVal == 'COMPLETED';
                     final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
                     final bool isExpanded = _expandedActivityIds.contains(actId);
 
@@ -1558,19 +1718,40 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFE6F4F1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                actIcon,
-                                color: const Color(0xFF00A884),
-                                size: 18,
-                              ),
-                            ),
+                            isTask
+                                ? SizedBox(
+                                    width: 36,
+                                    height: 36,
+                                    child: Checkbox(
+                                      value: isTaskCompleted,
+                                      activeColor: const Color(0xFF00A884),
+                                      onChanged: (bool? newValue) async {
+                                        final newStatus = newValue == true ? 'COMPLETED' : 'PENDING';
+                                        final updateData = Map<String, dynamic>.from(act);
+                                        updateData['status'] = newStatus;
+                                        try {
+                                          await ApiService().put('${ApiConstants.activities}/$actId', data: updateData);
+                                        } catch (_) {}
+                                        try {
+                                          await ApiService().put('/tasks/$actId', data: updateData);
+                                        } catch (_) {}
+                                        _fetchActivities();
+                                      },
+                                    ),
+                                  )
+                                : Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFE6F4F1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      actIcon,
+                                      color: const Color(0xFF00A884),
+                                      size: 18,
+                                    ),
+                                  ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
@@ -1651,7 +1832,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                         border: Border.all(color: const Color(0xFFE2E8F0)),
                                       ),
                                       child: Text(
-                                        (act['description'] ?? act['notes'] ?? title).toString(),
+                                        parseActivityDescription(act['description'] ?? act['notes'] ?? title),
                                         style: GoogleFonts.poppins(
                                           fontSize: 13,
                                           color: const Color(0xFF334155),
@@ -1679,6 +1860,43 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                   ],
                                 ],
                               ),
+                            ),
+                            PopupMenuButton<String>(
+                              icon: const Icon(
+                                Icons.more_vert_rounded,
+                                color: Color(0xFF94A3B8),
+                                size: 20,
+                              ),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              itemBuilder: (context) => [
+                                PopupMenuItem<String>(
+                                  value: 'edit',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF00A884)),
+                                      const SizedBox(width: 8),
+                                      Text('Edit Activity', style: GoogleFonts.poppins(fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
+                                      const SizedBox(width: 8),
+                                      Text('Delete Activity', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onSelected: (action) {
+                                if (action == 'delete') {
+                                  _confirmAndDeleteActivity(act);
+                                } else if (action == 'edit') {
+                                  _editActivityModal(act);
+                                }
+                              },
                             ),
                           ],
                         ),
@@ -2602,7 +2820,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       result = await LogMeetingModal.show(context, dealId: dealId, associatedRecordName: name);
     }
 
-    if (mounted && result != null && result != false) {
+    if (mounted) {
       setState(() {
         _selectedDateFilter = 'All time';
         _selectedAssigneeFilter = 'Activity assigned to';
