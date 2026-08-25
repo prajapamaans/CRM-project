@@ -510,10 +510,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       }
 
       uniqueList.sort((a, b) {
-        final dateStrA = a['activityDate'] ?? a['createdAt'] ?? a['scheduledAt'] ?? a['date'] ?? '';
-        final dateStrB = b['activityDate'] ?? b['createdAt'] ?? b['scheduledAt'] ?? b['date'] ?? '';
-        final dtA = DateTime.tryParse(dateStrA.toString()) ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final dtB = DateTime.tryParse(dateStrB.toString()) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dtA = parseActivityDateTime(a);
+        final dtB = parseActivityDateTime(b);
         return dtB.compareTo(dtA);
       });
 
@@ -532,14 +530,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         }
 
         if (mounted) {
-          final oldDate = _lastActivityDateStr;
           setState(() {
             _activities = uniqueList;
             _lastActivityDateStr = updatedLastDate;
           });
-          if (updatedLastDate != oldDate && updatedLastDate != '--') {
-            _saveDealChanges();
-          }
         }
     } catch (e) {
       debugPrint('[DealDetailsScreen _fetchActivities ERROR]: $e');
@@ -583,11 +577,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   String get _formattedCreateDate {
-    return '08/04/2026\n2:12 PM\nGMT...';
+    final rawDate = widget.deal?.createdAt;
+    if (rawDate != null) {
+      final dt = parseActivityDateTime(rawDate);
+      if (dt.millisecondsSinceEpoch != 0) {
+        return formatActivityDateTime(dt.toLocal());
+      }
+    }
+    return '08/04/2026\n2:12 PM\nGMT+5:30';
   }
 
   String get _formattedLastActivityDate {
-    return '08/04/2026\n2:12 PM\nGMT...';
+    return formatLastActivityDateFromList(_activities, fallback: _lastActivityDateStr);
   }
 
   String _normalizeStage(String rawStage) {

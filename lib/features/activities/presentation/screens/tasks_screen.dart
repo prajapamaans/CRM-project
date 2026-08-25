@@ -97,36 +97,60 @@ class _TasksScreenState extends State<TasksScreen> {
     final apiService = ApiService();
 
     try {
-      _taskStatuses = await repository.getMasterDropdownByKey('task_status', includeInactive: false).catchError((_) => <MasterDropdownOptionModel>[]);
-      _taskPriorities = await repository.getMasterDropdownByKey('task_priority', includeInactive: false).catchError((_) => <MasterDropdownOptionModel>[]);
+      try {
+        _taskStatuses = await repository.getMasterDropdownByKey('task_status', includeInactive: false);
+      } catch (_) {}
+      try {
+        _taskPriorities = await repository.getMasterDropdownByKey('task_priority', includeInactive: false);
+      } catch (_) {}
 
-      final uResp = await apiService.get('/users').catchError((_) => null);
-      if (uResp != null && uResp.data != null) {
-        final raw = uResp.data;
-        if (raw is List) _users = raw.whereType<Map<String, dynamic>>().toList();
-        else if (raw is Map && raw['data'] is List) _users = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
-      }
+      try {
+        final uResp = await apiService.get('/users');
+        if (uResp.data != null) {
+          final raw = uResp.data;
+          if (raw is List) {
+            _users = raw.whereType<Map<String, dynamic>>().toList();
+          } else if (raw is Map && raw['data'] is List) {
+            _users = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
+          }
+        }
+      } catch (_) {}
 
-      final cResp = await apiService.get('/companies', queryParameters: {'limit': 200}).catchError((_) => null);
-      if (cResp != null && cResp.data != null) {
-        final raw = cResp.data;
-        if (raw is List) _companies = raw.whereType<Map<String, dynamic>>().toList();
-        else if (raw is Map && raw['data'] is List) _companies = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
-      }
+      try {
+        final cResp = await apiService.get('/companies', queryParameters: {'limit': 200});
+        if (cResp.data != null) {
+          final raw = cResp.data;
+          if (raw is List) {
+            _companies = raw.whereType<Map<String, dynamic>>().toList();
+          } else if (raw is Map && raw['data'] is List) {
+            _companies = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
+          }
+        }
+      } catch (_) {}
 
-      final contResp = await apiService.get('/contacts', queryParameters: {'limit': 200}).catchError((_) => null);
-      if (contResp != null && contResp.data != null) {
-        final raw = contResp.data;
-        if (raw is List) _contacts = raw.whereType<Map<String, dynamic>>().toList();
-        else if (raw is Map && raw['data'] is List) _contacts = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
-      }
+      try {
+        final contResp = await apiService.get('/contacts', queryParameters: {'limit': 200});
+        if (contResp.data != null) {
+          final raw = contResp.data;
+          if (raw is List) {
+            _contacts = raw.whereType<Map<String, dynamic>>().toList();
+          } else if (raw is Map && raw['data'] is List) {
+            _contacts = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
+          }
+        }
+      } catch (_) {}
 
-      final dResp = await apiService.get('/deals', queryParameters: {'limit': 200}).catchError((_) => null);
-      if (dResp != null && dResp.data != null) {
-        final raw = dResp.data;
-        if (raw is List) _deals = raw.whereType<Map<String, dynamic>>().toList();
-        else if (raw is Map && raw['data'] is List) _deals = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
-      }
+      try {
+        final dResp = await apiService.get('/deals', queryParameters: {'limit': 200});
+        if (dResp.data != null) {
+          final raw = dResp.data;
+          if (raw is List) {
+            _deals = raw.whereType<Map<String, dynamic>>().toList();
+          } else if (raw is Map && raw['data'] is List) {
+            _deals = (raw['data'] as List).whereType<Map<String, dynamic>>().toList();
+          }
+        }
+      } catch (_) {}
     } catch (e) {
       debugPrint('[LOAD MASTER DATA ERROR]: $e');
     }
@@ -182,7 +206,6 @@ class _TasksScreenState extends State<TasksScreen> {
     final queryParams = <String, dynamic>{
       'page': targetPage,
       'limit': _pageSize,
-      'type': 'task',
       'sort': _getSortField(),
       'order': _getSortOrder(),
     };
@@ -254,12 +277,13 @@ class _TasksScreenState extends State<TasksScreen> {
       final loadedTasks = records.whereType<Map>().map((e) {
         final item = Map<String, dynamic>.from(e);
         final id = (item['id'] ?? item['_id'])?.toString();
-        final title = item['title'] as String? ?? item['subject'] as String? ?? 'Untitled Task';
-        final dueDate = item['dueDate'] as String? ?? item['due_date'] as String? ?? item['scheduledAt'] as String? ?? '8/11/2026';
+        final title = item['title'] as String? ?? item['subject'] as String? ?? item['notes'] as String? ?? 'Untitled Activity';
+        final dueDate = item['dueDate'] as String? ?? item['due_date'] as String? ?? item['scheduledAt'] as String? ?? item['createdAt'] as String? ?? '8/11/2026';
         final priority = item['priority'] as String? ?? 'None';
         final status = item['status'] as String? ?? 'pending';
         final assignedTo = item['ownerName'] as String? ?? item['assignedTo'] as String? ?? item['creatorName'] as String? ?? 'Admin User';
         final notes = item['description'] as String? ?? item['notes'] as String? ?? '';
+        final taskType = (item['type'] ?? item['taskType'] ?? 'task').toString();
 
         return TaskModel(
           id: id,
@@ -269,6 +293,7 @@ class _TasksScreenState extends State<TasksScreen> {
           status: status,
           assignedTo: assignedTo,
           notes: notes,
+          taskType: taskType,
           rawMap: item,
         );
       }).toList();
@@ -1249,7 +1274,21 @@ class _TasksScreenState extends State<TasksScreen> {
                           size: 16,
                           color: Color(0xFF00A884),
                         )
-                      : null,
+                      : (task.taskType != null && !task.taskType!.toLowerCase().contains('task'))
+                          ? Icon(
+                              task.taskType!.toLowerCase().contains('note')
+                                  ? Icons.description_outlined
+                                  : (task.taskType!.toLowerCase().contains('email')
+                                      ? Icons.mail_outline_rounded
+                                      : (task.taskType!.toLowerCase().contains('call')
+                                          ? Icons.phone_outlined
+                                          : (task.taskType!.toLowerCase().contains('meeting')
+                                              ? Icons.videocam_outlined
+                                              : Icons.task_alt_rounded))),
+                              size: 15,
+                              color: const Color(0xFF00A884),
+                            )
+                          : null,
                 ),
               ),
 

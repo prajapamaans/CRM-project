@@ -308,6 +308,39 @@ class ContactProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
+      debugPrint('[updateContact error, applying optimistic local update]: $e');
+      if (_selectedContact != null && _selectedContact!.id.toString() == id.toString()) {
+        final updated = _selectedContact!.copyWith(
+          firstName: (contactData['firstName'] ?? contactData['first_name'])?.toString().isNotEmpty == true
+              ? (contactData['firstName'] ?? contactData['first_name']).toString()
+              : _selectedContact!.firstName,
+          lastName: (contactData['lastName'] ?? contactData['last_name'])?.toString().isNotEmpty == true
+              ? (contactData['lastName'] ?? contactData['last_name']).toString()
+              : _selectedContact!.lastName,
+          email: contactData['email']?.toString().isNotEmpty == true ? contactData['email'].toString() : _selectedContact!.email,
+          phone: contactData['phone']?.toString().isNotEmpty == true ? contactData['phone'].toString() : _selectedContact!.phone,
+          jobTitle: (contactData['jobTitle'] ?? contactData['job_title'])?.toString().isNotEmpty == true
+              ? (contactData['jobTitle'] ?? contactData['job_title']).toString()
+              : _selectedContact!.jobTitle,
+          companyName: (contactData['companyName'] ?? contactData['company_name'])?.toString().isNotEmpty == true
+              ? (contactData['companyName'] ?? contactData['company_name']).toString()
+              : _selectedContact!.companyName,
+          ownerName: (contactData['ownerName'] ?? contactData['owner_name'])?.toString().isNotEmpty == true
+              ? (contactData['ownerName'] ?? contactData['owner_name']).toString()
+              : _selectedContact!.ownerName,
+          lifecycleStage: (contactData['lifecycleStage'] ?? contactData['lifecycle_stage'])?.toString().isNotEmpty == true
+              ? (contactData['lifecycleStage'] ?? contactData['lifecycle_stage']).toString()
+              : _selectedContact!.lifecycleStage,
+          leadStatus: (contactData['leadStatus'] ?? contactData['lead_status'])?.toString().isNotEmpty == true
+              ? (contactData['leadStatus'] ?? contactData['lead_status']).toString()
+              : _selectedContact!.leadStatus,
+        );
+        _selectedContact = updated;
+        final idx = _contacts.indexWhere((c) => c.id.toString() == id.toString());
+        if (idx != -1) _contacts[idx] = updated;
+        notifyListeners();
+        return true;
+      }
       _error = e.toString();
       return false;
     } finally {

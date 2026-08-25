@@ -62,3 +62,59 @@ String parseActivityDescription(dynamic rawDescription) {
   }
   return str;
 }
+
+/// Parses raw activity date or map into DateTime for consistent sorting (most recent first).
+DateTime parseActivityDateTime(dynamic act) {
+  if (act == null) return DateTime.fromMillisecondsSinceEpoch(0);
+  if (act is DateTime) return act;
+  if (act is Map) {
+    final rawDate = act['activityDate'] ??
+        act['activity_date'] ??
+        act['createdAt'] ??
+        act['created_at'] ??
+        act['scheduledAt'] ??
+        act['scheduled_at'] ??
+        act['date'] ??
+        act['updatedAt'] ??
+        act['updated_at'];
+    if (rawDate != null) return parseActivityDateTime(rawDate);
+  }
+  final str = act.toString().trim();
+  if (str.isEmpty) return DateTime.fromMillisecondsSinceEpoch(0);
+  return DateTime.tryParse(str) ?? DateTime.fromMillisecondsSinceEpoch(0);
+}
+
+/// Formats a DateTime object into a clean timestamp string (e.g. 08/24/2026 \n 6:10 PM \n GMT+5:30).
+String formatActivityDateTime(DateTime dt, {bool multiLine = true}) {
+  final month = dt.month.toString().padLeft(2, '0');
+  final day = dt.day.toString().padLeft(2, '0');
+  final year = dt.year;
+
+  int hour = dt.hour;
+  final period = hour >= 12 ? 'PM' : 'AM';
+  hour = hour % 12;
+  if (hour == 0) hour = 12;
+  final minute = dt.minute.toString().padLeft(2, '0');
+
+  final timeStr = '$hour:$minute $period';
+  final offsetHours = dt.timeZoneOffset.inHours;
+  final offsetMinutes = (dt.timeZoneOffset.inMinutes % 60).abs().toString().padLeft(2, '0');
+  final offsetSign = dt.timeZoneOffset.isNegative ? '-' : '+';
+  final tzStr = 'GMT$offsetSign${offsetHours.abs().toString().padLeft(2, '0')}:$offsetMinutes';
+
+  if (multiLine) {
+    return '$month/$day/$year\n$timeStr\n$tzStr';
+  }
+  return '$month/$day/$year $timeStr $tzStr';
+}
+
+/// Dynamic calculation of Last Activity Date from sorted activities list.
+String formatLastActivityDateFromList(List<dynamic> activities, {String fallback = '--', bool multiLine = true}) {
+  if (activities.isEmpty) return fallback;
+  final top = activities.first;
+  final dt = parseActivityDateTime(top);
+  if (dt.millisecondsSinceEpoch == 0) return fallback;
+  return formatActivityDateTime(dt.toLocal(), multiLine: multiLine);
+}
+
+

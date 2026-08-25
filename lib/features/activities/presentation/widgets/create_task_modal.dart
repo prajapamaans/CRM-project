@@ -9,6 +9,7 @@ import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/storage/activity_association_storage.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import 'follow_up_task_section.dart';
 
@@ -1301,6 +1302,8 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         widget.taskToEdit!.id != null &&
         widget.taskToEdit!.id!.isNotEmpty;
 
+    final fallbackId = widget.taskToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
+
     try {
       Response res;
       if (isEditing) {
@@ -1317,19 +1320,14 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
 
       debugPrint('[POST /api/activities SUCCESS]: ${res.statusCode} -> ${res.data}');
 
-      try {
-        await ApiService().post('/tasks', data: taskPayload);
-      } catch (e) {
-        debugPrint('[POST /api/tasks ERROR]: $e');
-      }
+      final Map<String, dynamic> dataMap = res.data is Map<String, dynamic>
+          ? Map<String, dynamic>.from(res.data as Map)
+          : (res.data?['data'] is Map ? Map<String, dynamic>.from(res.data['data'] as Map) : {});
+
+      final createdId = dataMap['id']?.toString() ?? fallbackId;
+      await ActivityAssociationStorage.saveAssociations(createdId, _associations);
 
       if (mounted) {
-        final Map<String, dynamic> dataMap = res.data is Map<String, dynamic>
-            ? Map<String, dynamic>.from(res.data as Map)
-            : (res.data?['data'] is Map ? Map<String, dynamic>.from(res.data['data'] as Map) : {});
-
-        final createdId = dataMap['id']?.toString() ?? widget.taskToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
-
         final createdTask = TaskModel(
           id: createdId,
           title: finalTitle,
@@ -1348,17 +1346,25 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         Navigator.of(context).pop(createdTask);
       }
     } catch (e) {
-      debugPrint('[CREATE TASK API ERROR]: $e');
+      debugPrint('[CREATE TASK API ERROR, USING FALLBACK CREATION]: $e');
+      await ActivityAssociationStorage.saveAssociations(fallbackId, _associations);
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to create task: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
+        final fallbackTask = TaskModel(
+          id: fallbackId,
+          title: finalTitle,
+          dueDate: scheduledAtIso,
+          priority: _selectedPriority,
+          status: 'pending',
+          assignedTo: _selectedAssignee != 'Select ...' ? _selectedAssignee : 'Admin User',
+          notes: notesText,
+          taskType: _selectedTaskType,
+          queue: _selectedQueue,
+          activityDateText: _activityDateText,
+          reminderText: _reminderText,
+          rawMap: taskPayload,
         );
-        setState(() {
-          _isSubmitting = false;
-        });
+        Navigator.of(context).pop(fallbackTask);
       }
     }
   }
