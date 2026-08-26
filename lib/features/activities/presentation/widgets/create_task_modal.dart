@@ -10,6 +10,7 @@ import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
 import '../../../../core/storage/activity_association_storage.dart';
+import '../../../../core/utils/activity_utils.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import 'follow_up_task_section.dart';
 
@@ -295,12 +296,12 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     super.initState();
     _associations = {
       'Companies': widget.companyId != null ? [{'id': widget.companyId!, 'name': widget.associatedRecordName}] : [],
-      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
+      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
     final editTask = widget.taskToEdit;
-    _titleController = TextEditingController(text: editTask?.title ?? '');
-    _notesController = TextEditingController(text: editTask?.notes ?? '');
+    _titleController = TextEditingController(text: parseActivityDescription(editTask?.title ?? ''));
+    _notesController = TextEditingController(text: parseActivityDescription(editTask?.notes ?? ''));
 
     if (editTask != null) {
       if (editTask.priority.isNotEmpty) _selectedPriority = editTask.priority;
@@ -390,13 +391,17 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       usersDisplayList.add(_selectedAssignee);
     }
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: Column(
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.88,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        ),
+        child: Column(
         children: [
           // 1. Dark Top Header matching 2nd Image
           Container(
@@ -1021,10 +1026,14 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       ElevatedButton(
-                        onPressed: !_isSubmitting ? _handleSubmit : null,
+                        onPressed: () {
+                          if (!_isSubmitting) {
+                            _handleSubmit();
+                          }
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF70D1C4),
-                          disabledBackgroundColor: const Color(0xFFA5E3DB),
+                          disabledBackgroundColor: const Color(0xFF70D1C4),
                           foregroundColor: Colors.white,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -1090,7 +1099,8 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildFormatIconButton(String label, {required bool isActive, bool isBold = false, bool isItalic = false, bool isUnderline = false, required VoidCallback onTap}) {
@@ -1155,6 +1165,9 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   }
 
   Future<void> _handleSubmit() async {
+    debugPrint('[CREATE TASK BUTTON CLICKED]');
+    if (_isSubmitting) return;
+
     final finalTitle = _titleController.text.trim().isNotEmpty
         ? _titleController.text.trim()
         : 'New Task';
@@ -1164,167 +1177,203 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       _isSubmitting = true;
     });
 
-    // 1. Serialized JSON document for description field as expected by backend API
-    final String descriptionJson = jsonEncode({
-      'type': 'doc',
-      'content': [
-        {
-          'type': 'paragraph',
-          if (notesText.isNotEmpty)
-            'content': [
-              {
-                'type': 'text',
-                'text': notesText,
-              }
-            ]
-        }
-      ]
-    });
-
-    // 2. Dynamic Associations array
-    String? targetCompanyId;
-    if (_associations['Companies'] != null && _associations['Companies']!.isNotEmpty) {
-      targetCompanyId = _associations['Companies']!.first['id'];
-    } else if (widget.companyId != null && widget.companyId!.isNotEmpty) {
-      targetCompanyId = widget.companyId;
-    }
-
-    String? targetContactId;
-    if (_associations['Contacts'] != null && _associations['Contacts']!.isNotEmpty) {
-      targetContactId = _associations['Contacts']!.first['id'];
-    } else if (widget.contactId != null && widget.contactId!.isNotEmpty) {
-      targetContactId = widget.contactId;
-    }
-
-    String? targetDealId;
-    if (_associations['Deals'] != null && _associations['Deals']!.isNotEmpty) {
-      targetDealId = _associations['Deals']!.first['id'];
-    } else if (widget.dealId != null && widget.dealId!.isNotEmpty) {
-      targetDealId = widget.dealId;
-    }
-
-    final List<Map<String, String>> associations = [];
-    _associations['Contacts']?.forEach((c) {
-      if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'contact'});
-    });
-    _associations['Companies']?.forEach((c) {
-      if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'company'});
-    });
-    _associations['Deals']?.forEach((d) {
-      if (d['id'] != null) associations.add({'objectId': d['id']!, 'objectType': 'deal'});
-    });
-
-    // 3. Owner ID resolution
-    String? ownerId;
-    for (final user in _apiUsers) {
-      final first = user['firstName'] as String? ?? user['first_name'] as String? ?? '';
-      final last = user['lastName'] as String? ?? user['last_name'] as String? ?? '';
-      final name = '$first $last'.trim();
-      final email = user['email'] as String? ?? '';
-      if ((name.isNotEmpty && name == _selectedAssignee) || (email.isNotEmpty && email == _selectedAssignee)) {
-        ownerId = user['id']?.toString();
-        break;
-      }
-    }
-    if (ownerId == null || ownerId.isEmpty) {
-      try {
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        ownerId = authProvider.currentUser?.id ?? authProvider.loginResponse?.user?['id']?.toString();
-      } catch (_) {}
-    }
-
-    // 4. ISO 8601 UTC date string
-    final scheduledDateTime = DateTime.now().add(const Duration(days: 3));
-    final scheduledAtIso = scheduledDateTime.toUtc().toIso8601String();
-
-
-
-    final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-    if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
-      companyIds.add(targetCompanyId);
-    }
-
-    final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-    if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
-      contactIds.add(targetContactId);
-    }
-
-    final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-    if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
-      dealIds.add(targetDealId);
-    }
-
-    final List<Map<String, String>> assocList = [];
-    for (final id in companyIds) {
-      assocList.add({'objectId': id, 'objectType': 'company'});
-    }
-    for (final id in contactIds) {
-      assocList.add({'objectId': id, 'objectType': 'contact'});
-    }
-    for (final id in dealIds) {
-      assocList.add({'objectId': id, 'objectType': 'deal'});
-    }
-
-    // 5. Confirmed API payload structure
-    final taskPayload = {
-      'type': 'task',
-      'title': finalTitle,
-      'associations': _associations,
-      'associationsList': assocList,
-      'associations_list': assocList,
-      'companyIds': companyIds,
-      'company_ids': companyIds,
-      'contactIds': contactIds,
-      'contact_ids': contactIds,
-      'dealIds': dealIds,
-      'deal_ids': dealIds,
-      if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
-        'companyId': targetCompanyId,
-        'company_id': targetCompanyId,
-      },
-      if (targetContactId != null && targetContactId.isNotEmpty) ...{
-        'contactId': targetContactId,
-        'contact_id': targetContactId,
-      },
-      if (targetDealId != null && targetDealId.isNotEmpty) ...{
-        'dealId': targetDealId,
-        'deal_id': targetDealId,
-      },
-      'description': descriptionJson,
-      if (ownerId != null && ownerId.isNotEmpty) 'ownerId': ownerId,
-      'priority': _selectedPriority.toLowerCase(),
-      'queue': _selectedQueue != 'None' ? _selectedQueue : null,
-      'reminderType': _reminderText != 'No reminder' ? _reminderText.toLowerCase() : 'none',
-      'scheduledAt': scheduledAtIso,
-    };
-
-    final isEditing = widget.taskToEdit != null &&
-        widget.taskToEdit!.id != null &&
-        widget.taskToEdit!.id!.isNotEmpty;
-
-    final fallbackId = widget.taskToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
-
     try {
+      // 1. Serialized JSON document for description field as expected by backend API
+      final String descriptionJson = jsonEncode({
+        'type': 'doc',
+        'content': [
+          {
+            'type': 'paragraph',
+            if (notesText.isNotEmpty)
+              'content': [
+                {
+                  'type': 'text',
+                  'text': notesText,
+                }
+              ]
+          }
+        ]
+      });
+
+      // 2. Dynamic Associations array
+      String? targetCompanyId;
+      if (_associations['Companies'] != null && _associations['Companies']!.isNotEmpty) {
+        targetCompanyId = _associations['Companies']!.first['id'];
+      } else if (widget.companyId != null && widget.companyId!.isNotEmpty) {
+        targetCompanyId = widget.companyId;
+      }
+
+      String? targetContactId;
+      if (_associations['Contacts'] != null && _associations['Contacts']!.isNotEmpty) {
+        targetContactId = _associations['Contacts']!.first['id'];
+      } else if (widget.contactId != null && widget.contactId!.isNotEmpty) {
+        targetContactId = widget.contactId;
+      }
+
+      String? targetDealId;
+      if (_associations['Deals'] != null && _associations['Deals']!.isNotEmpty) {
+        targetDealId = _associations['Deals']!.first['id'];
+      } else if (widget.dealId != null && widget.dealId!.isNotEmpty) {
+        targetDealId = widget.dealId;
+      }
+
+      final List<Map<String, String>> associations = [];
+      _associations['Contacts']?.forEach((c) {
+        if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'contact'});
+      });
+      _associations['Companies']?.forEach((c) {
+        if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'company'});
+      });
+      _associations['Deals']?.forEach((d) {
+        if (d['id'] != null) associations.add({'objectId': d['id']!, 'objectType': 'deal'});
+      });
+
+      // 3. Owner ID resolution
+      String? ownerId;
+      for (final user in _apiUsers) {
+        final first = user['firstName'] as String? ?? user['first_name'] as String? ?? '';
+        final last = user['lastName'] as String? ?? user['last_name'] as String? ?? '';
+        final name = '$first $last'.trim();
+        final email = user['email'] as String? ?? '';
+        if ((name.isNotEmpty && name == _selectedAssignee) || (email.isNotEmpty && email == _selectedAssignee)) {
+          ownerId = user['id']?.toString();
+          break;
+        }
+      }
+      if (ownerId == null || ownerId.isEmpty) {
+        try {
+          final authProvider = Provider.of<AuthProvider>(context, listen: false);
+          ownerId = authProvider.currentUser?.id ?? authProvider.loginResponse?.user?['id']?.toString();
+        } catch (_) {}
+      }
+
+      // 4. ISO 8601 UTC date string
+      final scheduledDateTime = DateTime.now().add(const Duration(days: 3));
+      final scheduledAtIso = scheduledDateTime.toUtc().toIso8601String();
+
+      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
+        companyIds.add(targetCompanyId);
+      }
+
+      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
+        contactIds.add(targetContactId);
+      }
+
+      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
+        dealIds.add(targetDealId);
+      }
+
+      final List<Map<String, String>> assocList = [];
+      for (final id in companyIds) {
+        assocList.add({'objectId': id, 'objectType': 'company'});
+      }
+      for (final id in contactIds) {
+        assocList.add({'objectId': id, 'objectType': 'contact'});
+      }
+      for (final id in dealIds) {
+        assocList.add({'objectId': id, 'objectType': 'deal'});
+      }
+      final taskPayload = {
+        'type': 'task',
+        'title': finalTitle,
+        'subject': finalTitle,
+        'notes': notesText,
+        'description': notesText,
+        'descriptionJson': descriptionJson,
+        'status': widget.taskToEdit?.status ?? 'PENDING',
+        'priority': _selectedPriority.toLowerCase(),
+        'activityDate': scheduledAtIso,
+        'dueDate': scheduledAtIso,
+        'due_date': scheduledAtIso,
+        'scheduledAt': scheduledAtIso,
+        'scheduled_at': scheduledAtIso,
+        'associations': _associations,
+        'associationsList': assocList,
+        'associations_list': assocList,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'contactIds': contactIds,
+        'contact_ids': contactIds,
+        'dealIds': dealIds,
+        'deal_ids': dealIds,
+        if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+          'companyId': targetCompanyId,
+          'company_id': targetCompanyId,
+        },
+        if (targetContactId != null && targetContactId.isNotEmpty) ...{
+          'contactId': targetContactId,
+          'contact_id': targetContactId,
+        },
+        if (targetDealId != null && targetDealId.isNotEmpty) ...{
+          'dealId': targetDealId,
+          'deal_id': targetDealId,
+        },
+        if (ownerId != null && ownerId.isNotEmpty) ...{
+          'ownerId': ownerId,
+          'owner_id': ownerId,
+        },
+        'queue': _selectedQueue != 'None' ? _selectedQueue : null,
+        'reminderType': _reminderText != 'No reminder' ? _reminderText.toLowerCase() : 'none',
+      };
+
+      final isEditing = widget.taskToEdit != null &&
+          widget.taskToEdit!.id != null &&
+          widget.taskToEdit!.id!.isNotEmpty;
+
+      final fallbackId = widget.taskToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
+
       Response res;
       if (isEditing) {
-        res = await ApiService().put(
-          '${ApiConstants.activities}/${widget.taskToEdit!.id}',
-          data: taskPayload,
-        );
+        final taskId = widget.taskToEdit!.id!;
+        try {
+          res = await ApiService().put(
+            '${ApiConstants.activities}/$taskId',
+            data: taskPayload,
+          );
+        } catch (_) {
+          res = await ApiService().patch(
+            '${ApiConstants.activities}/$taskId',
+            data: taskPayload,
+          );
+        }
       } else {
-        res = await ApiService().post(
-          ApiConstants.activities,
-          data: taskPayload,
-        );
+        try {
+          res = await ApiService().post(
+            ApiConstants.activities,
+            data: taskPayload,
+          );
+        } catch (e1) {
+          try {
+            res = await ApiService().post(
+              '/tasks',
+              data: taskPayload,
+            );
+          } catch (_) {
+            throw e1;
+          }
+        }
       }
 
       debugPrint('[POST /api/activities SUCCESS]: ${res.statusCode} -> ${res.data}');
 
-      final Map<String, dynamic> dataMap = res.data is Map<String, dynamic>
-          ? Map<String, dynamic>.from(res.data as Map)
-          : (res.data?['data'] is Map ? Map<String, dynamic>.from(res.data['data'] as Map) : {});
+      Map<String, dynamic> dataMap = {};
+      if (res.data is Map) {
+        final rawMap = Map<String, dynamic>.from(res.data as Map);
+        if (rawMap['data'] is Map) {
+          dataMap = Map<String, dynamic>.from(rawMap['data'] as Map);
+        } else if (rawMap['activity'] is Map) {
+          dataMap = Map<String, dynamic>.from(rawMap['activity'] as Map);
+        } else if (rawMap['task'] is Map) {
+          dataMap = Map<String, dynamic>.from(rawMap['task'] as Map);
+        } else {
+          dataMap = rawMap;
+        }
+      }
 
-      final createdId = dataMap['id']?.toString() ?? fallbackId;
+      final createdId = (dataMap['id'] ?? dataMap['_id'] ?? dataMap['activityId'] ?? dataMap['activity_id'])?.toString() ?? fallbackId;
       await ActivityAssociationStorage.saveAssociations(createdId, _associations);
 
       if (mounted) {
@@ -1340,31 +1389,39 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           queue: _selectedQueue,
           activityDateText: _activityDateText,
           reminderText: _reminderText,
-          rawMap: dataMap,
+          rawMap: dataMap.isNotEmpty ? dataMap : taskPayload,
         );
 
         Navigator.of(context).pop(createdTask);
       }
     } catch (e) {
-      debugPrint('[CREATE TASK API ERROR, USING FALLBACK CREATION]: $e');
-      await ActivityAssociationStorage.saveAssociations(fallbackId, _associations);
-
+      debugPrint('[CREATE TASK API ERROR]: $e');
       if (mounted) {
-        final fallbackTask = TaskModel(
-          id: fallbackId,
-          title: finalTitle,
-          dueDate: scheduledAtIso,
-          priority: _selectedPriority,
-          status: 'pending',
-          assignedTo: _selectedAssignee != 'Select ...' ? _selectedAssignee : 'Admin User',
-          notes: notesText,
-          taskType: _selectedTaskType,
-          queue: _selectedQueue,
-          activityDateText: _activityDateText,
-          reminderText: _reminderText,
-          rawMap: taskPayload,
+        String errorMsg = e.toString();
+        if (e is DioException) {
+          final resData = e.response?.data;
+          if (resData is Map && resData['message'] != null) {
+            errorMsg = resData['message'].toString();
+          } else if (resData is Map && resData['error'] != null) {
+            errorMsg = resData['error'].toString();
+          } else if (resData is String && resData.isNotEmpty) {
+            errorMsg = resData;
+          } else if (e.message != null && e.message!.isNotEmpty) {
+            errorMsg = e.message!;
+          }
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save task: $errorMsg'),
+            backgroundColor: Colors.red,
+          ),
         );
-        Navigator.of(context).pop(fallbackTask);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
       }
     }
   }

@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:dio/dio.dart';
 import '../../../../core/models/master_dropdown_model.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/storage/activity_association_storage.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/utils/activity_utils.dart';
 import 'follow_up_task_section.dart';
 
 class CallModel {
@@ -194,12 +198,12 @@ class _LogCallModalState extends State<LogCallModal> {
     super.initState();
     _associations = {
       'Companies': widget.companyId != null ? [{'id': widget.companyId!, 'name': widget.associatedRecordName}] : [],
-      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
+      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
     final editCall = widget.callToEdit;
-    _titleController = TextEditingController(text: editCall?.title ?? '');
-    _notesController = TextEditingController(text: editCall?.notes ?? '');
+    _titleController = TextEditingController(text: parseActivityDescription(editCall?.title ?? ''));
+    _notesController = TextEditingController(text: parseActivityDescription(editCall?.notes ?? ''));
 
     if (editCall != null) {
       if (editCall.outcome.isNotEmpty) {
@@ -495,13 +499,17 @@ class _LogCallModalState extends State<LogCallModal> {
       outcomes.add(_selectedOutcome);
     }
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: Column(
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        ),
+        child: Column(
         children: [
           // 1. Header (Dark Navy Bar with Chevron, Title, and Close Icon matching Image 3)
           Container(
@@ -1122,7 +1130,8 @@ class _LogCallModalState extends State<LogCallModal> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildFormatIconButton(String label, {required bool isActive, bool isBold = false, bool isItalic = false, bool isUnderline = false, required VoidCallback onTap}) {
@@ -1187,110 +1196,203 @@ class _LogCallModalState extends State<LogCallModal> {
   }
 
   Future<void> _handleSubmit() async {
+    final title = _titleController.text.trim();
+    final notes = _notesController.text.trim();
+
+    if (title.isEmpty && notes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a call title or notes.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
     });
 
-    String outcomeValue = _selectedOutcome;
-    if (_apiOutcomes.isNotEmpty) {
-      final matchedOption = _apiOutcomes.firstWhere(
-        (o) => o.label == _selectedOutcome,
-        orElse: () => _apiOutcomes.first,
-      );
-      outcomeValue = matchedOption.value;
-    } else {
-      outcomeValue = _selectedOutcome.toLowerCase();
-    }
-
-    final contactId = widget.contactId ?? widget.callToEdit?.contactId;
-    final companyId = widget.companyId ?? widget.callToEdit?.companyId;
-    final dealId = widget.dealId ?? widget.callToEdit?.dealId;
-
-    String? targetCompanyId = companyId ?? widget.callToEdit?.companyId;
-    if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
-        _associations['Companies'] != null &&
-        _associations['Companies']!.isNotEmpty) {
-      targetCompanyId = _associations['Companies']!.first['id'];
-    }
-
-    String? targetContactId = contactId ?? widget.callToEdit?.contactId;
-    if ((targetContactId == null || targetContactId.isEmpty) &&
-        _associations['Contacts'] != null &&
-        _associations['Contacts']!.isNotEmpty) {
-      targetContactId = _associations['Contacts']!.first['id'];
-    }
-
-    String? targetDealId = dealId ?? widget.callToEdit?.dealId;
-    if ((targetDealId == null || targetDealId.isEmpty) &&
-        _associations['Deals'] != null &&
-        _associations['Deals']!.isNotEmpty) {
-      targetDealId = _associations['Deals']!.first['id'];
-    }
-
-    final callData = {
-      'title': _titleController.text.trim(),
-      'type': 'call',
-      'outcome': outcomeValue,
-      'duration': _selectedDuration,
-      'startTime': _startTimeController.text.trim(),
-      'start_time': _startTimeController.text.trim(),
-      'notes': _notesController.text.trim(),
-      'description': _notesController.text.trim(),
-      'direction': _selectedDirection,
-      'createFollowUpTask': _createFollowUpTask,
-      if (_selectedOwner != 'Select owner') 'ownerName': _selectedOwner,
-      if (targetContactId != null && targetContactId.isNotEmpty) ...{
-        'contactId': targetContactId,
-        'contact_id': targetContactId,
-      },
-      if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
-        'companyId': targetCompanyId,
-        'company_id': targetCompanyId,
-      },
-      if (targetDealId != null && targetDealId.isNotEmpty) ...{
-        'dealId': targetDealId,
-        'deal_id': targetDealId,
-      },
-    };
-
-    final isEditing = widget.callToEdit != null &&
-        widget.callToEdit!.id != null &&
-        widget.callToEdit!.id!.isNotEmpty;
-
     try {
-      if (isEditing) {
-        final callId = widget.callToEdit!.id!;
-        debugPrint('[EDIT CALL] Updating activity $callId with data: $callData');
-        try {
-          await ApiService().patch(
-            '${ApiConstants.activities}/$callId',
-            data: callData,
-          );
-          debugPrint('[EDIT CALL PATCH SUCCESS]');
-        } catch (e) {
-          debugPrint('[EDIT CALL PATCH FAILED, RETRYING PUT]: $e');
-          await ApiService().put(
-            '${ApiConstants.activities}/$callId',
-            data: callData,
-          );
-          debugPrint('[EDIT CALL PUT SUCCESS]');
-        }
+      String outcomeValue = _selectedOutcome;
+      if (_apiOutcomes.isNotEmpty) {
+        final matchedOption = _apiOutcomes.firstWhere(
+          (o) => o.label == _selectedOutcome,
+          orElse: () => _apiOutcomes.first,
+        );
+        outcomeValue = matchedOption.value;
       } else {
-        await ApiService().post(ApiConstants.activities, data: callData);
+        outcomeValue = _selectedOutcome.toLowerCase();
       }
 
-      if (_createFollowUpTask) {
+      final contactId = widget.contactId ?? widget.callToEdit?.contactId;
+      final companyId = widget.companyId ?? widget.callToEdit?.companyId;
+      final dealId = widget.dealId ?? widget.callToEdit?.dealId;
+
+      String? targetCompanyId = companyId ?? widget.callToEdit?.companyId;
+      if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
+          _associations['Companies'] != null &&
+          _associations['Companies']!.isNotEmpty) {
+        targetCompanyId = _associations['Companies']!.first['id'];
+      }
+
+      String? targetContactId = contactId ?? widget.callToEdit?.contactId;
+      if ((targetContactId == null || targetContactId.isEmpty) &&
+          _associations['Contacts'] != null &&
+          _associations['Contacts']!.isNotEmpty) {
+        targetContactId = _associations['Contacts']!.first['id'];
+      }
+
+      String? targetDealId = dealId ?? widget.callToEdit?.dealId;
+      if ((targetDealId == null || targetDealId.isEmpty) &&
+          _associations['Deals'] != null &&
+          _associations['Deals']!.isNotEmpty) {
+        targetDealId = _associations['Deals']!.first['id'];
+      }
+
+      if (targetContactId == '1') targetContactId = null;
+      if (targetCompanyId == '1') targetCompanyId = null;
+      if (targetDealId == '1') targetDealId = null;
+
+      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
+        companyIds.add(targetCompanyId);
+      }
+
+      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
+        contactIds.add(targetContactId);
+      }
+
+      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
+        dealIds.add(targetDealId);
+      }
+
+      final List<Map<String, String>> assocList = [];
+      for (final id in companyIds) {
+        assocList.add({'objectId': id, 'objectType': 'company'});
+      }
+      for (final id in contactIds) {
+        assocList.add({'objectId': id, 'objectType': 'contact'});
+      }
+      for (final id in dealIds) {
+        assocList.add({'objectId': id, 'objectType': 'deal'});
+      }
+
+      final callData = {
+        'title': title.isNotEmpty ? title : 'Call Activity',
+        'type': 'call',
+        'outcome': outcomeValue,
+        'duration': _selectedDuration,
+        'startTime': _startTimeController.text.trim(),
+        'start_time': _startTimeController.text.trim(),
+        'notes': notes,
+        'description': notes,
+        'direction': _selectedDirection,
+        'createFollowUpTask': _createFollowUpTask,
+        'activityDate': DateTime.now().toIso8601String(),
+        'associationsList': assocList,
+        'associations_list': assocList,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'contactIds': contactIds,
+        'contact_ids': contactIds,
+        'dealIds': dealIds,
+        'deal_ids': dealIds,
+        if (_selectedOwner != 'Select owner') 'ownerName': _selectedOwner,
+        if (targetContactId != null && targetContactId.isNotEmpty) ...{
+          'contactId': targetContactId,
+          'contact_id': targetContactId,
+        },
+        if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+          'companyId': targetCompanyId,
+          'company_id': targetCompanyId,
+        },
+        if (targetDealId != null && targetDealId.isNotEmpty) ...{
+          'dealId': targetDealId,
+          'deal_id': targetDealId,
+        },
+      };
+
+      final isEditing = widget.callToEdit != null &&
+          widget.callToEdit!.id != null &&
+          widget.callToEdit!.id!.isNotEmpty;
+
+      bool callSuccess = false;
+      Response? res;
+      try {
+        if (isEditing) {
+          final callId = widget.callToEdit!.id!;
+          try {
+            res = await ApiService().patch(
+              '${ApiConstants.activities}/$callId',
+              data: callData,
+            );
+          } catch (e) {
+            res = await ApiService().put(
+              '${ApiConstants.activities}/$callId',
+              data: callData,
+            );
+          }
+        } else {
+          res = await ApiService().post(ApiConstants.activities, data: callData);
+        }
+        callSuccess = true;
+      } catch (e) {
+        debugPrint('[LOG/EDIT CALL ERROR]: $e');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to save call: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      Map<String, dynamic> dataMap = {};
+      if (res.data is Map) {
+        final rawMap = Map<String, dynamic>.from(res.data as Map);
+        if (rawMap['data'] is Map) {
+          dataMap = Map<String, dynamic>.from(rawMap['data'] as Map);
+        } else if (rawMap['activity'] is Map) {
+          dataMap = Map<String, dynamic>.from(rawMap['activity'] as Map);
+        } else {
+          dataMap = rawMap;
+        }
+      }
+
+      final createdId = (dataMap['id'] ?? dataMap['_id'] ?? widget.callToEdit?.id)?.toString();
+      if (createdId != null && createdId.isNotEmpty) {
+        await ActivityAssociationStorage.saveAssociations(createdId, _associations);
+      }
+
+      if (callSuccess && _createFollowUpTask) {
         try {
+          final String taskDescJson = jsonEncode({
+            'type': 'doc',
+            'content': [
+              {
+                'type': 'paragraph',
+                if (notes.isNotEmpty)
+                  'content': [{'type': 'text', 'text': notes}]
+              }
+            ]
+          });
+
           final taskPayload = {
-            'title': 'Follow-up: ${_titleController.text.trim()}',
-            'subject': 'Follow-up: ${_titleController.text.trim()}',
             'type': 'task',
-            'status': 'PENDING',
-            'priority': 'Medium',
-            'notes': _notesController.text.trim(),
-            'description': _notesController.text.trim(),
-            'activityDate': DateTime.now().toIso8601String(),
-            'dueDate': 'Today',
+            'title': 'Follow-up: ${title.isNotEmpty ? title : "Call"}',
+            'subject': 'Follow-up: ${title.isNotEmpty ? title : "Call"}',
+            'priority': 'medium',
+            'notes': notes,
+            'description': taskDescJson,
+            'scheduledAt': DateTime.now().toIso8601String(),
             if (targetContactId != null && targetContactId.isNotEmpty) ...{
               'contactId': targetContactId,
               'contact_id': targetContactId,
@@ -1304,43 +1406,55 @@ class _LogCallModalState extends State<LogCallModal> {
               'deal_id': targetDealId,
             },
           };
-          try {
-            await ApiService().post(ApiConstants.activities, data: taskPayload);
-          } catch (_) {}
-          try {
-            await ApiService().post('/tasks', data: taskPayload);
-          } catch (_) {}
+          await ApiService().post(ApiConstants.activities, data: taskPayload);
         } catch (e) {
-          debugPrint('[Create Follow-up Task Error]: $e');
+          debugPrint('[Create Follow-up Task Warning]: $e');
         }
       }
+
+      final updatedCall = CallModel(
+        id: createdId,
+        title: title,
+        outcome: _selectedOutcome,
+        duration: _selectedDuration,
+        startTime: _startTimeController.text.trim(),
+        notes: notes,
+        assignedTo: _selectedOwner != 'Select owner' ? _selectedOwner : (widget.callToEdit?.assignedTo ?? 'Admin User'),
+        direction: _selectedDirection,
+        priority: widget.callToEdit?.priority ?? 'Medium',
+        status: widget.callToEdit?.status ?? 'PENDING',
+        type: widget.callToEdit?.type ?? 'call',
+        contactId: targetContactId,
+        companyId: targetCompanyId,
+        dealId: targetDealId,
+        rawMap: dataMap.isNotEmpty ? dataMap : callData,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Call logged successfully!'),
+            backgroundColor: Color(0xFF00A884),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pop(updatedCall);
+      }
     } catch (e) {
-      debugPrint('[LOG/EDIT CALL ERROR]: $e');
-    }
-
-    final updatedCall = CallModel(
-      id: widget.callToEdit?.id,
-      title: _titleController.text.trim(),
-      outcome: _selectedOutcome,
-      duration: _selectedDuration,
-      startTime: _startTimeController.text.trim(),
-      notes: _notesController.text.trim(),
-      assignedTo: _selectedOwner != 'Select owner' ? _selectedOwner : (widget.callToEdit?.assignedTo ?? 'Admin User'),
-      direction: _selectedDirection,
-      priority: widget.callToEdit?.priority ?? 'Medium',
-      status: widget.callToEdit?.status ?? 'PENDING',
-      type: widget.callToEdit?.type ?? 'call',
-      contactId: contactId,
-      companyId: companyId,
-      dealId: dealId,
-      rawMap: widget.callToEdit?.rawMap,
-    );
-
-    if (mounted) {
-      setState(() {
-        _isSubmitting = false;
-      });
-      Navigator.of(context).pop(updatedCall);
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unexpected error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

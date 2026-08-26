@@ -575,7 +575,12 @@ class _TasksScreenState extends State<TasksScreen> {
                   ElevatedButton.icon(
                     onPressed: () async {
                       final newTask = await CreateTaskModal.show(context);
-                      if (newTask != null) {
+                      if (newTask != null && mounted) {
+                        setState(() {
+                          _tasks.removeWhere((t) => t.id == newTask.id);
+                          _tasks.insert(0, newTask);
+                          _totalTasks += 1;
+                        });
                         _fetchTasks(resetPage: true);
                       }
                     },

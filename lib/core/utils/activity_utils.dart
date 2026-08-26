@@ -68,15 +68,15 @@ DateTime parseActivityDateTime(dynamic act) {
   if (act == null) return DateTime.fromMillisecondsSinceEpoch(0);
   if (act is DateTime) return act;
   if (act is Map) {
-    final rawDate = act['activityDate'] ??
+    final rawDate = act['updatedAt'] ??
+        act['updated_at'] ??
+        act['activityDate'] ??
         act['activity_date'] ??
         act['createdAt'] ??
         act['created_at'] ??
         act['scheduledAt'] ??
         act['scheduled_at'] ??
-        act['date'] ??
-        act['updatedAt'] ??
-        act['updated_at'];
+        act['date'];
     if (rawDate != null) return parseActivityDateTime(rawDate);
   }
   final str = act.toString().trim();

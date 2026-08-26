@@ -325,7 +325,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         if (!type.contains('CALL') && !fieldKey.contains('call')) return false;
       } else if (_selectedActivitySubTab == 4) {
         // Tasks
-        if (!type.contains('TASK') && !fieldKey.contains('task')) return false;
+        if (!type.contains('TASK') && !type.contains('TO-DO') && !type.contains('TO_DO') && !fieldKey.contains('task')) return false;
       } else if (_selectedActivitySubTab == 5) {
         // Meetings
         if (!type.contains('MEETING') && !fieldKey.contains('meeting')) return false;
@@ -555,15 +555,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
         String updatedLastDate = '--';
         if (uniqueList.isNotEmpty) {
-          final first = uniqueList.first;
-          final rawDate = first['activityDate'] ?? first['createdAt'] ?? first['scheduledAt'] ?? first['date'];
-          if (rawDate != null && rawDate.toString().isNotEmpty) {
-            try {
-              final dt = DateTime.parse(rawDate.toString()).toLocal();
-              updatedLastDate = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-            } catch (_) {
-              updatedLastDate = rawDate.toString();
-            }
+          final dt = parseActivityDateTime(uniqueList.first);
+          if (dt.millisecondsSinceEpoch > 0) {
+            final local = dt.toLocal();
+            updatedLastDate = '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
           }
         }
 
@@ -1526,69 +1521,83 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
   Future<void> _editActivityModal(Map<String, dynamic> act) async {
     final actId = (act['id'] ?? act['_id'] ?? '').toString();
-    final type = (act['type'] ?? '').toString().toLowerCase();
-    final title = (act['title'] ?? act['notes'] ?? act['description'] ?? 'Activity').toString();
+    final type = (act['type'] ?? act['activityType'] ?? '').toString().toLowerCase();
+    final rawNotes = act['notes'] ?? act['content'] ?? act['body'] ?? act['description'] ?? '';
+    final notesText = parseActivityDescription(rawNotes);
+    final rawTitle = act['title'] ?? act['subject'] ?? (notesText.isNotEmpty ? notesText : 'Activity');
+    final titleText = parseActivityDescription(rawTitle);
 
+    dynamic result;
     if (type.contains('task')) {
-      await CreateTaskModal.show(
+      result = await CreateTaskModal.show(
         context,
         taskToEdit: TaskModel(
           id: actId,
-          title: title,
-          dueDate: 'Today',
+          title: titleText,
+          dueDate: (act['dueDate'] ?? act['due_date'] ?? act['scheduledAt'] ?? 'Today').toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
           assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
-          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+          notes: notesText,
+          rawMap: act,
         ),
         contactId: widget.contact?.id,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('email')) {
-      await CreateEmailModal.show(
+      result = await CreateEmailModal.show(
         context,
         emailToEdit: act,
         contactId: widget.contact?.id,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('note')) {
-      await CreateNoteModal.show(
+      result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
         contactId: widget.contact?.id,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('call')) {
-      await LogCallModal.show(
+      result = await LogCallModal.show(
         context,
         callToEdit: CallModel(
           id: actId,
-          title: title,
+          title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
           duration: (act['duration'] ?? '5m').toString(),
           startTime: (act['startTime'] ?? '10:00 AM').toString(),
-          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+          notes: notesText,
+          rawMap: act,
         ),
         contactId: widget.contact?.id,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('meeting')) {
-      await LogMeetingModal.show(
+      result = await LogMeetingModal.show(
         context,
         existingMeeting: MeetingModel(
           id: actId,
-          title: title,
+          title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
           duration: (act['duration'] ?? '30m').toString(),
           startTime: (act['startTime'] ?? '10:00 AM').toString(),
-          notes: (act['notes'] ?? act['description'] ?? '').toString(),
+          notes: notesText,
+          rawMap: act,
         ),
+        contactId: widget.contact?.id,
+        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+      );
+    } else {
+      result = await CreateNoteModal.show(
+        context,
+        noteToEdit: act,
         contactId: widget.contact?.id,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     }
 
-    if (mounted) {
+    if (mounted && result != null && result != false) {
       _fetchActivities();
     }
   }
@@ -3191,7 +3200,58 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       result = await LogMeetingModal.show(context, contactId: contactId, associatedRecordName: name);
     }
 
-    if (mounted) {
+    if (mounted && result != null && result != false) {
+      Map<String, dynamic> newActMap = {};
+      if (result is TaskModel) {
+        newActMap = {
+          if (result.rawMap != null) ...result.rawMap!,
+          'id': result.id,
+          'title': result.title,
+          'type': 'task',
+          'notes': result.notes,
+          'description': result.notes,
+          'status': result.status,
+          'priority': result.priority,
+          'createdAt': DateTime.now().toIso8601String(),
+          'scheduledAt': result.dueDate,
+          'assignedTo': result.assignedTo,
+          'contactId': contactId,
+          'contact_id': contactId,
+        };
+      } else if (result is CallModel) {
+        newActMap = {
+          if (result.rawMap != null) ...result.rawMap!,
+          'id': result.id,
+          'title': result.title,
+          'type': 'call',
+          'notes': result.notes,
+          'description': result.notes,
+          'outcome': result.outcome,
+          'duration': result.duration,
+          'startTime': result.startTime,
+          'createdAt': DateTime.now().toIso8601String(),
+          'contactId': contactId,
+          'contact_id': contactId,
+        };
+      } else if (result is MeetingModel) {
+        newActMap = {
+          if (result.rawMap != null) ...result.rawMap!,
+          'id': result.id,
+          'title': result.title,
+          'type': 'meeting',
+          'notes': result.notes,
+          'description': result.notes,
+          'outcome': result.outcome,
+          'duration': result.duration,
+          'startTime': result.startTime,
+          'createdAt': DateTime.now().toIso8601String(),
+          'contactId': contactId,
+          'contact_id': contactId,
+        };
+      } else if (result is Map) {
+        newActMap = Map<String, dynamic>.from(result as Map);
+      }
+
       setState(() {
         _selectedDateFilter = 'All time';
         _selectedAssigneeFilter = 'Activity assigned to';
@@ -3206,6 +3266,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           _selectedActivitySubTab = 3;
         } else if (type == 'Meeting') {
           _selectedActivitySubTab = 5;
+        }
+        if (newActMap.isNotEmpty) {
+          _activities.removeWhere((item) => item['id']?.toString() == newActMap['id']?.toString());
+          _activities.insert(0, newActMap);
         }
         _tabController.animateTo(1); // Switch to Activities tab
       });

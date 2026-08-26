@@ -7,6 +7,7 @@ import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/storage/secure_storage_service.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/utils/activity_utils.dart';
 import 'create_template_modal.dart';
 import 'follow_up_task_section.dart';
 
@@ -212,13 +213,15 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
     super.initState();
     _associations = {
       'Companies': widget.companyId != null ? [{'id': widget.companyId!, 'name': widget.associatedRecordName}] : [],
-      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
+      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
 
     if (widget.emailToEdit != null) {
-      _subjectController.text = (widget.emailToEdit!['title'] ?? widget.emailToEdit!['subject'] ?? '').toString();
-      _bodyController.text = (widget.emailToEdit!['notes'] ?? widget.emailToEdit!['body'] ?? widget.emailToEdit!['content'] ?? '').toString();
+      final rawSubj = widget.emailToEdit!['subject'] ?? widget.emailToEdit!['title'] ?? '';
+      _subjectController.text = parseActivityDescription(rawSubj);
+      final rawBody = widget.emailToEdit!['body'] ?? widget.emailToEdit!['description'] ?? widget.emailToEdit!['notes'] ?? '';
+      _bodyController.text = parseActivityDescription(rawBody);
     }
 
     _undoHistory.add(_bodyController.text);
@@ -380,7 +383,15 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
     final subject = _subjectController.text.trim();
     final body = _bodyController.text.trim();
 
-    if (subject.isEmpty && body.isEmpty) return;
+    if (subject.isEmpty && body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter an email subject or body.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -409,11 +420,50 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
         selectedDealId = _associations['Deals']!.first['id'];
       }
 
+      if (selectedContactId == '1') selectedContactId = null;
+      if (selectedCompanyId == '1') selectedCompanyId = null;
+      if (selectedDealId == '1') selectedDealId = null;
+
+      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (selectedCompanyId != null && selectedCompanyId.isNotEmpty && !companyIds.contains(selectedCompanyId)) {
+        companyIds.add(selectedCompanyId);
+      }
+
+      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (selectedContactId != null && selectedContactId.isNotEmpty && !contactIds.contains(selectedContactId)) {
+        contactIds.add(selectedContactId);
+      }
+
+      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+      if (selectedDealId != null && selectedDealId.isNotEmpty && !dealIds.contains(selectedDealId)) {
+        dealIds.add(selectedDealId);
+      }
+
+      final List<Map<String, String>> assocList = [];
+      for (final id in companyIds) {
+        assocList.add({'objectId': id, 'objectType': 'company'});
+      }
+      for (final id in contactIds) {
+        assocList.add({'objectId': id, 'objectType': 'contact'});
+      }
+      for (final id in dealIds) {
+        assocList.add({'objectId': id, 'objectType': 'deal'});
+      }
+
       final payload = {
         'title': subject.isNotEmpty ? subject : 'Email Activity',
         'type': 'email',
         'notes': body,
+        'description': body,
         'activityDate': DateTime.now().toIso8601String(),
+        'associationsList': assocList,
+        'associations_list': assocList,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'contactIds': contactIds,
+        'contact_ids': contactIds,
+        'dealIds': dealIds,
+        'deal_ids': dealIds,
         if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
           'contactId': selectedContactId,
           'contact_id': selectedContactId,
@@ -428,29 +478,56 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
         },
       };
 
+      bool emailSuccess = false;
       final emailId = widget.emailToEdit?['id'] ?? widget.emailToEdit?['_id'];
-      if (emailId != null && emailId.toString().isNotEmpty) {
-        try {
-          await api.put('${ApiConstants.activities}/$emailId', data: payload);
-        } catch (_) {
-          await api.patch('${ApiConstants.activities}/$emailId', data: payload);
+      try {
+        if (emailId != null && emailId.toString().isNotEmpty) {
+          try {
+            await api.put('${ApiConstants.activities}/$emailId', data: payload);
+          } catch (_) {
+            await api.patch('${ApiConstants.activities}/$emailId', data: payload);
+          }
+        } else {
+          await api.post(ApiConstants.activities, data: payload);
         }
-      } else {
-        await api.post(ApiConstants.activities, data: payload);
+        emailSuccess = true;
+      } catch (e) {
+        debugPrint('[CreateEmail Error]: $e');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to save email: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
       }
 
-      if (_createFollowUpTask) {
+      if (emailSuccess && _createFollowUpTask) {
         try {
+          final String taskDescJson = jsonEncode({
+            'type': 'doc',
+            'content': [
+              {
+                'type': 'paragraph',
+                if (body.isNotEmpty)
+                  'content': [{'type': 'text', 'text': body}]
+              }
+            ]
+          });
+
           final taskPayload = {
+            'type': 'task',
             'title': 'Follow-up: ${subject.isNotEmpty ? subject : "Email"}',
             'subject': 'Follow-up: ${subject.isNotEmpty ? subject : "Email"}',
-            'type': 'task',
-            'status': 'PENDING',
-            'priority': 'Medium',
+            'priority': 'medium',
             'notes': body,
-            'description': body,
-            'activityDate': DateTime.now().toIso8601String(),
-            'dueDate': 'Today',
+            'description': taskDescJson,
+            'scheduledAt': DateTime.now().toIso8601String(),
             if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
               'contactId': selectedContactId,
               'contact_id': selectedContactId,
@@ -464,20 +541,34 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
               'deal_id': selectedDealId,
             },
           };
-          try {
-            await api.post(ApiConstants.activities, data: taskPayload);
-          } catch (_) {}
-          try {
-            await api.post('/tasks', data: taskPayload);
-          } catch (_) {}
+          await api.post(ApiConstants.activities, data: taskPayload);
         } catch (e) {
-          debugPrint('[Create Follow-up Task Error]: $e');
+          debugPrint('[Create Follow-up Task Warning]: $e');
         }
       }
-    } catch (_) {}
 
-    if (mounted) {
-      Navigator.of(context).pop(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Email saved successfully!'),
+            backgroundColor: Color(0xFF00A884),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unexpected error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -959,42 +1050,47 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                               ],
                             ),
 
-                            // Send Split Button
                             Container(
                               decoration: BoxDecoration(
                                 color: const Color(0xFF00A884),
                                 borderRadius: BorderRadius.circular(6),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  InkWell(
-                                    onTap: _isSubmitting ? null : _submitEmail,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                                      child: Text(
-                                        'Send',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 14.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.white,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      InkWell(
+                                        onTap: _isSubmitting ? null : _submitEmail,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                                          child: _isSubmitting
+                                              ? const SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                                )
+                                              : Text(
+                                                  'Send',
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 14.5,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
                                         ),
                                       ),
-                                    ),
+                                      const SizedBox(
+                                        height: 22,
+                                        child: VerticalDivider(color: Colors.white54, width: 1),
+                                      ),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                        child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 20),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(
-                                    height: 22,
-                                    child: VerticalDivider(color: Colors.white54, width: 1),
-                                  ),
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                                    child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 20),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
                       ),
                       const SizedBox(height: 160),
                     ],

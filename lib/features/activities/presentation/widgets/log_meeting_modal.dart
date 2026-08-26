@@ -1,11 +1,15 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/models/master_dropdown_model.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/storage/activity_association_storage.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/utils/activity_utils.dart';
 import 'follow_up_task_section.dart';
 
 class MeetingModel {
@@ -19,6 +23,7 @@ class MeetingModel {
   final String? contactId;
   final String? companyId;
   final String? dealId;
+  final Map<String, dynamic>? rawMap;
 
   MeetingModel({
     this.id,
@@ -31,6 +36,7 @@ class MeetingModel {
     this.contactId,
     this.companyId,
     this.dealId,
+    this.rawMap,
   });
 }
 
@@ -84,6 +90,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
   String _selectedOutcome = 'Scheduled';
   String _selectedDuration = '15 Minutes';
   bool _createFollowUpTask = false;
+  bool _isSubmitting = false;
 
   // Associations state
   late Map<String, List<Map<String, String>>> _associations;
@@ -200,8 +207,8 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     super.initState();
     final em = widget.existingMeeting;
     if (em != null) {
-      _titleController.text = em.title;
-      _notesController.text = em.notes;
+      _titleController.text = parseActivityDescription(em.title);
+      _notesController.text = parseActivityDescription(em.notes);
       _selectedOutcome = em.outcome;
       _selectedDuration = em.duration;
     }
@@ -212,7 +219,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
 
     _associations = {
       'Companies': compId != null && compId.isNotEmpty ? [{'id': compId, 'name': widget.associatedRecordName}] : [],
-      'Contacts': cId != null && cId.isNotEmpty ? [{'id': cId, 'name': widget.associatedRecordName}] : (compId == null && dId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : []),
+      'Contacts': cId != null && cId.isNotEmpty ? [{'id': cId, 'name': widget.associatedRecordName}] : [],
       'Deals': dId != null && dId.isNotEmpty ? [{'id': dId, 'name': widget.associatedRecordName}] : [],
     };
     final now = DateTime.now();
@@ -274,13 +281,17 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
       _selectedOutcome = outcomes.first;
     }
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: Column(
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        ),
+        child: Column(
         children: [
           // 1. Dark Blue/Grey Top Header matching Image 4
           Container(
@@ -737,131 +748,244 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: canSubmit
+                        onPressed: canSubmit
                         ? () async {
-                            final matchedOption = provider.meetingOutcomeOptions.firstWhere(
-                              (o) => o.label == _selectedOutcome,
-                              orElse: () => MasterDropdownOptionModel(
-                                id: '',
-                                value: _selectedOutcome.toLowerCase().replaceAll(' ', '_'),
-                                label: _selectedOutcome,
-                              ),
-                            );
-                            final outcomeValue = matchedOption.value;
+                            final title = _titleController.text.trim();
+                            final notes = _notesController.text.trim();
 
-                            String? targetCompanyId = widget.companyId ?? widget.existingMeeting?.companyId;
-                            if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
-                                _associations['Companies'] != null &&
-                                _associations['Companies']!.isNotEmpty) {
-                              targetCompanyId = _associations['Companies']!.first['id'];
+                            if (title.isEmpty && notes.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter a meeting title or notes.'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
                             }
 
-                            String? targetContactId = widget.contactId ?? widget.existingMeeting?.contactId;
-                            if ((targetContactId == null || targetContactId.isEmpty) &&
-                                _associations['Contacts'] != null &&
-                                _associations['Contacts']!.isNotEmpty) {
-                              targetContactId = _associations['Contacts']!.first['id'];
-                            }
+                            setState(() {
+                              _isSubmitting = true;
+                            });
 
-                            String? targetDealId = widget.dealId ?? widget.existingMeeting?.dealId;
-                            if ((targetDealId == null || targetDealId.isEmpty) &&
-                                _associations['Deals'] != null &&
-                                _associations['Deals']!.isNotEmpty) {
-                              targetDealId = _associations['Deals']!.first['id'];
-                            }
-
-                            final meetingData = {
-                              'title': _titleController.text.trim(),
-                              'type': 'meeting',
-                              'outcome': outcomeValue,
-                              'duration': _selectedDuration,
-                              'startTime': _startTimeController.text.trim(),
-                              'notes': _notesController.text.trim(),
-                              'description': _notesController.text.trim(),
-                              'createFollowUpTask': _createFollowUpTask,
-                              if (targetContactId != null && targetContactId.isNotEmpty) ...{
-                                'contactId': targetContactId,
-                                'contact_id': targetContactId,
-                              },
-                              if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
-                                'companyId': targetCompanyId,
-                                'company_id': targetCompanyId,
-                              },
-                              if (targetDealId != null && targetDealId.isNotEmpty) ...{
-                                'dealId': targetDealId,
-                                'deal_id': targetDealId,
-                              },
-                            };
-
-                            final existingId = widget.existingMeeting?.id;
                             try {
-                              if (existingId != null && existingId.isNotEmpty) {
-                                try {
-                                  final res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
-                                  debugPrint('[PUT /api/activities/$existingId SUCCESS]: ${res.data}');
-                                } catch (e) {
-                                  debugPrint('[PUT /api/activities/$existingId FAILED, TRYING PATCH]: $e');
-                                  final res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
-                                  debugPrint('[PATCH /api/activities/$existingId SUCCESS]: ${res.data}');
+                              final matchedOption = provider.meetingOutcomeOptions.firstWhere(
+                                (o) => o.label == _selectedOutcome,
+                                orElse: () => MasterDropdownOptionModel(
+                                  id: '',
+                                  value: _selectedOutcome.toLowerCase().replaceAll(' ', '_'),
+                                  label: _selectedOutcome,
+                                ),
+                              );
+                              final outcomeValue = matchedOption.value;
+
+                              String? targetCompanyId = widget.companyId ?? widget.existingMeeting?.companyId;
+                              if ((targetCompanyId == null || targetCompanyId.isEmpty) &&
+                                  _associations['Companies'] != null &&
+                                  _associations['Companies']!.isNotEmpty) {
+                                targetCompanyId = _associations['Companies']!.first['id'];
+                              }
+
+                              String? targetContactId = widget.contactId ?? widget.existingMeeting?.contactId;
+                              if ((targetContactId == null || targetContactId.isEmpty) &&
+                                  _associations['Contacts'] != null &&
+                                  _associations['Contacts']!.isNotEmpty) {
+                                targetContactId = _associations['Contacts']!.first['id'];
+                              }
+
+                              String? targetDealId = widget.dealId ?? widget.existingMeeting?.dealId;
+                              if ((targetDealId == null || targetDealId.isEmpty) &&
+                                  _associations['Deals'] != null &&
+                                  _associations['Deals']!.isNotEmpty) {
+                                targetDealId = _associations['Deals']!.first['id'];
+                              }
+
+                              if (targetContactId == '1') targetContactId = null;
+                              if (targetCompanyId == '1') targetCompanyId = null;
+                              if (targetDealId == '1') targetDealId = null;
+
+                              final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+                              if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
+                                companyIds.add(targetCompanyId);
+                              }
+
+                              final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+                              if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
+                                contactIds.add(targetContactId);
+                              }
+
+                              final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
+                              if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
+                                dealIds.add(targetDealId);
+                              }
+
+                              final List<Map<String, String>> assocList = [];
+                              for (final id in companyIds) {
+                                assocList.add({'objectId': id, 'objectType': 'company'});
+                              }
+                              for (final id in contactIds) {
+                                assocList.add({'objectId': id, 'objectType': 'contact'});
+                              }
+                              for (final id in dealIds) {
+                                assocList.add({'objectId': id, 'objectType': 'deal'});
+                              }
+
+                              final meetingData = {
+                                'title': title.isNotEmpty ? title : 'Meeting Activity',
+                                'type': 'meeting',
+                                'outcome': outcomeValue,
+                                'duration': _selectedDuration,
+                                'startTime': _startTimeController.text.trim(),
+                                'notes': notes,
+                                'description': notes,
+                                'createFollowUpTask': _createFollowUpTask,
+                                'activityDate': DateTime.now().toIso8601String(),
+                                'associationsList': assocList,
+                                'associations_list': assocList,
+                                'companyIds': companyIds,
+                                'company_ids': companyIds,
+                                'contactIds': contactIds,
+                                'contact_ids': contactIds,
+                                'dealIds': dealIds,
+                                'deal_ids': dealIds,
+                                if (targetContactId != null && targetContactId.isNotEmpty) ...{
+                                  'contactId': targetContactId,
+                                  'contact_id': targetContactId,
+                                },
+                                if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+                                  'companyId': targetCompanyId,
+                                  'company_id': targetCompanyId,
+                                },
+                                if (targetDealId != null && targetDealId.isNotEmpty) ...{
+                                  'dealId': targetDealId,
+                                  'deal_id': targetDealId,
+                                },
+                              };
+
+                              final existingId = widget.existingMeeting?.id;
+                              bool meetingSuccess = false;
+                              Response? res;
+                              try {
+                                if (existingId != null && existingId.isNotEmpty) {
+                                  try {
+                                    res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
+                                  } catch (e) {
+                                    res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
+                                  }
+                                } else {
+                                  res = await ApiService().post(ApiConstants.activities, data: meetingData);
                                 }
-                              } else {
-                                final res = await ApiService().post(ApiConstants.activities, data: meetingData);
-                                debugPrint('[POST /api/activities SUCCESS]: ${res.data}');
+                                meetingSuccess = true;
+                              } catch (e) {
+                                debugPrint('[SAVE MEETING ERROR]: $e');
+                                if (context.mounted) {
+                                  setState(() {
+                                    _isSubmitting = false;
+                                  });
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to save meeting: $e'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+
+                              Map<String, dynamic> dataMap = {};
+                              if (res.data is Map) {
+                                final rawMap = Map<String, dynamic>.from(res.data as Map);
+                                if (rawMap['data'] is Map) {
+                                  dataMap = Map<String, dynamic>.from(rawMap['data'] as Map);
+                                } else if (rawMap['activity'] is Map) {
+                                  dataMap = Map<String, dynamic>.from(rawMap['activity'] as Map);
+                                } else {
+                                  dataMap = rawMap;
+                                }
+                              }
+
+                              final createdId = (dataMap['id'] ?? dataMap['_id'] ?? existingId)?.toString();
+                              if (createdId != null && createdId.isNotEmpty) {
+                                await ActivityAssociationStorage.saveAssociations(createdId, _associations);
+                              }
+
+                               if (meetingSuccess && _createFollowUpTask) {
+                                 try {
+                                   final String taskDescJson = jsonEncode({
+                                     'type': 'doc',
+                                     'content': [
+                                       {
+                                         'type': 'paragraph',
+                                         if (notes.isNotEmpty)
+                                           'content': [{'type': 'text', 'text': notes}]
+                                       }
+                                     ]
+                                   });
+
+                                   final taskPayload = {
+                                     'type': 'task',
+                                     'title': 'Follow-up: ${title.isNotEmpty ? title : "Meeting"}',
+                                     'subject': 'Follow-up: ${title.isNotEmpty ? title : "Meeting"}',
+                                     'priority': 'medium',
+                                     'notes': notes,
+                                     'description': taskDescJson,
+                                     'scheduledAt': DateTime.now().toIso8601String(),
+                                     if (targetContactId != null && targetContactId.isNotEmpty) ...{
+                                       'contactId': targetContactId,
+                                       'contact_id': targetContactId,
+                                     },
+                                     if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+                                       'companyId': targetCompanyId,
+                                       'company_id': targetCompanyId,
+                                     },
+                                     if (targetDealId != null && targetDealId.isNotEmpty) ...{
+                                       'dealId': targetDealId,
+                                       'deal_id': targetDealId,
+                                     },
+                                   };
+                                   await ApiService().post(ApiConstants.activities, data: taskPayload);
+                                 } catch (e) {
+                                   debugPrint('[Create Follow-up Task Warning]: $e');
+                                 }
+                               }
+
+                              final meeting = MeetingModel(
+                                id: createdId,
+                                title: title,
+                                outcome: _selectedOutcome,
+                                duration: _selectedDuration,
+                                startTime: _startTimeController.text.trim(),
+                                notes: notes,
+                                assignedTo: widget.existingMeeting?.assignedTo ?? 'Admin User',
+                                contactId: targetContactId,
+                                companyId: targetCompanyId,
+                                dealId: targetDealId,
+                                rawMap: dataMap.isNotEmpty ? dataMap : meetingData,
+                              );
+                              if (context.mounted) {
+                                setState(() {
+                                  _isSubmitting = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Meeting saved successfully!'),
+                                    backgroundColor: Color(0xFF00A884),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                                Navigator.of(context).pop(meeting);
                               }
                             } catch (e) {
-                              debugPrint('[SAVE ${ApiConstants.activities} ERROR]: $e');
-                            }
-
-                            if (_createFollowUpTask) {
-                              try {
-                                final taskPayload = {
-                                  'title': 'Follow-up: ${_titleController.text.trim()}',
-                                  'subject': 'Follow-up: ${_titleController.text.trim()}',
-                                  'type': 'task',
-                                  'status': 'PENDING',
-                                  'priority': 'Medium',
-                                  'notes': _notesController.text.trim(),
-                                  'description': _notesController.text.trim(),
-                                  'activityDate': DateTime.now().toIso8601String(),
-                                  'dueDate': 'Today',
-                                  if (targetContactId != null && targetContactId.isNotEmpty) ...{
-                                    'contactId': targetContactId,
-                                    'contact_id': targetContactId,
-                                  },
-                                  if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
-                                    'companyId': targetCompanyId,
-                                    'company_id': targetCompanyId,
-                                  },
-                                  if (targetDealId != null && targetDealId.isNotEmpty) ...{
-                                    'dealId': targetDealId,
-                                    'deal_id': targetDealId,
-                                  },
-                                };
-                                try {
-                                  await ApiService().post(ApiConstants.activities, data: taskPayload);
-                                } catch (_) {}
-                                try {
-                                  await ApiService().post('/tasks', data: taskPayload);
-                                } catch (_) {}
-                              } catch (e) {
-                                debugPrint('[Create Follow-up Task Error]: $e');
+                              if (context.mounted) {
+                                setState(() {
+                                  _isSubmitting = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Unexpected error: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
                               }
-                            }
-
-                            final meeting = MeetingModel(
-                              id: existingId,
-                              title: _titleController.text.trim(),
-                              outcome: _selectedOutcome,
-                              duration: _selectedDuration,
-                              startTime: _startTimeController.text.trim(),
-                              notes: _notesController.text.trim(),
-                              assignedTo: widget.existingMeeting?.assignedTo ?? 'Admin User',
-                              contactId: targetContactId,
-                              companyId: targetCompanyId,
-                              dealId: targetDealId,
-                            );
-                            if (context.mounted) {
-                              Navigator.of(context).pop(meeting);
                             }
                           }
                         : null,
@@ -889,7 +1013,8 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildFormatIconButton(

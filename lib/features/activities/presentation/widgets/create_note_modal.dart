@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/utils/activity_utils.dart';
 import 'follow_up_task_section.dart';
 
 class CreateNoteModal extends StatefulWidget {
@@ -76,13 +78,15 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
     super.initState();
     _associations = {
       'Companies': widget.companyId != null ? [{'id': widget.companyId!, 'name': widget.associatedRecordName}] : [],
-      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : widget.companyId == null && widget.dealId == null ? [{'id': '1', 'name': widget.associatedRecordName}] : [],
+      'Contacts': widget.contactId != null ? [{'id': widget.contactId!, 'name': widget.associatedRecordName}] : [],
       'Deals': widget.dealId != null ? [{'id': widget.dealId!, 'name': widget.associatedRecordName}] : [],
     };
 
     if (widget.noteToEdit != null) {
-      _titleController.text = (widget.noteToEdit!['title'] ?? widget.noteToEdit!['subject'] ?? '').toString();
-      _contentController.text = (widget.noteToEdit!['notes'] ?? widget.noteToEdit!['content'] ?? widget.noteToEdit!['description'] ?? '').toString();
+      final rawTitle = widget.noteToEdit!['title'] ?? widget.noteToEdit!['subject'] ?? '';
+      _titleController.text = parseActivityDescription(rawTitle);
+      final rawContent = widget.noteToEdit!['notes'] ?? widget.noteToEdit!['content'] ?? widget.noteToEdit!['description'] ?? widget.noteToEdit!['body'] ?? '';
+      _contentController.text = parseActivityDescription(rawContent);
     }
 
     _undoHistory.add(_contentController.text);
@@ -221,7 +225,15 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
     final title = _titleController.text.trim();
     final body = _contentController.text.trim();
 
-    if (title.isEmpty && body.isEmpty) return;
+    if (title.isEmpty && body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a note title or content.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -256,17 +268,21 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
         selectedDealId = widget.noteToEdit?['dealId'] ?? widget.noteToEdit?['deal_id'];
       }
 
-      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      if (selectedContactId == '1') selectedContactId = null;
+      if (selectedCompanyId == '1') selectedCompanyId = null;
+      if (selectedDealId == '1') selectedDealId = null;
+
+      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
       if (selectedCompanyId != null && selectedCompanyId.isNotEmpty && !companyIds.contains(selectedCompanyId)) {
         companyIds.add(selectedCompanyId);
       }
 
-      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
       if (selectedContactId != null && selectedContactId.isNotEmpty && !contactIds.contains(selectedContactId)) {
         contactIds.add(selectedContactId);
       }
 
-      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().where((id) => id != '1').toList() ?? [];
       if (selectedDealId != null && selectedDealId.isNotEmpty && !dealIds.contains(selectedDealId)) {
         dealIds.add(selectedDealId);
       }
@@ -286,8 +302,8 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
         'title': title.isNotEmpty ? title : 'Note',
         'type': 'note',
         'notes': body,
+        'description': body,
         'activityDate': DateTime.now().toIso8601String(),
-        'associations': _associations,
         'associationsList': assocList,
         'associations_list': assocList,
         'companyIds': companyIds,
@@ -310,29 +326,56 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
         },
       };
 
+      bool noteSuccess = false;
       final noteId = widget.noteToEdit?['id'] ?? widget.noteToEdit?['_id'];
-      if (noteId != null && noteId.toString().isNotEmpty) {
-        try {
-          await api.put('${ApiConstants.activities}/$noteId', data: payload);
-        } catch (_) {
-          await api.patch('${ApiConstants.activities}/$noteId', data: payload);
+      try {
+        if (noteId != null && noteId.toString().isNotEmpty) {
+          try {
+            await api.put('${ApiConstants.activities}/$noteId', data: payload);
+          } catch (_) {
+            await api.patch('${ApiConstants.activities}/$noteId', data: payload);
+          }
+        } else {
+          await api.post(ApiConstants.activities, data: payload);
         }
-      } else {
-        await api.post(ApiConstants.activities, data: payload);
+        noteSuccess = true;
+      } catch (e) {
+        debugPrint('[CreateNote Error]: $e');
+        if (mounted) {
+          setState(() {
+            _isSubmitting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to save note: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
       }
 
-      if (_createFollowUpTask) {
+      if (noteSuccess && _createFollowUpTask) {
         try {
+          final String taskDescJson = jsonEncode({
+            'type': 'doc',
+            'content': [
+              {
+                'type': 'paragraph',
+                if (body.isNotEmpty)
+                  'content': [{'type': 'text', 'text': body}]
+              }
+            ]
+          });
+
           final taskPayload = {
+            'type': 'task',
             'title': 'Follow-up: ${title.isNotEmpty ? title : "Note"}',
             'subject': 'Follow-up: ${title.isNotEmpty ? title : "Note"}',
-            'type': 'task',
-            'status': 'PENDING',
-            'priority': 'Medium',
+            'priority': 'medium',
             'notes': body,
-            'description': body,
-            'activityDate': DateTime.now().toIso8601String(),
-            'dueDate': 'Today',
+            'description': taskDescJson,
+            'scheduledAt': DateTime.now().toIso8601String(),
             if (selectedContactId != null && selectedContactId.isNotEmpty) ...{
               'contactId': selectedContactId,
               'contact_id': selectedContactId,
@@ -346,20 +389,34 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
               'deal_id': selectedDealId,
             },
           };
-          try {
-            await api.post(ApiConstants.activities, data: taskPayload);
-          } catch (_) {}
-          try {
-            await api.post('/tasks', data: taskPayload);
-          } catch (_) {}
+          await api.post(ApiConstants.activities, data: taskPayload);
         } catch (e) {
-          debugPrint('[Create Follow-up Task Error]: $e');
+          debugPrint('[Create Follow-up Task Warning]: $e');
         }
       }
-    } catch (_) {}
 
-    if (mounted) {
-      Navigator.of(context).pop(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Note saved successfully!'),
+            backgroundColor: Color(0xFF00A884),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unexpected error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -661,29 +718,35 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
                   const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
                   // 8. Footer Action Bar
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    child: Row(
-                      children: [
-                        ElevatedButton(
-                          onPressed: _isSubmitting ? null : _submitNote,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF00A884),
-                            disabledBackgroundColor: const Color(0xFFCBD5E1),
-                            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                          ),
-                          child: Text(
-                            'Create note',
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          ElevatedButton(
+                            onPressed: _isSubmitting ? null : _submitNote,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF00A884),
+                              disabledBackgroundColor: const Color(0xFFCBD5E1),
+                              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                             ),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : Text(
+                                    'Create note',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
                           ),
-                        ),
-                        const Spacer(),
+                          const Spacer(),
                         Row(
                           children: [
                             const Icon(Icons.check, color: Color(0xFF00A884), size: 18),
