@@ -24,7 +24,7 @@ class DealsScreen extends StatefulWidget {
 class _DealsScreenState extends State<DealsScreen> {
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = false;
+  bool _isFilterExpanded = true;
   final Set<String> _selectedDealIds = {};
 
   @override
@@ -89,7 +89,7 @@ class _DealsScreenState extends State<DealsScreen> {
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final provider = context.read<DealProvider>();
     final idsToDelete = List<String>.from(_selectedDealIds);
@@ -158,6 +158,11 @@ class _DealsScreenState extends State<DealsScreen> {
                     },
                     isFilterActive: dealProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _isFilterExpanded = !_isFilterExpanded;
+                      });
+                    },
                     onRefreshTap: () {
                       context.read<DealProvider>().fetchDeals();
                     },
@@ -415,7 +420,8 @@ class _DealsScreenState extends State<DealsScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final created = await CreateDealModal.show(context);
-          if (created == true && mounted) {
+          if (!mounted) return;
+          if (created == true) {
             _loadDealsForSegment(_selectedSegment);
             context.read<DealProvider>().fetchDealStats();
           }

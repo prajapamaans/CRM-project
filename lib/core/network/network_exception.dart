@@ -28,8 +28,18 @@ class NetworkException implements Exception {
         String? serverMessage;
 
         if (responseData is Map<String, dynamic>) {
-          serverMessage = responseData['message'] as String? ??
-              responseData['error'] as String?;
+          final errorsField = responseData['errors'] ?? responseData['details'];
+          if (errorsField is List && errorsField.isNotEmpty) {
+            serverMessage = errorsField.join(', ');
+          } else if (responseData['message'] is List && (responseData['message'] as List).isNotEmpty) {
+            serverMessage = (responseData['message'] as List).join(', ');
+          } else if (errorsField != null && errorsField.toString().isNotEmpty) {
+            serverMessage = errorsField.toString();
+          } else if (responseData['message'] != null) {
+            serverMessage = responseData['message'].toString();
+          } else if (responseData['error'] != null) {
+            serverMessage = responseData['error'].toString();
+          }
         }
 
         switch (statusCode) {

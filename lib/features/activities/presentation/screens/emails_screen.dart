@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/data/models/company_model.dart';
@@ -14,6 +15,7 @@ import '../../../contacts/presentation/screens/contact_details_screen.dart';
 import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/email_inline_filter_section.dart';
 import 'email_details_screen.dart';
 
@@ -45,6 +47,22 @@ class _EmailsScreenState extends State<EmailsScreen> {
   bool _hasMoreData = true;
   String? _errorMessage;
 
+  /// Id of the email the user selected. Held by id so the highlight survives a
+  /// reload of the list.
+  String? _selectedEmailId;
+
+  /// Marks the selected row so it can be scrolled to once it is built.
+  final GlobalKey _selectedTileKey = GlobalKey();
+
+  /// Activity requested by another screen, applied once the list has loaded.
+  String? _pendingFocusId;
+  String? _appliedFocusId;
+  bool _hasLoadedOnce = false;
+
+  /// Extra pages to pull while looking for a requested email, so an activity
+  /// that is not on the first page can still be reached.
+  static const int _maxFocusPageFetches = 5;
+
   @override
   void initState() {
     super.initState();
@@ -55,9 +73,56 @@ class _EmailsScreenState extends State<EmailsScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // An email opened from elsewhere in the app (e.g. a notification).
+    final requested = context.watch<NavigationProvider>().focusedActivityId;
+    if (requested != null && requested != _appliedFocusId) {
+      _appliedFocusId = requested;
+      _pendingFocusId = requested;
+      // Off the build phase: applying the focus calls setState.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyPendingFocus();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  String? _emailId(Map<String, dynamic> email) =>
+      (email['id'] ?? email['_id'])?.toString();
+
+  /// Highlights the requested email and brings it into view. Does nothing until
+  /// the list has loaded — [_fetchEmails] calls back in once it has.
+  Future<void> _applyPendingFocus() async {
+    final id = _pendingFocusId;
+    if (id == null || !_hasLoadedOnce || _isLoading) return;
+
+    _pendingFocusId = null;
+
+    // The list is paginated, so keep pulling pages until the email shows up.
+    var fetches = 0;
+    while (mounted &&
+        !_emails.any((e) => _emailId(e) == id) &&
+        _hasMoreData &&
+        fetches < _maxFocusPageFetches) {
+      fetches++;
+      await _fetchEmails(reset: false);
+    }
+
+    // Not in this list (deleted, filtered out, or too far back): leave the
+    // screen as it is rather than scrolling somewhere arbitrary.
+    if (!mounted || !_emails.any((e) => _emailId(e) == id)) return;
+
+    setState(() => _selectedEmailId = id);
+    await ensureListItemVisible(
+      controller: _scrollController,
+      itemKey: _selectedTileKey,
+    );
   }
 
   void _onScroll() {
@@ -161,7 +226,12 @@ class _EmailsScreenState extends State<EmailsScreen> {
         _hasMoreData = items.length >= _pageSize;
         _isLoading = false;
         _isLoadingMore = false;
+        _hasLoadedOnce = true;
       });
+
+      // The list is populated now, so an activity requested by another screen
+      // (including one requested before this load started) can be located.
+      if (reset) _applyPendingFocus();
     } catch (e) {
       debugPrint('[Fetch Emails ERROR]: $e');
       if (!mounted) return;
@@ -169,6 +239,7 @@ class _EmailsScreenState extends State<EmailsScreen> {
         _errorMessage = 'Failed to load emails. Tap to retry.';
         _isLoading = false;
         _isLoadingMore = false;
+        _hasLoadedOnce = true;
       });
     }
   }
@@ -278,7 +349,7 @@ class _EmailsScreenState extends State<EmailsScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 1. Top Header Row: Email Icon + Title + 3-Dot Button
+            // 1. Top Header Row: Email Icon + Title
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               color: Colors.white,
@@ -297,45 +368,6 @@ class _EmailsScreenState extends State<EmailsScreen> {
                       fontWeight: FontWeight.w700,
                       color: const Color(0xFF1E293B),
                     ),
-                  ),
-                  const Spacer(),
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert_rounded, color: Color(0xFF64748B)),
-                    onSelected: (value) {
-                      if (value == 'sort') {
-                        _showSortMenu(context);
-                      } else if (value == 'filter') {
-                        setState(() {
-                          _isFilterExpanded = !_isFilterExpanded;
-                        });
-                      }
-                    },
-                    itemBuilder: (ctx) => [
-                      PopupMenuItem<String>(
-                        value: 'sort',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.sort_rounded, color: Color(0xFF64748B), size: 18),
-                            const SizedBox(width: 10),
-                            Text('Sort', style: GoogleFonts.poppins(fontSize: 13.5)),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'filter',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.tune_rounded,
-                              color: _isFilterExpanded ? const Color(0xFF00A884) : const Color(0xFF64748B),
-                              size: 18,
-                            ),
-                            const SizedBox(width: 10),
-                            Text('Filter', style: GoogleFonts.poppins(fontSize: 13.5)),
-                          ],
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -499,15 +531,26 @@ class _EmailsScreenState extends State<EmailsScreen> {
     final startTime = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['createdAt'] ?? '').toString();
     final ownerName = (act['ownerName'] ?? act['owner']?['name'] ?? act['assignedTo'] ?? 'Admin User').toString();
 
+    final id = _emailId(act);
+    final bool isSelected = id != null && id == _selectedEmailId;
+
     return Container(
+      // The key rides along with the selection so the selected row can always
+      // be scrolled to, however it got selected.
+      key: isSelected ? _selectedTileKey : null,
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+          width: isSelected ? 1.5 : 1,
+        ),
       ),
       child: InkWell(
         onTap: () async {
+          // Mark this email as the selected one before opening its details.
+          setState(() => _selectedEmailId = id);
           _onEmailTileTap(act);
         },
         borderRadius: BorderRadius.circular(10),
@@ -673,7 +716,7 @@ class _EmailsScreenState extends State<EmailsScreen> {
       );
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1),
+          builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
         ),
       );
       _fetchEmails(reset: true);
@@ -685,7 +728,7 @@ class _EmailsScreenState extends State<EmailsScreen> {
       );
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1),
+          builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
         ),
       );
       _fetchEmails(reset: true);
@@ -699,7 +742,7 @@ class _EmailsScreenState extends State<EmailsScreen> {
       );
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1),
+          builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
         ),
       );
       _fetchEmails(reset: true);

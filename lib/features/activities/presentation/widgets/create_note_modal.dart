@@ -330,11 +330,8 @@ class _CreateNoteModalState extends State<CreateNoteModal> {
       final noteId = widget.noteToEdit?['id'] ?? widget.noteToEdit?['_id'];
       try {
         if (noteId != null && noteId.toString().isNotEmpty) {
-          try {
-            await api.put('${ApiConstants.activities}/$noteId', data: payload);
-          } catch (_) {
-            await api.patch('${ApiConstants.activities}/$noteId', data: payload);
-          }
+          // PATCH /api/activities/:id is the documented update route.
+          await api.patch('${ApiConstants.activities}/$noteId', data: payload);
         } else {
           await api.post(ApiConstants.activities, data: payload);
         }

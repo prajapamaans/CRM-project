@@ -195,28 +195,14 @@ class DealRemoteDataSourceImpl implements DealRemoteDataSource {
 
   @override
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData) async {
-    dynamic rawData;
-    try {
-      final response = await _apiService.put(
-        '${ApiConstants.deals}/$id',
-        data: dealData,
-      );
-      debugPrint('[PUT /api/deals/$id SUCCESS]: ${response.data}');
-      rawData = response.data;
-    } catch (e) {
-      debugPrint('[PUT /api/deals/$id FAILED, RETRYING PATCH]: $e');
-      try {
-        final response = await _apiService.patch(
-          '${ApiConstants.deals}/$id',
-          data: dealData,
-        );
-        debugPrint('[PATCH /api/deals/$id SUCCESS]: ${response.data}');
-        rawData = response.data;
-      } catch (patchErr) {
-        debugPrint('[PATCH /api/deals/$id FAILED TOO]: $patchErr');
-        rethrow;
-      }
-    }
+    // PATCH /api/deals/:id is the documented update route. Trying PUT first
+    // cost every save a full failed round trip before the real request.
+    final response = await _apiService.patch(
+      '${ApiConstants.deals}/$id',
+      data: dealData,
+    );
+    debugPrint('[PATCH /api/deals/$id SUCCESS]: ${response.data}');
+    final dynamic rawData = response.data;
 
     if (rawData is Map<String, dynamic>) {
       final data = rawData.containsKey('data') && rawData['data'] is Map<String, dynamic>

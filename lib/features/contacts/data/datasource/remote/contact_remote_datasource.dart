@@ -196,13 +196,10 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
       debugPrint('[PATCH /api/contacts/$id SUCCESS]: ${response.data}');
       rawData = response.data;
     } catch (e) {
-      debugPrint('[PATCH /api/contacts/$id FAILED, RETRYING PUT]: $e');
-      final response = await _apiService.put(
-        '${ApiConstants.contacts}/$id',
-        data: contactData,
-      );
-      debugPrint('[PUT /api/contacts/$id SUCCESS]: ${response.data}');
-      rawData = response.data;
+      // PATCH is the only update route; retrying with PUT just doubled the
+      // wait before the failure surfaced.
+      debugPrint('[PATCH /api/contacts/$id FAILED]: $e');
+      rethrow;
     }
 
     if (rawData is Map<String, dynamic>) {

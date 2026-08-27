@@ -17,6 +17,11 @@ import '../../../contacts/presentation/screens/contact_details_screen.dart';
 import '../../../contacts/data/models/contact_model.dart';
 import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../deals/data/models/deal_model.dart';
+import '../../../companies/presentation/providers/company_provider.dart';
+import '../../../deals/presentation/providers/deal_provider.dart';
+import '../../../contacts/presentation/providers/contact_provider.dart';
+import '../../../../core/widgets/search_and_filter_bar.dart';
+import '../widgets/task_inline_filter_section.dart';
 
 class TasksScreen extends StatefulWidget {
   const TasksScreen({super.key});
@@ -37,6 +42,10 @@ class _TasksScreenState extends State<TasksScreen> {
   int _totalTasks = 0;
   String? _errorMessage;
 
+  /// Id of the task whose details view was opened from this list. Held by id so
+  /// the highlight survives a reload of the list.
+  String? _selectedTaskId;
+
   // Filter dropdown state
   String _selectedCreateDate = 'Create date';
   String _selectedStatusFilter = 'Status';
@@ -48,6 +57,7 @@ class _TasksScreenState extends State<TasksScreen> {
 
   // Sort state
   String _selectedSortOption = 'Most Recent';
+  ContactSortOption _currentSortOption = ContactSortOption.mostRecent;
 
   // API Master Data
   List<MasterDropdownOptionModel> _taskStatuses = [];
@@ -72,6 +82,9 @@ class _TasksScreenState extends State<TasksScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<CompanyProvider>().fetchCompanies();
+      context.read<ContactProvider>().fetchContacts();
+      context.read<DealProvider>().fetchDeals();
       _loadMasterDataAndFetchTasks();
     });
   }
@@ -330,193 +343,7 @@ class _TasksScreenState extends State<TasksScreen> {
     });
   }
 
-  void _showSortMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Text(
-                  'SORT BY',
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF64748B),
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              const Divider(height: 1, color: Color(0xFFE2E8F0)),
-              ..._sortOptions.map((opt) {
-                final bool isSelected = _selectedSortOption == opt;
-                return InkWell(
-                  onTap: () {
-                    setState(() {
-                      _selectedSortOption = opt;
-                    });
-                    Navigator.pop(context);
-                    _fetchTasks(resetPage: true);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          opt,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13.5,
-                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                            color: const Color(0xFF1E293B),
-                          ),
-                        ),
-                        if (isSelected)
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF00A884),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
-  void _showFilterModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Filters',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1E293B),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedCreateDate = 'Create date';
-                        _selectedStatusFilter = 'Status';
-                        _selectedPriorityFilter = 'Priority';
-                        _selectedCompanyFilter = 'Company';
-                        _selectedContactFilter = 'Contact';
-                        _selectedDealFilter = 'Deal';
-                        _selectedOwnerFilter = 'Owner';
-                      });
-                      Navigator.pop(context);
-                      _fetchTasks(resetPage: true);
-                    },
-                    child: Text(
-                      'Reset All',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF00A884),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 10,
-                children: [
-                  _buildDropdownPill(
-                    label: _selectedCreateDate,
-                    items: const ['Create date', 'Today', 'This Week', 'This Month'],
-                    onSelected: (val) => setState(() => _selectedCreateDate = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedStatusFilter,
-                    items: _taskStatuses.isNotEmpty
-                        ? ['Status', ..._taskStatuses.map((s) => s.label)]
-                        : const ['Status', 'Pending', 'Completed', 'Reopened'],
-                    onSelected: (val) => setState(() => _selectedStatusFilter = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedPriorityFilter,
-                    items: _taskPriorities.isNotEmpty
-                        ? ['Priority', ..._taskPriorities.map((p) => p.label)]
-                        : const ['Priority', 'None', 'Low', 'Medium', 'High'],
-                    onSelected: (val) => setState(() => _selectedPriorityFilter = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedCompanyFilter,
-                    items: _companies.isNotEmpty
-                        ? ['Company', ..._companies.map((c) => c['name'] as String? ?? 'Company')]
-                        : const ['Company'],
-                    onSelected: (val) => setState(() => _selectedCompanyFilter = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedContactFilter,
-                    items: _contacts.isNotEmpty
-                        ? [
-                            'Contact',
-                            ..._contacts.map((c) => '${c['firstName'] ?? ''} ${c['lastName'] ?? ''}'.trim())
-                          ]
-                        : const ['Contact'],
-                    onSelected: (val) => setState(() => _selectedContactFilter = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedDealFilter,
-                    items: _deals.isNotEmpty
-                        ? ['Deal', ..._deals.map((d) => d['title'] as String? ?? 'Deal')]
-                        : const ['Deal'],
-                    onSelected: (val) => setState(() => _selectedDealFilter = val),
-                  ),
-                  _buildDropdownPill(
-                    label: _selectedOwnerFilter,
-                    items: _users.isNotEmpty
-                        ? [
-                            'Owner',
-                            ..._users.map((u) => '${u['firstName'] ?? ''} ${u['lastName'] ?? ''}'.trim())
-                          ]
-                        : const ['Owner', 'Admin User'],
-                    onSelected: (val) => setState(() => _selectedOwnerFilter = val),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -605,10 +432,99 @@ class _TasksScreenState extends State<TasksScreen> {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Column(
+                children: [
+                  SearchAndFilterBar(
+                    searchHint: 'Search tasks...',
+                    onSearchChanged: _onSearchChanged,
+                    onSegmentChanged: (index) {
+                      setState(() {
+                        _selectedSegment = index;
+                      });
+                      _fetchTasks(resetPage: true);
+                    },
+                    currentSort: _currentSortOption,
+                    onSortChanged: (ContactSortOption option) {
+                      setState(() {
+                        _currentSortOption = option;
+                        if (option == ContactSortOption.aToZ) {
+                          _selectedSortOption = 'A to Z';
+                        } else if (option == ContactSortOption.zToA) {
+                          _selectedSortOption = 'Z to A';
+                        } else {
+                          _selectedSortOption = 'Most Recent';
+                        }
+                      });
+                      _fetchTasks(resetPage: true);
+                    },
+                    isFilterActive: _selectedCreateDate != 'Create date' ||
+                        _selectedStatusFilter != 'Status' ||
+                        _selectedPriorityFilter != 'Priority' ||
+                        _selectedCompanyFilter != 'Company' ||
+                        _selectedContactFilter != 'Contact' ||
+                        _selectedDealFilter != 'Deal' ||
+                        _selectedOwnerFilter != 'Owner',
+                    isFilterExpanded: _showFiltersRow,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _showFiltersRow = !_showFiltersRow;
+                      });
+                    },
+                  ),
+
+                  if (_showFiltersRow)
+                    TaskInlineFilterSection(
+                      selectedOwnerId: _selectedOwnerFilter != 'Owner' ? _selectedOwnerFilter : 'all',
+                      selectedCreateDate: _selectedCreateDate != 'Create date' ? _selectedCreateDate : 'All time',
+                      selectedStatus: _selectedStatusFilter != 'Status' ? _selectedStatusFilter : 'All statuses',
+                      selectedPriority: _selectedPriorityFilter != 'Priority' ? _selectedPriorityFilter : 'ALL PRIORITIES',
+                      selectedCompany: _selectedCompanyFilter != 'Company' ? _selectedCompanyFilter : 'All companies',
+                      selectedContact: _selectedContactFilter != 'Contact' ? _selectedContactFilter : 'All contacts',
+                      selectedDeal: _selectedDealFilter != 'Deal' ? _selectedDealFilter : 'All deals',
+                      users: _users,
+                      companies: _companies,
+                      contacts: _contacts,
+                      deals: _deals,
+                      taskStatuses: _taskStatuses.map((s) => s.label).toList(),
+                      taskPriorities: _taskPriorities.map((p) => p.label).toList(),
+                      onOwnerChanged: (val) {
+                        setState(() => _selectedOwnerFilter = (val == null || val == 'all') ? 'Owner' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onCreateDateChanged: (val) {
+                        setState(() => _selectedCreateDate = (val == null || val == 'All time') ? 'Create date' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onStatusChanged: (val) {
+                        setState(() => _selectedStatusFilter = (val == null || val == 'All statuses') ? 'Status' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onPriorityChanged: (val) {
+                        setState(() => _selectedPriorityFilter = (val == null || val == 'ALL PRIORITIES') ? 'Priority' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onCompanyChanged: (val) {
+                        setState(() => _selectedCompanyFilter = (val == null || val == 'All companies') ? 'Company' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onContactChanged: (val) {
+                        setState(() => _selectedContactFilter = (val == null || val == 'All contacts') ? 'Contact' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                      onDealChanged: (val) {
+                        setState(() => _selectedDealFilter = (val == null || val == 'All deals') ? 'Deal' : val);
+                        _fetchTasks(resetPage: true);
+                      },
+                    ),
+                ],
+              ),
+            ),
             const Divider(height: 1, color: Color(0xFFE2E8F0)),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
@@ -618,205 +534,6 @@ class _TasksScreenState extends State<TasksScreen> {
                   ),
                   child: Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                        child: Container(
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: TextField(
-                            onChanged: _onSearchChanged,
-                            decoration: InputDecoration(
-                              hintText: 'Search tasks',
-                              hintStyle: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: const Color(0xFF94A3B8),
-                              ),
-                              prefixIcon: const Icon(
-                                Icons.search_rounded,
-                                color: Color(0xFF94A3B8),
-                                size: 18,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: Container(
-                          height: 36,
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Row(
-                            children: [
-                              _buildSegmentButton('All', 0),
-                              _buildSegmentButton('Pending', 1),
-                              _buildSegmentButton('Completed', 2),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: Row(
-                          children: [
-                            InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _showFiltersRow = !_showFiltersRow;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: _showFiltersRow ? const Color(0xFFE6F4F1) : Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _showFiltersRow ? const Color(0xFF00A884) : const Color(0xFF5FB6AD),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.tune_rounded,
-                                      size: 14,
-                                      color: Color(0xFF00A884),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Filters',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF00A884),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            InkWell(
-                              onTap: () => _showSortMenu(context),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFFCBD5E1)),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.swap_vert_rounded,
-                                      size: 14,
-                                      color: Color(0xFF64748B),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Sort',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF475569),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_showFiltersRow) ...[
-                        const SizedBox(height: 10),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                _buildDropdownPill(
-                                  icon: Icons.calendar_today_outlined,
-                                  label: _selectedCreateDate,
-                                  items: const ['Create date', 'Today', 'This Week', 'This Month'],
-                                  onSelected: (val) => setState(() => _selectedCreateDate = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  label: _selectedStatusFilter,
-                                  items: _taskStatuses.isNotEmpty
-                                      ? ['Status', ..._taskStatuses.map((s) => s.label)]
-                                      : const ['Status', 'Pending', 'Completed', 'Reopened'],
-                                  onSelected: (val) => setState(() => _selectedStatusFilter = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  label: _selectedPriorityFilter,
-                                  items: _taskPriorities.isNotEmpty
-                                      ? ['Priority', ..._taskPriorities.map((p) => p.label)]
-                                      : const ['Priority', 'None', 'Low', 'Medium', 'High'],
-                                  onSelected: (val) => setState(() => _selectedPriorityFilter = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  icon: Icons.bookmark_border_rounded,
-                                  label: _selectedCompanyFilter,
-                                  items: _companies.isNotEmpty
-                                      ? ['Company', ..._companies.map((c) => c['name'] as String? ?? 'Company')]
-                                      : const ['Company'],
-                                  onSelected: (val) => setState(() => _selectedCompanyFilter = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  icon: Icons.person_outline_rounded,
-                                  label: _selectedContactFilter,
-                                  items: _contacts.isNotEmpty
-                                      ? [
-                                          'Contact',
-                                          ..._contacts.map((c) => '${c['firstName'] ?? ''} ${c['lastName'] ?? ''}'.trim())
-                                        ]
-                                      : const ['Contact'],
-                                  onSelected: (val) => setState(() => _selectedContactFilter = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  icon: Icons.attach_money_rounded,
-                                  label: _selectedDealFilter,
-                                  items: _deals.isNotEmpty
-                                      ? ['Deal', ..._deals.map((d) => d['title'] as String? ?? 'Deal')]
-                                      : const ['Deal'],
-                                  onSelected: (val) => setState(() => _selectedDealFilter = val),
-                                ),
-                                const SizedBox(width: 6),
-                                _buildDropdownPill(
-                                  label: _selectedOwnerFilter,
-                                  items: _users.isNotEmpty
-                                      ? [
-                                          'Owner',
-                                          ..._users.map((u) => '${u['firstName'] ?? ''} ${u['lastName'] ?? ''}'.trim())
-                                        ]
-                                      : const ['Owner', 'Admin User'],
-                                  onSelected: (val) => setState(() => _selectedOwnerFilter = val),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
                       Expanded(
                         child: AppRefreshIndicator(
                           onRefresh: () async {
@@ -998,85 +715,7 @@ class _TasksScreenState extends State<TasksScreen> {
     );
   }
 
-  Widget _buildSegmentButton(String title, int index) {
-    final bool isSelected = _selectedSegment == index;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          if (_selectedSegment != index) {
-            setState(() {
-              _selectedSegment = index;
-            });
-            _fetchTasks(resetPage: true);
-          }
-        },
-        child: Container(
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 12.5,
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected ? const Color(0xFF00A884) : const Color(0xFF64748B),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
-  Widget _buildDropdownPill({
-    IconData? icon,
-    required String label,
-    required List<String> items,
-    required ValueChanged<String> onSelected,
-  }) {
-    return PopupMenuButton<String>(
-      onSelected: onSelected,
-      itemBuilder: (context) => items
-          .map((item) => PopupMenuItem(
-                value: item,
-                child: Text(item, style: GoogleFonts.poppins(fontSize: 12.5)),
-              ))
-          .toList(),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: const Color(0xFF00A884)),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF00A884),
-            ),
-          ),
-          const SizedBox(width: 2),
-          const Icon(
-            Icons.keyboard_arrow_down_rounded,
-            size: 16,
-            color: Color(0xFF00A884),
-          ),
-        ],
-      ),
-    );
-  }
 
   Color _getPriorityColor(String priority) {
     final match = _taskPriorities.firstWhere(
@@ -1103,17 +742,23 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Widget _buildTaskCard(TaskModel task) {
     final bool isCompleted = task.status.toLowerCase() == 'completed';
-    final priorityColor = _getPriorityColor(task.priority);
+    final bool isSelected = task.id != null && task.id == _selectedTaskId;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+        border: Border.all(
+          color: isSelected ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+          width: isSelected ? 1.5 : 1,
+        ),
       ),
       child: InkWell(
         onTap: () async {
+          // Mark this task as the selected one before opening its details.
+          setState(() => _selectedTaskId = task.id);
+
           final act = task.rawMap ?? {};
 
           String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null))?.toString();
@@ -1181,7 +826,7 @@ class _TasksScreenState extends State<TasksScreen> {
             );
             await Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1),
+                builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: task.id),
               ),
             );
             _fetchTasks(resetPage: true);
@@ -1198,7 +843,7 @@ class _TasksScreenState extends State<TasksScreen> {
             );
             await Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1),
+                builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: task.id),
               ),
             );
             _fetchTasks(resetPage: true);
@@ -1216,7 +861,7 @@ class _TasksScreenState extends State<TasksScreen> {
             );
             await Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1),
+                builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: task.id),
               ),
             );
             _fetchTasks(resetPage: true);
@@ -1319,23 +964,6 @@ class _TasksScreenState extends State<TasksScreen> {
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             color: const Color(0xFF475569),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: priorityColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: priorityColor.withValues(alpha: 0.4), width: 0.8),
-                          ),
-                          child: Text(
-                            task.priority,
-                            style: GoogleFonts.poppins(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: priorityColor,
-                            ),
                           ),
                         ),
                       ],

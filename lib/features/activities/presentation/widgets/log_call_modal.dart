@@ -206,11 +206,16 @@ class _LogCallModalState extends State<LogCallModal> {
     _notesController = TextEditingController(text: parseActivityDescription(editCall?.notes ?? ''));
 
     if (editCall != null) {
-      if (editCall.outcome.isNotEmpty) {
-        _selectedOutcome = editCall.outcome;
+      if (editCall.outcome.trim().isNotEmpty) {
+        _selectedOutcome = _canonicalOutcome(editCall.outcome);
       }
-      if (editCall.duration.isNotEmpty) {
-        _selectedDuration = editCall.duration;
+      // The value may arrive as '15', '15m' or '15 Minutes' depending on the
+      // screen that opened this form — normalise it onto a picker option.
+      final raw = editCall.rawMap;
+      final minutes = parseDurationMinutes(editCall.duration) ??
+          parseDurationMinutes(raw?['durationMinutes'] ?? raw?['duration_minutes']);
+      if (minutes != null) {
+        _selectedDuration = formatDurationLabel(minutes);
       }
       if (editCall.direction != null && editCall.direction!.isNotEmpty) {
         _selectedDirection = editCall.direction!;
@@ -218,15 +223,15 @@ class _LogCallModalState extends State<LogCallModal> {
       if (editCall.assignedTo != null && editCall.assignedTo!.isNotEmpty) {
         _selectedOwner = editCall.assignedTo!;
       }
-      if (editCall.startTime.isNotEmpty) {
-        _startTimeController = TextEditingController(text: editCall.startTime);
-        _selectedDate = _formatDateHeader(editCall.startTime);
+      final scheduledAt = parseActivityDateTimeOrNull(editCall.startTime) ??
+          parseActivityDateTimeOrNull(raw?['scheduledAt'] ?? raw?['scheduled_at']);
+      if (scheduledAt != null) {
+        _startTimeController = TextEditingController(text: formatActivityDateTimeInput(scheduledAt));
+        _selectedDate = _formatDateHeader(scheduledAt.toIso8601String());
       } else {
-        final now = DateTime.now();
-        final d = now.day.toString().padLeft(2, '0');
-        final m = now.month.toString().padLeft(2, '0');
-        final y = now.year.toString();
-        _startTimeController = TextEditingController(text: '$d/$m/$y 6:13 PM GMT+5:30');
+        _startTimeController = TextEditingController(
+          text: formatActivityDateTimeInput(DateTime.now()),
+        );
       }
     } else {
       final now = DateTime.now();
@@ -238,6 +243,17 @@ class _LogCallModalState extends State<LogCallModal> {
 
     _fetchCallOutcomes();
     _fetchUsers();
+  }
+
+  /// Matches a stored outcome (often lowercase, e.g. `connected`) back onto the
+  /// option label so the picker shows the value the call was saved with.
+  String _canonicalOutcome(String raw) {
+    final value = raw.trim();
+    for (final option in _outcomes) {
+      if (option.toLowerCase() == value.toLowerCase()) return option;
+    }
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
   }
 
   String _formatDateHeader(String raw) {
@@ -491,11 +507,13 @@ class _LogCallModalState extends State<LogCallModal> {
   Widget build(BuildContext context) {
     final bool canSubmit = _titleController.text.trim().isNotEmpty && !_isSubmitting;
 
-    final outcomes = _apiOutcomes.isNotEmpty
-        ? _apiOutcomes.map((o) => o.label).toList()
-        : _outcomes;
+    // Growable copy: the outcome stored on an existing call is often absent
+    // from the fallback list, and appending to a const list throws.
+    final outcomes = <String>[
+      if (_apiOutcomes.isNotEmpty) ..._apiOutcomes.map((o) => o.label) else ..._outcomes,
+    ];
 
-    if (!outcomes.contains(_selectedOutcome) && outcomes.isNotEmpty) {
+    if (_selectedOutcome.isNotEmpty && !outcomes.contains(_selectedOutcome)) {
       outcomes.add(_selectedOutcome);
     }
 
@@ -912,16 +930,22 @@ class _LogCallModalState extends State<LogCallModal> {
                         ],
                       ),
                       itemBuilder: (context) {
-                        final usersDisplayList = _apiUsers.isNotEmpty
-                            ? _apiUsers.map((u) {
-                                final first = u['firstName'] as String? ?? u['first_name'] as String? ?? '';
-                                final last = u['lastName'] as String? ?? u['last_name'] as String? ?? '';
-                                final name = '$first $last'.trim();
-                                return name.isNotEmpty ? name : (u['email'] as String? ?? 'User');
-                              }).toList()
-                            : const ['Admin User', 'Select owner'];
+                        // Growable copy: the owner of an existing call is often
+                        // absent from the fallback list, and appending to a
+                        // const list throws.
+                        final usersDisplayList = <String>[
+                          if (_apiUsers.isNotEmpty)
+                            ..._apiUsers.map((u) {
+                              final first = u['firstName'] as String? ?? u['first_name'] as String? ?? '';
+                              final last = u['lastName'] as String? ?? u['last_name'] as String? ?? '';
+                              final name = '$first $last'.trim();
+                              return name.isNotEmpty ? name : (u['email'] as String? ?? 'User');
+                            })
+                          else
+                            ...['Admin User', 'Select owner'],
+                        ];
 
-                        if (!usersDisplayList.contains(_selectedOwner)) {
+                        if (_selectedOwner.isNotEmpty && !usersDisplayList.contains(_selectedOwner)) {
                           usersDisplayList.add(_selectedOwner);
                         }
 
@@ -1214,15 +1238,14 @@ class _LogCallModalState extends State<LogCallModal> {
     });
 
     try {
-      String outcomeValue = _selectedOutcome;
-      if (_apiOutcomes.isNotEmpty) {
-        final matchedOption = _apiOutcomes.firstWhere(
-          (o) => o.label == _selectedOutcome,
-          orElse: () => _apiOutcomes.first,
-        );
-        outcomeValue = matchedOption.value;
-      } else {
-        outcomeValue = _selectedOutcome.toLowerCase();
+      // Falling back to the first option here used to silently replace the
+      // outcome of the call being edited — keep the selected value instead.
+      String outcomeValue = _selectedOutcome.toLowerCase().replaceAll(' ', '_');
+      for (final option in _apiOutcomes) {
+        if (option.label.toLowerCase() == _selectedOutcome.toLowerCase() && option.value.isNotEmpty) {
+          outcomeValue = option.value;
+          break;
+        }
       }
 
       final contactId = widget.contactId ?? widget.callToEdit?.contactId;
@@ -1280,18 +1303,26 @@ class _LogCallModalState extends State<LogCallModal> {
         assocList.add({'objectId': id, 'objectType': 'deal'});
       }
 
+      // The API stores these as durationMinutes (int) and scheduledAt (ISO);
+      // the display strings are kept for the endpoints that echo them back.
+      final durationMinutes = parseDurationMinutes(_selectedDuration);
+      final scheduledAt = parseActivityDateTimeOrNull(_startTimeController.text.trim());
+
       final callData = {
         'title': title.isNotEmpty ? title : 'Call Activity',
         'type': 'call',
         'outcome': outcomeValue,
         'duration': _selectedDuration,
+        if (durationMinutes != null) 'durationMinutes': durationMinutes,
+        if (scheduledAt != null) 'scheduledAt': scheduledAt.toUtc().toIso8601String(),
         'startTime': _startTimeController.text.trim(),
         'start_time': _startTimeController.text.trim(),
         'notes': notes,
         'description': notes,
         'direction': _selectedDirection,
         'createFollowUpTask': _createFollowUpTask,
-        'activityDate': DateTime.now().toIso8601String(),
+        'activityDate': (scheduledAt ?? DateTime.now()).toIso8601String(),
+        if (assocList.isNotEmpty) 'associations': assocList,
         'associationsList': assocList,
         'associations_list': assocList,
         'companyIds': companyIds,
@@ -1323,18 +1354,12 @@ class _LogCallModalState extends State<LogCallModal> {
       Response? res;
       try {
         if (isEditing) {
+          // PATCH /api/activities/:id is the documented update route.
           final callId = widget.callToEdit!.id!;
-          try {
-            res = await ApiService().patch(
-              '${ApiConstants.activities}/$callId',
-              data: callData,
-            );
-          } catch (e) {
-            res = await ApiService().put(
-              '${ApiConstants.activities}/$callId',
-              data: callData,
-            );
-          }
+          res = await ApiService().patch(
+            '${ApiConstants.activities}/$callId',
+            data: callData,
+          );
         } else {
           res = await ApiService().post(ApiConstants.activities, data: callData);
         }

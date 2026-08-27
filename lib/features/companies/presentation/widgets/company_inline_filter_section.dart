@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/providers/master_data_provider.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/widgets/searchable_dropdown_form_field.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../providers/company_provider.dart';
@@ -36,6 +37,16 @@ class _CompanyInlineFilterSectionState extends State<CompanyInlineFilterSection>
     'This quarter',
     'This year',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // The filter row has an MSP pill — make sure GET /api/msp-options ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +145,41 @@ class _CompanyInlineFilterSectionState extends State<CompanyInlineFilterSection>
                 context.read<CompanyProvider>().setCreateDateFilter(val);
               },
             ),
+            const SizedBox(width: 14),
+
+            // 4. MSP Options from API
+            Builder(
+              builder: (context) {
+                final mspList = MspFieldUtils.optionsWith(
+                  masterProvider,
+                  companyProvider.selectedMsp == 'All MSPs'
+                      ? null
+                      : companyProvider.selectedMsp,
+                );
+
+                final mspItems = [
+                  DropdownSearchItem<String>(
+                    value: 'All MSPs',
+                    label: 'All MSPs',
+                  ),
+                  ...mspList.map(
+                    (msp) => DropdownSearchItem<String>(
+                      value: msp,
+                      label: msp,
+                    ),
+                  ),
+                ];
+
+                return _buildFilterPill<String>(
+                  title: 'MSP',
+                  value: companyProvider.selectedMsp ?? 'All MSPs',
+                  items: mspItems,
+                  onChanged: (val) {
+                    context.read<CompanyProvider>().setMspFilter(val);
+                  },
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -160,6 +206,7 @@ class _CompanyInlineFilterSectionState extends State<CompanyInlineFilterSection>
           final bool isFiltered = selectedItem != null &&
               selectedItem.value != 'all' &&
               selectedItem.value != 'All time' &&
+              selectedItem.value != 'All MSPs' &&
               selectedItem.value != 'Select a stage';
 
           final String displayTitle = isFiltered ? '$title: ${selectedItem.label}' : title;

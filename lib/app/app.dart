@@ -36,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/providers/font_size_provider.dart';
 import '../core/providers/master_data_provider.dart';
+import '../features/activities/presentation/providers/meeting_scheduler_provider.dart';
 import '../features/authentication/presentation/providers/auth_provider.dart';
 import '../features/companies/presentation/providers/company_provider.dart';
 import '../features/contacts/presentation/providers/contact_provider.dart';
@@ -66,6 +67,7 @@ class CrmApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ContactProvider()),
         ChangeNotifierProvider(create: (_) => CompanyProvider()),
         ChangeNotifierProvider(create: (_) => MasterDataProvider()..fetchCompanyMasterData()),
+        ChangeNotifierProvider(create: (_) => MeetingSchedulerProvider()),
       ],
       // 2. Consume FontSizeProvider to dynamically re-theme and re-scale text across all screens
       child: Consumer<FontSizeProvider>(

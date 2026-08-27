@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/master_data_provider.dart';
 
 class AssociateMspModal extends StatefulWidget {
   final String? initialMsp;
@@ -35,11 +37,10 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _customMspController = TextEditingController();
 
-  List<String> _mspOptions = [
-    'Magnit',
-    'Beeline',
-    'agileOne',
-  ];
+  /// Options that are not part of the API list: values already stored on the
+  /// record plus any custom option added here. The API list itself is never
+  /// duplicated locally.
+  final List<String> _extraOptions = [];
 
   final Set<String> _selectedMsps = {};
   bool _isAddingCustom = false;
@@ -48,22 +49,32 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
     if (widget.initialMsp != null && widget.initialMsp!.isNotEmpty) {
-      if (!_mspOptions.contains(widget.initialMsp)) {
-        _mspOptions.add(widget.initialMsp!);
-      }
+      _extraOptions.add(widget.initialMsp!);
       _selectedMsps.add(widget.initialMsp!);
     }
     if (widget.initialSelectedMsps != null) {
       for (final item in widget.initialSelectedMsps!) {
         if (item.isNotEmpty) {
-          if (!_mspOptions.contains(item)) {
-            _mspOptions.add(item);
+          if (!_extraOptions.contains(item)) {
+            _extraOptions.add(item);
           }
           _selectedMsps.add(item);
         }
       }
     }
+  }
+
+  /// API options first, then values only this record knows about.
+  List<String> _allOptions(List<String> apiMsps) {
+    final options = <String>[...apiMsps];
+    for (final extra in _extraOptions) {
+      if (!options.contains(extra)) options.add(extra);
+    }
+    return options;
   }
 
   @override
@@ -77,8 +88,9 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
     final text = _customMspController.text.trim();
     if (text.isNotEmpty) {
       setState(() {
-        if (!_mspOptions.contains(text)) {
-          _mspOptions.add(text);
+        final apiMsps = context.read<MasterDataProvider>().mspNames;
+        if (!apiMsps.contains(text) && !_extraOptions.contains(text)) {
+          _extraOptions.add(text);
         }
         _selectedMsps.add(text);
         _customMspController.clear();
@@ -89,7 +101,10 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredOptions = _mspOptions.where((opt) {
+    final masterProvider = context.watch<MasterDataProvider>();
+    final allOptions = _allOptions(masterProvider.mspNames);
+
+    final filteredOptions = allOptions.where((opt) {
       if (_searchQuery.isEmpty) return true;
       return opt.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
@@ -180,7 +195,47 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
                   ),
                   child: Column(
                     children: [
-                      if (filteredOptions.isEmpty)
+                      if (masterProvider.isMspLoading && allOptions.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF00A884),
+                            ),
+                          ),
+                        )
+                      else if (masterProvider.mspError != null && allOptions.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Column(
+                            children: [
+                              Text(
+                                masterProvider.mspError!,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: const Color(0xFFDC2626),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              TextButton(
+                                onPressed: () => masterProvider.fetchMspOptions(force: true),
+                                child: Text(
+                                  'Retry',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF00A884),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (filteredOptions.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Text(

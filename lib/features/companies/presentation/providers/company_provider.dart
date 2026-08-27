@@ -27,6 +27,7 @@ class CompanyProvider extends ChangeNotifier {
   String? _selectedLifecycleStage;
   String? _selectedLeadStatus;
   String? _selectedCreateDate;
+  String? _selectedMsp;
 
   // Sorting
   ContactSortOption _sortOption = ContactSortOption.mostRecent;
@@ -61,6 +62,17 @@ class CompanyProvider extends ChangeNotifier {
       }).toList();
     }
 
+    // Apply MSP filter
+    if (_selectedMsp != null &&
+        _selectedMsp!.isNotEmpty &&
+        _selectedMsp != 'All MSPs' &&
+        _selectedMsp != 'all') {
+      filtered = filtered.where((c) {
+        final msp = (c.msp ?? '').toLowerCase();
+        return msp.contains(_selectedMsp!.toLowerCase());
+      }).toList();
+    }
+
     // Apply Sorting
     switch (_sortOption) {
       case ContactSortOption.aToZ:
@@ -86,6 +98,7 @@ class CompanyProvider extends ChangeNotifier {
   String? get selectedOwnerId => _selectedOwnerId;
   String? get selectedLeadStatus => _selectedLeadStatus;
   String? get selectedCreateDate => _selectedCreateDate;
+  String? get selectedMsp => _selectedMsp;
   ContactSortOption get sortOption => _sortOption;
 
   bool get isFilterActive =>
@@ -98,6 +111,10 @@ class CompanyProvider extends ChangeNotifier {
           _selectedLeadStatus!.isNotEmpty &&
           _selectedLeadStatus != 'Select a status' &&
           _selectedLeadStatus != 'all') ||
+      (_selectedMsp != null &&
+          _selectedMsp!.isNotEmpty &&
+          _selectedMsp != 'All MSPs' &&
+          _selectedMsp != 'all') ||
       (_selectedCreateDate != null && _selectedCreateDate!.isNotEmpty);
 
   int get totalCount => isFilterActive ? companies.length : _totalCount;
@@ -134,6 +151,11 @@ class CompanyProvider extends ChangeNotifier {
 
   void setCreateDateFilter(String? date) {
     _selectedCreateDate = date;
+    notifyListeners();
+  }
+
+  void setMspFilter(String? msp) {
+    _selectedMsp = msp;
     notifyListeners();
   }
 

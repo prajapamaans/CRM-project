@@ -1,13 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../../../core/network/api_constants.dart';
-import '../../../../core/network/api_service.dart';
-import '../../../activities/presentation/widgets/create_email_modal.dart';
-import '../../../activities/presentation/widgets/create_note_modal.dart';
-import '../../../activities/presentation/widgets/create_task_modal.dart';
-import '../../../activities/presentation/widgets/log_call_modal.dart';
-import '../../../activities/presentation/widgets/log_meeting_modal.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../../data/models/notification_model.dart';
 import '../providers/notification_provider.dart';
 import '../utils/notification_utils.dart';
@@ -24,6 +18,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   NotificationTimeFilter _selectedTimeFilter = NotificationTimeFilter.all;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  final Set<String> _deletingNotificationIds = {};
 
   @override
   void initState() {
@@ -45,35 +40,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        title: Text(
-          'Notifications',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-            color: const Color(0xFF1E293B),
-          ),
-        ),
-        actions: [
-          if (notificationProvider.unreadCount > 0)
-            TextButton(
-              onPressed: () {
-                context.read<NotificationProvider>().markAllAsRead();
-              },
-              child: Text(
-                'Mark all read',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF00A884),
-                ),
-              ),
-            ),
-        ],
-      ),
       body: RefreshIndicator(
         color: const Color(0xFF00A884),
         onRefresh: () async {
@@ -81,7 +47,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         },
         child: Column(
           children: [
-            _buildTypeTabs(),
+            _buildTypeTabs(notificationProvider),
             _buildSearchBar(),
             _buildTimeFilterChips(),
             Expanded(
@@ -94,75 +60,103 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   /// Top Entity Type Tabs: All, Companies, Contacts, Deals
-  Widget _buildTypeTabs() {
+  Widget _buildTypeTabs(NotificationProvider provider) {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Row(
-          children: NotificationTypeTab.values.map((tab) {
-            final isSelected = _selectedTab == tab;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedTab = tab;
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? Colors.white : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : [],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        tab.icon,
-                        size: 15,
-                        color: isSelected
-                            ? const Color(0xFF00A884)
-                            : const Color(0xFF64748B),
-                      ),
-                      const SizedBox(width: 4),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          tab.label,
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight:
-                                isSelected ? FontWeight.w600 : FontWeight.w500,
-                            color: isSelected
-                                ? const Color(0xFF1E293B)
-                                : const Color(0xFF64748B),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: NotificationTypeTab.values.map((tab) {
+                  final isSelected = _selectedTab == tab;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _selectedTab = tab;
+                        });
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: isSelected
+                              ? [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.05),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                              : [],
+                        ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                tab.icon,
+                                size: 14,
+                                color: isSelected
+                                    ? const Color(0xFF00A884)
+                                    : const Color(0xFF64748B),
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                tab.label,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11,
+                                  fontWeight:
+                                      isSelected ? FontWeight.w600 : FontWeight.w500,
+                                  color: isSelected
+                                      ? const Color(0xFF1E293B)
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          if (provider.unreadCount > 0) ...[
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: () => context.read<NotificationProvider>().markAllAsRead(),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F4F1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Mark read',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF00A884),
                   ),
                 ),
               ),
-            );
-          }).toList(),
-        ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -359,6 +353,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   if (!item.isRead) {
                     provider.markAsRead(item.id);
                   }
+                  _openNotificationActivity(item);
                 },
                 child: _buildNotificationItem(
                   item: item,
@@ -410,142 +405,84 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Future<void> _handleDeleteNotificationActivity(NotificationModel item) async {
+  Future<void> _handleDeleteNotification(NotificationModel item) async {
+    if (_deletingNotificationIds.contains(item.id)) return;
+
+    final provider = context.read<NotificationProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete Activity', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to delete this activity?', style: GoogleFonts.poppins()),
+        title: Text('Delete Notification', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text('Are you sure you want to delete this notification?', style: GoogleFonts.poppins(fontSize: 14)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
 
-    if (confirm == true) {
-      final actId = item.entityId ?? item.id;
-      final actType = (item.activityType ?? item.type).toLowerCase();
-      final api = ApiService();
-      try {
-        if (actType.contains('task')) {
-          await api.delete('/tasks/$actId');
-        } else {
-          await api.delete('${ApiConstants.activities}/$actId');
-        }
-      } catch (_) {
-        try {
-          await api.delete('${ApiConstants.activities}/$actId');
-        } catch (e) {
-          debugPrint('[DELETE NOTIFICATION ACTIVITY ERROR]: $e');
-        }
-      }
+    if (confirm != true) return;
 
+    setState(() {
+      _deletingNotificationIds.add(item.id);
+    });
+
+    try {
+      await provider.deleteNotification(item.id);
       if (mounted) {
-        context.read<NotificationProvider>().fetchNotifications();
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           const SnackBar(
-            content: Text('Activity deleted successfully'),
+            content: Text('Notification deleted successfully'),
             backgroundColor: Color(0xFF00A884),
             behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
           ),
         );
+      }
+    } catch (e) {
+      debugPrint('[DELETE NOTIFICATION ERROR]: $e');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete notification: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingNotificationIds.remove(item.id);
+        });
       }
     }
   }
 
-  Future<void> _handleEditNotificationActivity(NotificationModel item) async {
-    final actId = item.entityId ?? item.id;
-    final actType = (item.activityType ?? item.type).toLowerCase();
-
-    if (actType.contains('task')) {
-      await CreateTaskModal.show(
-        context,
-        taskToEdit: TaskModel(
-          id: actId,
-          title: item.message,
-          dueDate: 'Today',
-          priority: 'Medium',
-          status: 'PENDING',
-          assignedTo: 'Admin User',
-          notes: item.message,
-        ),
-        companyId: item.companyId,
-        contactId: item.contactId,
-        dealId: item.dealId,
-      );
-    } else if (actType.contains('email')) {
-      await CreateEmailModal.show(
-        context,
-        emailToEdit: {
-          'id': actId,
-          'title': item.message,
-          'notes': item.message,
-        },
-        companyId: item.companyId,
-        contactId: item.contactId,
-        dealId: item.dealId,
-      );
-    } else if (actType.contains('note')) {
-      await CreateNoteModal.show(
-        context,
-        noteToEdit: {
-          'id': actId,
-          'title': item.message,
-          'notes': item.message,
-        },
-        companyId: item.companyId,
-        contactId: item.contactId,
-        dealId: item.dealId,
-      );
-    } else if (actType.contains('call')) {
-      await LogCallModal.show(
-        context,
-        callToEdit: CallModel(
-          id: actId,
-          title: item.message,
-          outcome: 'Connected',
-          duration: '5m',
-          startTime: '10:00 AM',
-          notes: item.message,
-          companyId: item.companyId,
-          contactId: item.contactId,
-          dealId: item.dealId,
-        ),
-        companyId: item.companyId,
-        contactId: item.contactId,
-        dealId: item.dealId,
-      );
-    } else if (actType.contains('meeting')) {
-      await LogMeetingModal.show(
-        context,
-        existingMeeting: MeetingModel(
-          id: actId,
-          title: item.message,
-          outcome: 'Completed',
-          duration: '30m',
-          startTime: '10:00 AM',
-          notes: item.message,
-          companyId: item.companyId,
-          contactId: item.contactId,
-          dealId: item.dealId,
-        ),
-        companyId: item.companyId,
-        contactId: item.contactId,
-        dealId: item.dealId,
-      );
-    }
-
-    if (mounted) {
-      context.read<NotificationProvider>().fetchNotifications();
-    }
+  /// Opens the Call, Meeting or Email screen on the activity this notification
+  /// refers to, so it lands scrolled to that row and highlighted.
+  ///
+  /// Notifications for other activity types (or without an activity id) are
+  /// left alone — the tap just marks them read as before.
+  void _openNotificationActivity(NotificationModel item) {
+    context.read<NavigationProvider>().openActivity(
+          activityType: item.activityType ?? item.entityType ?? item.type,
+          activityId: item.entityId,
+        );
   }
 
   Widget _buildNotificationItem({
@@ -615,42 +552,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               ],
             ),
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(
-              Icons.more_vert_rounded,
-              color: Color(0xFF94A3B8),
-              size: 20,
-            ),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF00A884)),
-                    const SizedBox(width: 8),
-                    Text('Edit Activity', style: GoogleFonts.poppins(fontSize: 13)),
-                  ],
-                ),
-              ),
-              PopupMenuItem<String>(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
-                    const SizedBox(width: 8),
-                    Text('Delete Activity', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
-                  ],
-                ),
-              ),
-            ],
-            onSelected: (action) {
-              if (action == 'delete') {
-                _handleDeleteNotificationActivity(item);
-              } else if (action == 'edit') {
-                _handleEditNotificationActivity(item);
-              }
-            },
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: _deletingNotificationIds.contains(item.id)
+                ? const Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFFEF4444),
+                      ),
+                    ),
+                  )
+                : IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Color(0xFF94A3B8),
+                      size: 20,
+                    ),
+                    hoverColor: const Color(0xFFFEE2E2),
+                    splashRadius: 18,
+                    onPressed: () => _handleDeleteNotification(item),
+                  ),
           ),
         ],
       ),

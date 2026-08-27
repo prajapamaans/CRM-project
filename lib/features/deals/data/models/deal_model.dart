@@ -92,6 +92,7 @@ class DealModel {
   final String? createdAt;
   final String? priority;
   final String? quarter;
+  final String? msp;
   final List<AssociatedCompany>? associatedCompanies;
   final List<AssociatedContact>? associatedContacts;
   final List<Map<String, dynamic>>? contacts;
@@ -114,6 +115,7 @@ class DealModel {
     this.createdAt,
     this.priority,
     this.quarter,
+    this.msp,
     this.associatedCompanies,
     this.associatedContacts,
     this.contacts,
@@ -172,6 +174,7 @@ class DealModel {
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
       priority: json['priority'] as String?,
       quarter: json['quarter']?.toString(),
+      msp: json['msp']?.toString(),
       associatedCompanies: compList,
       associatedContacts: contList,
       contacts: rawContactsList

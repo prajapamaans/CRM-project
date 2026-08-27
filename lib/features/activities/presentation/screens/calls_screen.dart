@@ -3,8 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/log_call_modal.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/screens/company_details_screen.dart';
@@ -14,6 +17,7 @@ import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
+import '../widgets/call_inline_filter_section.dart';
 import 'call_details_screen.dart';
 
 class CallsScreen extends StatefulWidget {
@@ -29,8 +33,24 @@ class _CallsScreenState extends State<CallsScreen> {
   ContactSortOption _currentSort = ContactSortOption.mostRecent;
   bool _isFilterExpanded = false;
   String? _selectedOutcomeFilter;
+  String? _selectedOwnerId;
+  String? _selectedCreateDate;
+  String? _selectedStatusFilter;
   final List<CallModel> _calls = [];
   bool _isLoadingCalls = false;
+
+  /// Id of the call the user selected. Held by id so the highlight survives a
+  /// reload of the list.
+  String? _selectedCallId;
+
+  /// Marks the selected row so it can be scrolled to once it is built.
+  final GlobalKey _selectedTileKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+
+  /// Activity requested by another screen, applied once the list has loaded.
+  String? _pendingFocusId;
+  String? _appliedFocusId;
+  bool _hasLoadedOnce = false;
 
   @override
   void initState() {
@@ -38,6 +58,47 @@ class _CallsScreenState extends State<CallsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCalls();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A call opened from elsewhere in the app (e.g. a notification).
+    final requested = context.watch<NavigationProvider>().focusedActivityId;
+    if (requested != null && requested != _appliedFocusId) {
+      _appliedFocusId = requested;
+      _pendingFocusId = requested;
+      // Off the build phase: applying the focus calls setState.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyPendingFocus();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// Highlights the requested call and brings it into view. Does nothing until
+  /// the list has loaded — [_loadCalls] calls back in once it has.
+  Future<void> _applyPendingFocus() async {
+    final id = _pendingFocusId;
+    if (id == null || !_hasLoadedOnce || _isLoadingCalls) return;
+
+    _pendingFocusId = null;
+
+    // Not in this list (deleted, filtered out, or a different type): leave the
+    // screen as it is rather than scrolling somewhere arbitrary.
+    if (!_calls.any((c) => c.id == id)) return;
+    if (!mounted) return;
+
+    setState(() => _selectedCallId = id);
+    await ensureListItemVisible(
+      controller: _scrollController,
+      itemKey: _selectedTileKey,
+    );
   }
 
   Future<void> _loadCalls() async {
@@ -69,8 +130,15 @@ class _CallsScreenState extends State<CallsScreen> {
         }
 
         final id = item['id']?.toString() ?? item['_id']?.toString() ?? item['activityId']?.toString();
-        final duration = item['duration'] as String? ?? '15 Minutes';
-        final startTime = item['startTime'] as String? ?? item['start_time'] as String? ?? '';
+        // The API stores these as durationMinutes (int) and scheduledAt (ISO).
+        final durationMinutes = parseDurationMinutes(
+          item['durationMinutes'] ?? item['duration_minutes'] ?? item['duration'],
+        );
+        final duration = durationMinutes != null ? formatDurationLabel(durationMinutes) : '15 Minutes';
+        final scheduledAt = parseActivityDateTimeOrNull(
+          item['scheduledAt'] ?? item['scheduled_at'] ?? item['startTime'] ?? item['start_time'],
+        );
+        final startTime = scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '';
         final notes = item['notes'] as String? ?? item['description'] as String? ?? '';
         final assignedTo = item['ownerName'] as String? ?? 'Admin User';
         final priority = item['priority'] as String? ?? 'Medium';
@@ -104,7 +172,11 @@ class _CallsScreenState extends State<CallsScreen> {
       if (mounted) {
         setState(() {
           _isLoadingCalls = false;
+          _hasLoadedOnce = true;
         });
+        // The list is populated now, so an activity requested by another screen
+        // (including one requested before this load started) can be located.
+        _applyPendingFocus();
       }
     }
   }
@@ -153,13 +225,60 @@ class _CallsScreenState extends State<CallsScreen> {
     try {
       final auth = context.watch<AuthProvider>();
       final currentUserName = auth.currentUser?.fullName ?? 'Admin User';
-      final myCallsCount = _calls.where((c) => (c.assignedTo ?? 'Admin User') == currentUserName).length;
 
       final filteredCalls = _calls.where((c) {
+        final act = c.rawMap ?? {};
+
+        // 1. My Calls tab filter
         if (_selectedTab == 1 && (c.assignedTo ?? 'Admin User') != currentUserName) return false;
+
+        // 2. Owner filter
+        if (_selectedOwnerId != null && _selectedOwnerId != 'all') {
+          final ownerId = (act['ownerId'] ?? act['owner_id'] ?? '').toString();
+          final ownerName = (act['creatorName'] ?? act['ownerName'] ?? c.assignedTo ?? '').toString().toLowerCase();
+          if (ownerId != _selectedOwnerId && !ownerName.contains(_selectedOwnerId!.toLowerCase())) {
+            return false;
+          }
+        }
+
+        // 3. Status filter
+        if (_selectedStatusFilter != null && _selectedStatusFilter != 'All statuses') {
+          final status = (c.outcome + ' ' + (act['status'] ?? '')).toLowerCase();
+          if (!status.contains(_selectedStatusFilter!.toLowerCase())) {
+            return false;
+          }
+        }
+
+        // 4. Create Date filter
+        if (_selectedCreateDate != null && _selectedCreateDate != 'All time') {
+          final timeStr = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['createdAt'] ?? c.startTime).toString();
+          if (timeStr.isNotEmpty) {
+            try {
+              final itemDt = DateTime.parse(timeStr).toLocal();
+              final now = DateTime.now();
+              if (_selectedCreateDate == 'Today') {
+                if (itemDt.year != now.year || itemDt.month != now.month || itemDt.day != now.day) return false;
+              } else if (_selectedCreateDate == 'Yesterday') {
+                final yest = now.subtract(const Duration(days: 1));
+                if (itemDt.year != yest.year || itemDt.month != yest.month || itemDt.day != yest.day) return false;
+              } else if (_selectedCreateDate == 'This week') {
+                final weekStart = now.subtract(Duration(days: now.weekday - 1));
+                if (itemDt.isBefore(DateTime(weekStart.year, weekStart.month, weekStart.day))) return false;
+              } else if (_selectedCreateDate == 'This month') {
+                if (itemDt.year != now.year || itemDt.month != now.month) return false;
+              } else if (_selectedCreateDate == 'This year') {
+                if (itemDt.year != now.year) return false;
+              }
+            } catch (_) {}
+          }
+        }
+
+        // 5. Outcome filter
         if (_selectedOutcomeFilter != null && _selectedOutcomeFilter!.isNotEmpty) {
           if (!c.outcome.toLowerCase().contains(_selectedOutcomeFilter!.toLowerCase())) return false;
         }
+
+        // 6. Search query
         if (_searchQuery.isEmpty) return true;
         return c.title.toLowerCase().contains(_searchQuery.toLowerCase());
       }).toList();
@@ -253,7 +372,10 @@ class _CallsScreenState extends State<CallsScreen> {
                           _currentSort = option;
                         });
                       },
-                      isFilterActive: _selectedOutcomeFilter != null,
+                      isFilterActive: (_selectedOwnerId != null && _selectedOwnerId != 'all') ||
+                          (_selectedCreateDate != null && _selectedCreateDate != 'All time') ||
+                          (_selectedStatusFilter != null && _selectedStatusFilter != 'All statuses') ||
+                          (_selectedOutcomeFilter != null && _selectedOutcomeFilter!.isNotEmpty),
                       isFilterExpanded: _isFilterExpanded,
                       onToggleFilterExpanded: () {
                         setState(() {
@@ -262,14 +384,34 @@ class _CallsScreenState extends State<CallsScreen> {
                       },
                     ),
 
-                    if (_isFilterExpanded) _buildCallsInlineFilter(),
+                    if (_isFilterExpanded)
+                      CallInlineFilterSection(
+                        selectedOwnerId: _selectedOwnerId,
+                        selectedCreateDate: _selectedCreateDate,
+                        selectedStatus: _selectedStatusFilter,
+                        onOwnerChanged: (val) {
+                          setState(() {
+                            _selectedOwnerId = val;
+                          });
+                        },
+                        onCreateDateChanged: (val) {
+                          setState(() {
+                            _selectedCreateDate = val;
+                          });
+                        },
+                        onStatusChanged: (val) {
+                          setState(() {
+                            _selectedStatusFilter = val;
+                          });
+                        },
+                      ),
                   ],
                 ),
               ),
 
               const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
-              // 3. Search and Action Filter Container Card
+              // 3. Calls List Container Card
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -282,74 +424,6 @@ class _CallsScreenState extends State<CallsScreen> {
                     ),
                     child: Column(
                       children: [
-                        // Search Field
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-                          child: Container(
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFE2E8F0)),
-                            ),
-                            child: TextField(
-                              onChanged: (val) {
-                                setState(() {
-                                  _searchQuery = val;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                hintText: 'Search',
-                                hintStyle: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  color: const Color(0xFF94A3B8),
-                                ),
-                                prefixIcon: const Icon(
-                                  Icons.search_rounded,
-                                  color: Color(0xFF94A3B8),
-                                  size: 20,
-                                ),
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // Filter Buttons Row (Filters, Sort, Export, ...)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                _buildFilterPill(Icons.tune_rounded, 'Filters'),
-                                const SizedBox(width: 8),
-                                _buildFilterPill(Icons.swap_vert_rounded, 'Sort'),
-                                const SizedBox(width: 8),
-                                _buildFilterPill(Icons.file_download_outlined, 'Export'),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: const Color(0xFFCBD5E1)),
-                                  ),
-                                  child: const Icon(
-                                    Icons.more_horiz_rounded,
-                                    size: 16,
-                                    color: Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                         // Main List Content or Empty State
                         Expanded(
                           child: AppRefreshIndicator(
@@ -384,6 +458,7 @@ class _CallsScreenState extends State<CallsScreen> {
                                         ],
                                       )
                                     : ListView.builder(
+                                        controller: _scrollController,
                                         physics: const AlwaysScrollableScrollPhysics(
                                             parent: BouncingScrollPhysics()),
                                         padding: const EdgeInsets.all(14),
@@ -492,35 +567,19 @@ class _CallsScreenState extends State<CallsScreen> {
 
 
 
-  Widget _buildFilterPill(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFCBD5E1)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: const Color(0xFF64748B)),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF475569),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildCallTile(CallModel call) {
+    final bool isSelected = call.id != null && call.id == _selectedCallId;
+
     return InkWell(
+      // The key rides along with the selection so the selected row can always
+      // be scrolled to, however it got selected.
+      key: isSelected ? _selectedTileKey : null,
       onTap: () async {
+        // Mark this call as the selected one before opening its details.
+        setState(() => _selectedCallId = call.id);
+
         final act = call.rawMap ?? {};
 
         String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? call.companyId)?.toString();
@@ -584,7 +643,7 @@ class _CallsScreenState extends State<CallsScreen> {
           );
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1),
+              builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: call.id),
             ),
           );
           _loadCalls();
@@ -596,7 +655,7 @@ class _CallsScreenState extends State<CallsScreen> {
           );
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1),
+              builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: call.id),
             ),
           );
           _loadCalls();
@@ -610,7 +669,7 @@ class _CallsScreenState extends State<CallsScreen> {
           );
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1),
+              builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: call.id),
             ),
           );
           _loadCalls();
@@ -630,9 +689,12 @@ class _CallsScreenState extends State<CallsScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
       child: Row(
         children: [
@@ -691,91 +753,5 @@ class _CallsScreenState extends State<CallsScreen> {
       ),
     ),
   );
-  }
-
-  Widget _buildCallsInlineFilter() {
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Filter by Outcome',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF475569),
-                ),
-              ),
-              if (_selectedOutcomeFilter != null)
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedOutcomeFilter = null;
-                    });
-                  },
-                  child: Text(
-                    'Clear Filter',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF00A884),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildOutcomeChip('All', null),
-                const SizedBox(width: 6),
-                _buildOutcomeChip('Connected', 'Connected'),
-                const SizedBox(width: 6),
-                _buildOutcomeChip('Scheduled', 'Scheduled'),
-                const SizedBox(width: 6),
-                _buildOutcomeChip('Completed', 'Completed'),
-                const SizedBox(width: 6),
-                _buildOutcomeChip('No Answer', 'No Answer'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOutcomeChip(String label, String? val) {
-    final isSelected = _selectedOutcomeFilter == val;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: GoogleFonts.poppins(
-          fontSize: 11.5,
-          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-          color: isSelected ? Colors.white : const Color(0xFF475569),
-        ),
-      ),
-      selected: isSelected,
-      selectedColor: const Color(0xFF00A884),
-      backgroundColor: const Color(0xFFF1F5F9),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      onSelected: (_) {
-        setState(() {
-          _selectedOutcomeFilter = val;
-        });
-      },
-    );
   }
 }

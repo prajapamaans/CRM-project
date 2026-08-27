@@ -37,23 +37,51 @@ class NotificationModel {
   });
 
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
+    String? extractContactName(dynamic contact) {
+      if (contact is Map) {
+        if (contact['name'] != null && contact['name'].toString().isNotEmpty) {
+          return contact['name'].toString();
+        }
+        final fn = contact['firstName'] ?? contact['first_name'] ?? '';
+        final ln = contact['lastName'] ?? contact['last_name'] ?? '';
+        final name = '$fn $ln'.trim();
+        if (name.isNotEmpty) return name;
+      }
+      return null;
+    }
+
+    String? extractCompanyName(dynamic company) {
+      if (company is Map && company['name'] != null) {
+        return company['name'].toString();
+      }
+      return null;
+    }
+
+    String? extractDealName(dynamic deal) {
+      if (deal is Map) {
+        if (deal['name'] != null) return deal['name'].toString();
+        if (deal['title'] != null) return deal['title'].toString();
+      }
+      return null;
+    }
+
     return NotificationModel(
-      id: json['id'] as String? ?? json['_id'] as String? ?? '',
-      userId: json['userId'] as String? ?? json['user_id'] as String? ?? '',
-      type: json['type'] as String? ?? '',
-      message: json['message'] as String? ?? '',
-      isRead: json['isRead'] as bool? ?? json['is_read'] as bool? ?? (json['readAt'] != null || json['read_at'] != null),
-      readAt: json['readAt'] as String? ?? json['read_at'] as String?,
-      createdAt: json['createdAt'] as String? ?? json['created_at'] as String? ?? '',
-      entityType: json['entityType'] as String? ?? json['entity_type'] as String?,
-      entityId: json['entityId'] as String? ?? json['entity_id'] as String?,
-      activityType: json['activityType'] as String? ?? json['activity_type'] as String?,
-      contactId: json['contactId'] as String? ?? json['contact_id'] as String?,
-      companyId: json['companyId'] as String? ?? json['company_id'] as String?,
-      dealId: json['dealId'] as String? ?? json['deal_id'] as String?,
-      contactName: json['contactName'] as String? ?? json['contact_name'] as String?,
-      companyName: json['companyName'] as String? ?? json['company_name'] as String?,
-      dealName: json['dealName'] as String? ?? json['deal_name'] as String?,
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? json['user_id']?.toString() ?? json['recipientId']?.toString() ?? '',
+      type: json['type']?.toString() ?? json['notificationType']?.toString() ?? json['eventType']?.toString() ?? '',
+      message: json['message']?.toString() ?? json['content']?.toString() ?? json['description']?.toString() ?? json['title']?.toString() ?? '',
+      isRead: json['isRead'] as bool? ?? json['is_read'] as bool? ?? json['read'] as bool? ?? (json['readAt'] != null || json['read_at'] != null),
+      readAt: json['readAt']?.toString() ?? json['read_at']?.toString(),
+      createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? json['timestamp']?.toString() ?? '',
+      entityType: json['entityType']?.toString() ?? json['entity_type']?.toString() ?? json['targetType']?.toString(),
+      entityId: json['entityId']?.toString() ?? json['entity_id']?.toString() ?? json['targetId']?.toString(),
+      activityType: json['activityType']?.toString() ?? json['activity_type']?.toString(),
+      contactId: json['contactId']?.toString() ?? json['contact_id']?.toString() ?? (json['contact'] is Map ? json['contact']['id']?.toString() : null),
+      companyId: json['companyId']?.toString() ?? json['company_id']?.toString() ?? (json['company'] is Map ? json['company']['id']?.toString() : null),
+      dealId: json['dealId']?.toString() ?? json['deal_id']?.toString() ?? (json['deal'] is Map ? json['deal']['id']?.toString() : null),
+      contactName: json['contactName']?.toString() ?? json['contact_name']?.toString() ?? extractContactName(json['contact']),
+      companyName: json['companyName']?.toString() ?? json['company_name']?.toString() ?? extractCompanyName(json['company']),
+      dealName: json['dealName']?.toString() ?? json['deal_name']?.toString() ?? extractDealName(json['deal']),
     );
   }
 

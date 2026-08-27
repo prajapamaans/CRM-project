@@ -5,6 +5,8 @@ import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
@@ -16,6 +18,7 @@ import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/log_meeting_modal.dart';
 import 'meeting_details_screen.dart';
 
@@ -33,6 +36,19 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   bool _isLoadingMeetings = false;
   String? _lastDepartmentId;
 
+  /// Id of the meeting the user selected. Held by id so the highlight survives
+  /// a reload of the list.
+  String? _selectedMeetingId;
+
+  /// Marks the selected row so it can be scrolled to once it is built.
+  final GlobalKey _selectedTileKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+
+  /// Activity requested by another screen, applied once the list has loaded.
+  String? _pendingFocusId;
+  String? _appliedFocusId;
+  bool _hasLoadedOnce = false;
+
   // Filter & Sort State
   bool _showFilterBar = false;
   String _selectedSort = 'created_newest';
@@ -49,6 +65,43 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       _lastDepartmentId = currentDeptId;
       _loadMeetings();
     }
+
+    // A meeting opened from elsewhere in the app (e.g. a notification).
+    final requested = context.watch<NavigationProvider>().focusedActivityId;
+    if (requested != null && requested != _appliedFocusId) {
+      _appliedFocusId = requested;
+      _pendingFocusId = requested;
+      // Off the build phase: applying the focus calls setState.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyPendingFocus();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// Highlights the requested meeting and brings it into view. Does nothing
+  /// until the list has loaded — [_loadMeetings] calls back in once it has.
+  Future<void> _applyPendingFocus() async {
+    final id = _pendingFocusId;
+    if (id == null || !_hasLoadedOnce || _isLoadingMeetings) return;
+
+    _pendingFocusId = null;
+
+    // Not in this list (deleted, filtered out, or a different type): leave the
+    // screen as it is rather than scrolling somewhere arbitrary.
+    if (!_meetings.any((m) => m.id == id)) return;
+    if (!mounted) return;
+
+    setState(() => _selectedMeetingId = id);
+    await ensureListItemVisible(
+      controller: _scrollController,
+      itemKey: _selectedTileKey,
+    );
   }
 
   @override
@@ -118,8 +171,15 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         }
 
         final id = item['id']?.toString() ?? item['_id']?.toString();
-        final duration = item['duration'] as String? ?? '15 Minutes';
-        final startTime = item['startTime'] as String? ?? item['start_time'] as String? ?? '';
+        // The API stores these as durationMinutes (int) and scheduledAt (ISO).
+        final durationMinutes = parseDurationMinutes(
+          item['durationMinutes'] ?? item['duration_minutes'] ?? item['duration'],
+        );
+        final duration = durationMinutes != null ? formatDurationLabel(durationMinutes) : '15 Minutes';
+        final scheduledAt = parseActivityDateTimeOrNull(
+          item['scheduledAt'] ?? item['scheduled_at'] ?? item['startTime'] ?? item['start_time'],
+        );
+        final startTime = scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '';
         final notes = item['notes'] as String? ?? item['description'] as String? ?? '';
         final assignedTo = item['ownerName'] as String? ?? 'Admin User';
 
@@ -152,6 +212,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           contactId: parsedContactId,
           companyId: parsedCompanyId,
           dealId: parsedDealId,
+          rawMap: item,
         );
       }).toList();
 
@@ -167,7 +228,11 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       if (mounted) {
         setState(() {
           _isLoadingMeetings = false;
+          _hasLoadedOnce = true;
         });
+        // The list is populated now, so an activity requested by another screen
+        // (including one requested before this load started) can be located.
+        _applyPendingFocus();
       }
     }
   }
@@ -919,6 +984,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                                       ],
                                     )
                                   : ListView.builder(
+                                      controller: _scrollController,
                                       physics: const AlwaysScrollableScrollPhysics(
                                           parent: BouncingScrollPhysics()),
                                       padding: const EdgeInsets.all(14),
@@ -1113,8 +1179,16 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   }
 
   Widget _buildMeetingTile(MeetingModel meeting) {
+    final bool isSelected = meeting.id != null && meeting.id == _selectedMeetingId;
+
     return InkWell(
+      // The key rides along with the selection so the selected row can always
+      // be scrolled to, however it got selected.
+      key: isSelected ? _selectedTileKey : null,
       onTap: () async {
+        // Mark this meeting as the selected one before opening its details.
+        setState(() => _selectedMeetingId = meeting.id);
+
         // 1. If meeting was created from / associated with Contact, open Contact Details
         if (meeting.contactId != null && meeting.contactId!.isNotEmpty) {
           Navigator.push(
@@ -1128,6 +1202,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   lastName: '',
                 ),
                 initialTabIndex: 1,
+                highlightActivityId: meeting.id,
               ),
             ),
           );
@@ -1143,6 +1218,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   name: '',
                 ),
                 initialTabIndex: 1,
+                highlightActivityId: meeting.id,
               ),
             ),
           );
@@ -1161,6 +1237,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   probability: 0,
                 ),
                 initialTabIndex: 1,
+                highlightActivityId: meeting.id,
               ),
             ),
           );
@@ -1184,9 +1261,12 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
         child: Row(
           children: [

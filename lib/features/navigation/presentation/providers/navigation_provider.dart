@@ -130,7 +130,19 @@ class NavigationProvider extends ChangeNotifier {
     ),
   ];
 
+  /// Activity the next screen should scroll to and highlight, set when the user
+  /// opens one specific activity from elsewhere in the app.
+  String? _focusedActivityId;
+
+  /// Screen index per activity type, for [openActivity].
+  static const Map<String, int> _activityScreenIndexes = {
+    'call': 9,
+    'meeting': 7,
+    'email': 10,
+  };
+
   int get selectedIndex => _selectedIndex;
+  String? get focusedActivityId => _focusedActivityId;
   List<String> get pinnedKeys => List.unmodifiable(_pinnedKeys);
   List<NavItem> get allNavItems => _allNavItems;
 
@@ -145,9 +157,35 @@ class NavigationProvider extends ChangeNotifier {
   }
 
   /// Selects active screen index.
-  void selectScreen(int index) {
+  ///
+  /// Pass [activityId] to tell the destination screen which activity to scroll
+  /// to and highlight once its list has loaded.
+  void selectScreen(int index, {String? activityId}) {
     _selectedIndex = index;
+    _focusedActivityId = activityId;
     notifyListeners();
+  }
+
+  /// Opens the list screen for [activityType] (`call`, `meeting` or `email`)
+  /// focused on [activityId].
+  ///
+  /// Returns false when the type has no list screen or the id is missing, so
+  /// callers can fall back to their own handling.
+  bool openActivity({String? activityType, String? activityId}) {
+    final id = activityId?.trim();
+    if (id == null || id.isEmpty) return false;
+
+    final type = activityType?.trim().toLowerCase();
+    if (type == null || type.isEmpty) return false;
+
+    // Notification types arrive as 'call', 'activity_call', 'call_logged', …
+    final match = _activityScreenIndexes.entries
+        .where((entry) => type.contains(entry.key))
+        .firstOrNull;
+    if (match == null) return false;
+
+    selectScreen(match.value, activityId: id);
+    return true;
   }
 
   /// Toggles pin status for a given item key.

@@ -27,6 +27,9 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
   late MeetingModel _currentMeeting;
   bool _isDeleting = false;
 
+  /// Popped back to the list so it reloads the updated meeting.
+  bool _isEdited = false;
+
   @override
   void initState() {
     super.initState();
@@ -125,6 +128,7 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
     if (updated != null && mounted) {
       setState(() {
         _currentMeeting = updated;
+        _isEdited = true;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -165,7 +169,9 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
       final meetingId = _currentMeeting.id;
       if (meetingId != null && meetingId.isNotEmpty) {
         try {
-          await ApiService().put(
+          // PATCH is the documented update route; PUT returned 404 and the
+          // association change was silently dropped.
+          await ApiService().patch(
             '${ApiConstants.activities}/$meetingId',
             data: {
               'contactId': newContactId,
@@ -173,8 +179,18 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
               'dealId': newDealId,
             },
           );
+          _isEdited = true;
         } catch (e) {
           debugPrint('[UPDATE ASSOCIATION ERROR]: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to update associations: $e'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+          return;
         }
       }
 
@@ -263,7 +279,7 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                 child: InkWell(
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: () => Navigator.of(context).pop(_isEdited),
                   borderRadius: BorderRadius.circular(6),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),

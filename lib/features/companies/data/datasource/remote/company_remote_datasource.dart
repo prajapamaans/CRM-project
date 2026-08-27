@@ -201,18 +201,10 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
       debugPrint('[PATCH /api/companies/$id SUCCESS]: ${response.data}');
       rawData = response.data;
     } catch (e) {
-      debugPrint('[PATCH /api/companies/$id FAILED, RETRYING PUT]: $e');
-      try {
-        final response = await _apiService.put(
-          '${ApiConstants.companies}/$id',
-          data: companyData,
-        );
-        debugPrint('[PUT /api/companies/$id SUCCESS]: ${response.data}');
-        rawData = response.data;
-      } catch (putErr) {
-        debugPrint('[PUT /api/companies/$id FAILED TOO]: $putErr');
-        rethrow;
-      }
+      // PATCH is the only update route; retrying with PUT just doubled the
+      // wait before the failure surfaced.
+      debugPrint('[PATCH /api/companies/$id FAILED]: $e');
+      rethrow;
     }
 
     if (rawData is Map<String, dynamic>) {

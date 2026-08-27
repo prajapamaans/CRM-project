@@ -206,6 +206,8 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
       ],
     );
 
+    if (!context.mounted) return;
+
     if (selectedAction == 'sort') {
       _showSortMenu(context, details);
     } else if (selectedAction == 'filter') {

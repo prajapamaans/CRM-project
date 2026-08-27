@@ -99,6 +99,13 @@ class MspOptionModel {
     );
   }
 
+  /// Builds an option from a plain string entry, the shape returned by
+  /// `GET /api/msp-options` (e.g. `["Magnit", "Beeline", "agileOne"]`).
+  factory MspOptionModel.fromValue(String value, {int position = 0}) {
+    final name = value.trim();
+    return MspOptionModel(id: name, name: name, position: position);
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,

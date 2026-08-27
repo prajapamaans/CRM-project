@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/providers/master_data_provider.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/widgets/searchable_dropdown_form_field.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../providers/deal_provider.dart';
@@ -44,6 +45,16 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
     'This quarter',
     'This year',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // The filter row has an MSP pill — make sure GET /api/msp-options ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -151,6 +162,41 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
                 context.read<DealProvider>().setStaleDaysFilter(val);
               },
             ),
+            const SizedBox(width: 14),
+
+            // 5. MSP Options from API
+            Builder(
+              builder: (context) {
+                final mspList = MspFieldUtils.optionsWith(
+                  masterProvider,
+                  dealProvider.selectedMsp == 'All MSPs'
+                      ? null
+                      : dealProvider.selectedMsp,
+                );
+
+                final mspItems = [
+                  DropdownSearchItem<String>(
+                    value: 'All MSPs',
+                    label: 'All MSPs',
+                  ),
+                  ...mspList.map(
+                    (msp) => DropdownSearchItem<String>(
+                      value: msp,
+                      label: msp,
+                    ),
+                  ),
+                ];
+
+                return _buildFilterPill<String>(
+                  title: 'MSP',
+                  value: dealProvider.selectedMsp ?? 'All MSPs',
+                  items: mspItems,
+                  onChanged: (val) {
+                    context.read<DealProvider>().setMspFilter(val);
+                  },
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -178,6 +224,7 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
               selectedItem.value != 'all' &&
               selectedItem.value != 'All time' &&
               selectedItem.value != 'All stages' &&
+              selectedItem.value != 'All MSPs' &&
               selectedItem.value != 'Select a stage' &&
               selectedItem.value != 'Select a priority';
 

@@ -28,6 +28,9 @@ class LoggerInterceptor extends Interceptor {
     if (kDebugMode) {
       debugPrint('<-- ERROR ${err.response?.statusCode} ${err.requestOptions.uri}');
       debugPrint('Message: ${err.message}');
+      if (err.response?.data != null) {
+        debugPrint('Response Data: ${err.response?.data}');
+      }
     }
     super.onError(err, handler);
   }

@@ -56,13 +56,15 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   MasterDataRepositoryImpl({MasterDataRemoteDataSource? remoteDataSource})
       : _remoteDataSource = remoteDataSource ?? MasterDataRemoteDataSourceImpl();
 
+  /// Errors are propagated so callers can tell an API failure apart from an
+  /// empty MSP list and surface the right state to the user.
   @override
   Future<List<MspOptionModel>> getMspOptions() async {
     try {
       return await _remoteDataSource.getMspOptions();
     } catch (e) {
       debugPrint('[GET /api/msp-options ERROR]: $e');
-      return [];
+      rethrow;
     }
   }
 

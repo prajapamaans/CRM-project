@@ -4,12 +4,16 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/models/bingo_summary_model.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/add_association_modal.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
 import '../../../../core/storage/activity_association_storage.dart';
+import '../../../../core/widgets/associate_msp_modal.dart';
 import '../../../../core/widgets/bottom_nav_bar.dart';
 import '../../../activities/presentation/widgets/create_task_modal.dart';
 import '../../../activities/presentation/widgets/create_note_modal.dart';
@@ -29,10 +33,15 @@ class DealDetailsScreen extends StatefulWidget {
   final DealModel? deal;
   final int initialTabIndex;
 
+  /// Activity to scroll to and highlight in the All-activities list, e.g. the
+  /// one the user tapped on the Calls, Meetings, Emails or Tasks screen.
+  final String? highlightActivityId;
+
   const DealDetailsScreen({
     super.key,
     this.deal,
     this.initialTabIndex = 0,
+    this.highlightActivityId,
   });
 
   @override
@@ -62,6 +71,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   final List<Map<String, dynamic>> _associatedCompanies = [];
   final List<Map<String, dynamic>> _associatedContacts = [];
   final List<Map<String, dynamic>> _associatedDeals = [];
+  List<Map<String, dynamic>> _associatedMsps = [];
   final List<Map<String, dynamic>> _associatedTasks = [];
 
   // Activities Tab State
@@ -137,19 +147,32 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     'All time',
   ];
 
-  final List<String> _dealStages = const [
+  /// Fallback only. Stage names are org-editable, so the real list comes from
+  /// `GET /api/deals/stages` — see [_fetchDealStages].
+  static const List<String> _defaultDealStages = [
     'Prospect',
-    'Appointment Scheduled',
-    'Qualified to Buy',
-    'Presentation Scheduled',
-    'Decision Maker Bought-In',
-    'Contract Sent',
+    'Capability Statement',
+    'RFI',
+    'RFP/RFQ',
+    'MSA',
     'Closed Won',
     'Closed Lost',
   ];
 
+  /// Stage names in board order, and the probability each one implies.
+  List<String> _dealStages = List<String>.from(_defaultDealStages);
+  Map<String, int> _stageProbabilities = const {};
+
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
+
+  /// Activity highlighted in the All-activities list. Seeded from
+  /// [DealDetailsScreen.highlightActivityId] and moved when the user taps
+  /// another row, so only ever one row is highlighted.
+  String? _highlightedActivityId;
+  final GlobalKey _highlightedActivityKey = GlobalKey();
+  final ScrollController _activitiesScrollController = ScrollController();
+  bool _hasScrolledToHighlight = false;
   String _lastActivityDateStr = '--';
 
   @override
@@ -183,9 +206,23 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
     _dealStage = _normalizeStage(d?.stage ?? 'Prospect');
 
+    final highlightId = widget.highlightActivityId?.trim();
+    if (highlightId != null && highlightId.isNotEmpty) {
+      _highlightedActivityId = highlightId;
+      // 'All activities' is the only sub-tab guaranteed to contain it.
+      _selectedActivitySubTab = 0;
+    }
+
+    _fetchDealStages();
     _fetchActivities();
     _fetchUsers();
     _fetchDealDetails();
+
+    // This screen has an MSP field — make sure GET /api/msp-options ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
   }
 
   bool _isLoadingDetails = false;
@@ -242,6 +279,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
             _associatedDeals.clear();
             _associatedDeals.addAll(dealModel.associatedDeals!);
           }
+
+          // The deal's MSPs are stored as a comma-separated string; without
+          // this the Associate MSP card came up empty on every visit.
+          _associatedMsps
+            ..clear()
+            ..addAll(MspFieldUtils.namesFrom(dealModel.msp).map(
+              (name) => {
+                'id': name,
+                'name': name,
+                'subtext': 'Managed Service Provider',
+              },
+            ));
         });
       }
     } catch (e) {
@@ -537,12 +586,31 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         setState(() {
           _isLoadingActivities = false;
         });
+        // The timeline is populated now, so the highlighted row can be located.
+        _scrollToHighlightedActivity();
       }
     }
   }
 
+  /// Brings the highlighted activity into view once, after the timeline has
+  /// loaded. Does nothing when nothing is highlighted or the activity is not in
+  /// this record's timeline.
+  Future<void> _scrollToHighlightedActivity() async {
+    final id = _highlightedActivityId;
+    if (id == null || _hasScrolledToHighlight) return;
+    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id)) return;
+
+    // Only counts as done once it actually scrolled — if the Activities tab
+    // was not built yet, the next load tries again.
+    _hasScrolledToHighlight = await ensureListItemVisible(
+      controller: _activitiesScrollController,
+      itemKey: _highlightedActivityKey,
+    );
+  }
+
   @override
   void dispose() {
+    _activitiesScrollController.dispose();
     _tabController.dispose();
     _nameController.dispose();
     _pipelineController.dispose();
@@ -586,25 +654,82 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     return formatLastActivityDateFromList(_activities, fallback: _lastActivityDateStr);
   }
 
+  /// Matches a stored stage onto the org's stage list. An unrecognised value is
+  /// kept as-is — coercing it to the first stage made every deal read
+  /// 'Prospect' whatever it was actually in.
   String _normalizeStage(String rawStage) {
-    final idx = _dealStages.indexWhere((s) => s.trim().toLowerCase() == rawStage.trim().toLowerCase() || s.trim().replaceAll(' ', '_').toLowerCase() == rawStage.trim().toLowerCase());
-    if (idx >= 0) {
-      return _dealStages[idx];
-    }
-    return _dealStages.first;
+    final value = rawStage.trim();
+    if (value.isEmpty) return _dealStages.isNotEmpty ? _dealStages.first : '';
+
+    final idx = _dealStages.indexWhere((s) =>
+        s.trim().toLowerCase() == value.toLowerCase() ||
+        s.trim().replaceAll(' ', '_').toLowerCase() == value.toLowerCase());
+    return idx >= 0 ? _dealStages[idx] : value;
   }
 
-  void _updateStageAndProbability(String stage) {
-    final index = _dealStages.indexWhere((s) => s.trim().toLowerCase() == stage.trim().toLowerCase());
-    final stageIndex = index >= 0 ? index : 0;
-    final probabilities = [10, 20, 40, 60, 80, 90, 100, 0];
-    final prob = stageIndex < probabilities.length ? probabilities[stageIndex] : 20;
+  /// Loads the org's deal stages so the picker, the progress boxes and the
+  /// saved value all use the same names the API accepts.
+  Future<void> _fetchDealStages() async {
+    try {
+      final stages = await MasterDataRepositoryImpl().getDealStages();
+      final names = <String>[];
+      final probabilities = <String, int>{};
+
+      for (final stage in stages) {
+        final name = (stage['name'] ?? stage['label'] ?? stage['value'])?.toString().trim();
+        if (name == null || name.isEmpty || names.contains(name)) continue;
+        names.add(name);
+        final probability = (stage['probability'] as num?)?.toInt();
+        if (probability != null) probabilities[name] = probability;
+      }
+
+      if (!mounted || names.isEmpty) return;
+      setState(() {
+        _dealStages = names;
+        _stageProbabilities = probabilities;
+        // Re-match the current stage against the real names.
+        _dealStage = _normalizeStage(_dealStage);
+      });
+    } catch (e) {
+      debugPrint('[DealDetailsScreen _fetchDealStages ERROR]: $e');
+    }
+  }
+
+  Future<void> _updateStageAndProbability(String stage) async {
+    final previousStage = _dealStage;
+    final probability = _stageProbabilities[stage];
 
     setState(() {
       _dealStage = stage;
-      _probabilityController.text = '$prob%';
+      if (probability != null) _probabilityController.text = '$probability%';
     });
-    _saveDealChanges();
+
+    // Moving a deal goes through PATCH /api/deals/:id/stage, which validates
+    // the transition; the generic update does not move the stage.
+    final dealId = widget.deal?.id ?? context.read<DealProvider>().selectedDeal?.id;
+    if (dealId != null && dealId.isNotEmpty) {
+      try {
+        await ApiService().patch(
+          '${ApiConstants.deals}/$dealId/stage',
+          data: {'stage': stage},
+        );
+      } catch (e) {
+        debugPrint('[DealDetailsScreen stage move ERROR]: $e');
+        if (!mounted) return;
+        // Put the picker back on the stage the deal is really in.
+        setState(() => _dealStage = previousStage);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not move the deal to $stage: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+    }
+
+    await _saveDealChanges();
   }
 
   Future<void> _saveDealChanges() async {
@@ -624,8 +749,6 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       'deal_name': titleStr,
       'pipeline': pipelineStr,
       'stage': _dealStage,
-      'stage_name': _dealStage,
-      'status': _dealStage,
       'probability': probNum,
       if (amountNum != null) ...{
         'amount': amountNum,
@@ -1023,33 +1146,6 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 ),
                               ),
                             ),
-                            InkWell(
-                              onTap: () {
-                                _fetchActivities();
-                                _fetchUsers();
-                                _fetchDealDetails();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Refreshing deal data...'),
-                                    duration: Duration(seconds: 1),
-                                  ),
-                                );
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFE6F4F1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF64D2B7), width: 1),
-                                ),
-                                child: const Icon(
-                                  Icons.refresh_rounded,
-                                  size: 18,
-                                  color: Color(0xFF00A884),
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 2),
@@ -1142,15 +1238,29 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    itemBuilder: (context) => _dealStages
-                        .map((s) => PopupMenuItem(
-                              value: s,
+                    itemBuilder: (context) => _dealStages.map((s) {
+                      final isSelected = s.trim().toLowerCase() == _dealStage.trim().toLowerCase();
+                      return PopupMenuItem(
+                        value: s,
+                        child: Row(
+                          children: [
+                            Expanded(
                               child: Text(
                                 s,
-                                style: GoogleFonts.poppins(fontSize: 13),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                  color: const Color(0xFF334155),
+                                ),
                               ),
-                            ))
-                        .toList(),
+                            ),
+                            // Shows which stage the deal is currently in.
+                            if (isSelected)
+                              const Icon(Icons.check_rounded, size: 16, color: Color(0xFF00A884)),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                     child: Row(
                       children: [
                         Text(
@@ -1174,21 +1284,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               ),
               const SizedBox(height: 12),
 
-              // Progress Bar (8 Boxes Row)
+              // Progress Bar — one box per stage the org actually has, so the
+              // ticks line up with the options in the picker.
               Row(
-                children: List.generate(8, (index) {
+                children: List.generate(_dealStages.length, (index) {
                   final int currentStageIndex = _dealStages.indexWhere(
                     (s) => s.trim().toLowerCase() == _dealStage.trim().toLowerCase(),
                   );
-                  final int activeIndex = currentStageIndex >= 0 ? currentStageIndex : 0;
-                  final bool isCompleted = index <= activeIndex;
+                  final bool isCompleted =
+                      currentStageIndex >= 0 && index <= currentStageIndex;
                   return Expanded(
                     child: InkWell(
-                      onTap: () {
-                        if (index < _dealStages.length) {
-                          _updateStageAndProbability(_dealStages[index]);
-                        }
-                      },
+                      onTap: () => _updateStageAndProbability(_dealStages[index]),
                       child: Container(
                         height: 24,
                         margin: const EdgeInsets.only(right: 6),
@@ -1454,7 +1561,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         taskToEdit: TaskModel(
           id: actId,
           title: titleText,
-          dueDate: (act['dueDate'] ?? act['due_date'] ?? act['scheduledAt'] ?? 'Today').toString(),
+          dueDate: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['dueDate'] ?? act['due_date'] ?? '').toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
           assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
@@ -1485,8 +1592,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
-          duration: (act['duration'] ?? '5m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1500,8 +1607,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
-          duration: (act['duration'] ?? '30m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1527,6 +1634,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   // ==========================================
   Widget _buildActivitiesTab() {
     return ListView(
+      controller: _activitiesScrollController,
       padding: const EdgeInsets.all(16),
       children: [
         Container(
@@ -1829,10 +1937,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     final bool isTaskCompleted = statusVal == 'COMPLETED';
                     final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
                     final bool isExpanded = _expandedActivityIds.contains(actId);
+                    final bool isHighlighted = actId == _highlightedActivityId;
 
                     return InkWell(
+                      // The key rides along with the highlight so the row can be
+                      // scrolled to once the timeline has been built.
+                      key: isHighlighted ? _highlightedActivityKey : null,
                       onTap: () {
                         setState(() {
+                          // Selecting a row moves the highlight off the previous one.
+                          _highlightedActivityId = actId;
                           if (isExpanded) {
                             _expandedActivityIds.remove(actId);
                           } else {
@@ -1845,11 +1959,13 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: isHighlighted ? const Color(0xFFE6F4F1) : Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: isExpanded ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-                            width: isExpanded ? 1.5 : 1,
+                            color: isExpanded || isHighlighted
+                                ? const Color(0xFF00A884)
+                                : const Color(0xFFE2E8F0),
+                            width: isExpanded || isHighlighted ? 1.5 : 1,
                           ),
                         ),
                         child: Row(
@@ -1863,15 +1979,26 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                       value: isTaskCompleted,
                                       activeColor: const Color(0xFF00A884),
                                       onChanged: (bool? newValue) async {
-                                        final newStatus = newValue == true ? 'COMPLETED' : 'PENDING';
-                                        final updateData = Map<String, dynamic>.from(act);
-                                        updateData['status'] = newStatus;
+                                        // PATCH just the changed field: PUT is not a
+                                        // route, and echoing the whole activity back
+                                        // failed validation, so the toggle never stuck.
+                                        final newStatus = newValue == true ? 'completed' : 'pending';
                                         try {
-                                          await ApiService().put('${ApiConstants.activities}/$actId', data: updateData);
-                                        } catch (_) {}
-                                        try {
-                                          await ApiService().put('/tasks/$actId', data: updateData);
-                                        } catch (_) {}
+                                          await ApiService().patch(
+                                            '${ApiConstants.activities}/$actId',
+                                            data: {'status': newStatus},
+                                          );
+                                        } catch (e) {
+                                          debugPrint('[UPDATE ACTIVITY STATUS ERROR]: $e');
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Failed to update task status: $e'),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
+                                        }
                                         _fetchActivities();
                                       },
                                     ),
@@ -2047,15 +2174,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                                 updatePayload['associationsList'] = assocList;
                                                 updatePayload['associations_list'] = assocList;
 
-                                                try {
-                                                  await api.put('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                } catch (_) {
-                                                  try {
-                                                    await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                  } catch (_) {
-                                                    await api.post('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                  }
-                                                }
+                                                // PATCH /api/activities/:id is the
+                                                // documented update route.
+                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
                                                if (context.mounted) {
                                                  ScaffoldMessenger.of(context).showSnackBar(
                                                    const SnackBar(
@@ -2673,7 +2794,46 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           },
         ),
 
-        // Card 4: Tasks
+        // Card 4: MSP
+        _buildAssociationCard(
+          title: 'MSP',
+          description:
+              'Track the Managed Service Provider (MSP) associated with this record.',
+          buttonText: 'Create msp',
+          entityType: 'msp',
+          associatedItems: _associatedMsps,
+          onPressed: () async {
+            final currentMsps = _associatedMsps
+                .map((m) => (m['name'] ?? '').toString())
+                .where((s) => s.isNotEmpty)
+                .toList();
+            final res = await AssociateMspModal.show(
+              context,
+              initialSelectedMsps: currentMsps,
+            );
+            if (res != null) {
+              setState(() {
+                _associatedMsps = res.map((m) => {
+                  'id': m,
+                  'name': m,
+                  'subtext': 'Managed Service Provider',
+                }).toList();
+              });
+
+              final dealId = widget.deal?.id;
+              if (dealId != null && dealId.isNotEmpty) {
+                try {
+                  final repo = DealRepositoryImpl();
+                  await repo.updateDeal(dealId, {'msp': res.join(', ')});
+                } catch (e) {
+                  debugPrint('[DealDetailsScreen updateDeal MSP ERROR]: $e');
+                }
+              }
+            }
+          },
+        ),
+
+        // Card 5: Tasks
         _buildAssociationCard(
           title: 'Tasks',
           description: 'Track the tasks associated with this record.',

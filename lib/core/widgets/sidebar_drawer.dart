@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../features/authentication/presentation/providers/auth_provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../features/navigation/presentation/providers/navigation_provider.dart';
 import 'user_profile_menu.dart';
 
@@ -31,6 +31,30 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
   bool _productivityExpanded = true;
   bool _contentExpanded = true;
   bool _reportingExpanded = true;
+
+  String _appVersion = 'v1.0.0';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          final version = info.version;
+          if (version.isNotEmpty) {
+            _appVersion = 'v$version';
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('[SidebarDrawer _loadAppVersion Error]: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +172,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       ),
                       if (_contentExpanded)
                         _buildSubItemsTreeContainer([
-                          _buildSubTile(context, navProvider: navProvider, itemKey: 'documents', index: 15, icon: Icons.folder_open_outlined, label: 'Documents'),
                           _buildSubTile(context, navProvider: navProvider, itemKey: 'templates', index: 16, icon: Icons.grid_view_outlined, label: 'Templates'),
                         ]),
 
@@ -197,18 +220,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                         ),
                       ),
 
-                      const SizedBox(height: 4),
 
-                      // User Management Item
-                      _buildSubTile(
-                        context,
-                        navProvider: navProvider,
-                        itemKey: 'user_management',
-                        index: 17,
-                        icon: Icons.people_outline_rounded,
-                        label: 'User Management',
-                        showPinButton: false,
-                      ),
                       const SizedBox(height: 4),
 
                       // Notifications Item
@@ -230,6 +242,42 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                           child: Text(
                             '2',
                             style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Divider(height: 1, color: Color(0xFFF1F5F9)),
+
+                // 3. App Version Footer (from pubspec.yaml version: 1.0.0+1)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'App Version',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: const Color(0xFF94A3B8),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(
+                          _appVersion,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF475569),
                           ),
                         ),
                       ),

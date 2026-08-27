@@ -33,6 +33,62 @@ class MasterDataProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
+  // ---------------------------------------------------------------------------
+  // MSP options — GET /api/msp-options
+  // ---------------------------------------------------------------------------
+
+  bool _isMspLoading = false;
+  bool _mspLoaded = false;
+  String? _mspError;
+  Future<void>? _mspRequest;
+
+  /// MSP names for dropdowns/selection fields, in the order the API returned them.
+  List<String> get mspNames =>
+      _mspOptions.map((e) => e.name).where((n) => n.isNotEmpty).toList();
+
+  bool get isMspLoading => _isMspLoading;
+  String? get mspError => _mspError;
+  bool get hasLoadedMspOptions => _mspLoaded;
+
+  /// Loads the MSP options once. Safe to call from `initState` of every screen
+  /// that shows an MSP field — concurrent calls share a single request.
+  Future<void> ensureMspOptionsLoaded() => fetchMspOptions();
+
+  /// Fetches MSP options from the API. Pass [force] to bypass the cache (retry).
+  Future<void> fetchMspOptions({bool force = false}) async {
+    final inFlight = _mspRequest;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+    if (_mspLoaded && !force) return;
+
+    final request = _loadMspOptions();
+    _mspRequest = request;
+    try {
+      await request;
+    } finally {
+      _mspRequest = null;
+    }
+  }
+
+  Future<void> _loadMspOptions() async {
+    _isMspLoading = true;
+    _mspError = null;
+    notifyListeners();
+
+    try {
+      _mspOptions = await _repository.getMspOptions();
+      _mspLoaded = true;
+    } catch (e) {
+      _mspError = 'Unable to load MSP options. Please try again.';
+      debugPrint('[MasterDataProvider fetchMspOptions error]: $e');
+    } finally {
+      _isMspLoading = false;
+      notifyListeners();
+    }
+  }
+
   /// Loads master options for Company entity
   Future<void> fetchCompanyMasterData() async {
     await fetchAllMasterData();
@@ -67,7 +123,9 @@ class MasterDataProvider extends ChangeNotifier {
         _repository.getMasterDropdownByKey('company_industry', includeInactive: false),
         _repository.getMasterDropdownByKey('company_type', includeInactive: false),
         _repository.getMasterDropdownByKey('contact_lead_status', includeInactive: false),
-        _repository.getMspOptions(),
+        // A failing MSP call must not sink the whole batch — the dedicated
+        // fetchMspOptions() path reports its own loading/error state.
+        _repository.getMspOptions().catchError((_) => <MspOptionModel>[]),
         _repository.getDepartments(),
         _repository.getNotifications(departmentId: departmentId),
         _repository.getDealStages(),
@@ -92,6 +150,11 @@ class MasterDataProvider extends ChangeNotifier {
       _companyTypeOptions = results[3] as List<MasterDropdownOptionModel>;
       _contactLeadStatusOptions = results[4] as List<MasterDropdownOptionModel>;
       _mspOptions = results[5] as List<MspOptionModel>;
+      // Leave _mspLoaded false on an empty result so an MSP screen retries.
+      if (_mspOptions.isNotEmpty) {
+        _mspLoaded = true;
+        _mspError = null;
+      }
       _departments = results[6] as List<Map<String, dynamic>>;
       _notifications = results[7] as List<Map<String, dynamic>>;
       _dealStages = results[8] as List<Map<String, dynamic>>;

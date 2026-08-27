@@ -24,7 +24,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = false;
+  bool _isFilterExpanded = true;
   final Set<String> _selectedCompanyIds = {};
 
   @override
@@ -88,7 +88,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final provider = context.read<CompanyProvider>();
     final idsToDelete = List<String>.from(_selectedCompanyIds);
@@ -164,6 +164,11 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                     },
                     isFilterActive: companyProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _isFilterExpanded = !_isFilterExpanded;
+                      });
+                    },
                     onRefreshTap: () {
                       context.read<CompanyProvider>().fetchCompanies();
                     },

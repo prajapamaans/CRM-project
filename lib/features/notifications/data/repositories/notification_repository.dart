@@ -10,11 +10,13 @@ abstract class NotificationRepository {
     String? contactId,
     String? dealId,
     String? createdDateRange,
+    String? departmentId,
     int? limit,
   });
 
   Future<void> markAsRead(String notificationId);
   Future<void> markAllAsRead();
+  Future<void> deleteNotification(String notificationId);
 }
 
 class NotificationRepositoryImpl implements NotificationRepository {
@@ -29,6 +31,7 @@ class NotificationRepositoryImpl implements NotificationRepository {
     String? contactId,
     String? dealId,
     String? createdDateRange,
+    String? departmentId,
     int? limit,
   }) async {
     try {
@@ -37,6 +40,7 @@ class NotificationRepositoryImpl implements NotificationRepository {
         contactId: contactId,
         dealId: dealId,
         createdDateRange: createdDateRange,
+        departmentId: departmentId,
         limit: limit,
       );
 
@@ -76,6 +80,17 @@ class NotificationRepositoryImpl implements NotificationRepository {
       debugPrint('[NOTIFICATIONS API SUCCESS] Marked all notifications as read');
     } catch (e) {
       debugPrint('[NOTIFICATIONS API ERROR] Failed to mark all as read: $e');
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> deleteNotification(String notificationId) async {
+    try {
+      await _remoteDataSource.deleteNotification(notificationId);
+      debugPrint('[NOTIFICATIONS API SUCCESS] Deleted notification $notificationId via DELETE /api/activities/notifications/$notificationId');
+    } catch (e) {
+      debugPrint('[NOTIFICATIONS API ERROR] Failed to delete notification $notificationId: $e');
       rethrow;
     }
   }

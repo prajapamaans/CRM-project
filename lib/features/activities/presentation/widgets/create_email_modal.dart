@@ -60,9 +60,103 @@ class CreateEmailModal extends StatefulWidget {
 class _CreateEmailModalState extends State<CreateEmailModal> {
   final TextEditingController _subjectController = TextEditingController();
   final TextEditingController _bodyController = TextEditingController();
+
+  // Cc / Bcc each get their own row under To, opened from the Cc and Bcc links.
+  final TextEditingController _ccController = TextEditingController();
+  final TextEditingController _bccController = TextEditingController();
+  final FocusNode _ccFocusNode = FocusNode();
+  final FocusNode _bccFocusNode = FocusNode();
+  bool _showCc = false;
+  bool _showBcc = false;
+
   bool _createFollowUpTask = false;
   bool _isSubmitting = false;
   bool _isLoadingTemplates = false;
+
+  /// Opens the Cc (or Bcc) row and puts the cursor in it. Tapping the link
+  /// again closes the row and clears what was typed there.
+  void _toggleRecipientRow({required bool cc}) {
+    setState(() {
+      if (cc) {
+        _showCc = !_showCc;
+        if (!_showCc) _ccController.clear();
+      } else {
+        _showBcc = !_showBcc;
+        if (!_showBcc) _bccController.clear();
+      }
+    });
+
+    final shouldFocus = cc ? _showCc : _showBcc;
+    if (!shouldFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      (cc ? _ccFocusNode : _bccFocusNode).requestFocus();
+    });
+  }
+
+  /// A stored cc/bcc value as editable text — the API may hand back either a
+  /// string or a list of addresses.
+  static String _recipientText(dynamic stored) {
+    if (stored == null) return '';
+    if (stored is List) {
+      return stored.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).join(', ');
+    }
+    return stored.toString().trim();
+  }
+
+  /// Splits a recipient field into addresses, accepting commas or semicolons.
+  static List<String> _recipients(String raw) => raw
+      .split(RegExp(r'[,;]'))
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+
+  /// One row of the header block, laid out like the To row.
+  Widget _buildRecipientRow({
+    required String label,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required VoidCallback onRemove,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 60,
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              keyboardType: TextInputType.emailAddress,
+              style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF1E293B)),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: 'name@company.com, another@company.com',
+                hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: onRemove,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Icon(Icons.close, size: 14, color: Color(0xFF64748B)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _showTemplatesMenu(BuildContext context, Offset tapPosition) async {
     setState(() => _isLoadingTemplates = true);
@@ -222,6 +316,12 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
       _subjectController.text = parseActivityDescription(rawSubj);
       final rawBody = widget.emailToEdit!['body'] ?? widget.emailToEdit!['description'] ?? widget.emailToEdit!['notes'] ?? '';
       _bodyController.text = parseActivityDescription(rawBody);
+
+      // Show the Cc / Bcc rows already filled when the email has recipients.
+      _ccController.text = _recipientText(widget.emailToEdit!['cc']);
+      _bccController.text = _recipientText(widget.emailToEdit!['bcc']);
+      _showCc = _ccController.text.isNotEmpty;
+      _showBcc = _bccController.text.isNotEmpty;
     }
 
     _undoHistory.add(_bodyController.text);
@@ -291,6 +391,10 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
     _bodyController.removeListener(_onContentChanged);
     _subjectController.dispose();
     _bodyController.dispose();
+    _ccController.dispose();
+    _bccController.dispose();
+    _ccFocusNode.dispose();
+    _bccFocusNode.dispose();
     super.dispose();
   }
 
@@ -450,12 +554,17 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
         assocList.add({'objectId': id, 'objectType': 'deal'});
       }
 
+      final ccList = _recipients(_ccController.text);
+      final bccList = _recipients(_bccController.text);
+
       final payload = {
         'title': subject.isNotEmpty ? subject : 'Email Activity',
         'type': 'email',
         'notes': body,
         'description': body,
         'activityDate': DateTime.now().toIso8601String(),
+        if (ccList.isNotEmpty) 'cc': ccList.join(', '),
+        if (bccList.isNotEmpty) 'bcc': bccList.join(', '),
         'associationsList': assocList,
         'associations_list': assocList,
         'companyIds': companyIds,
@@ -482,11 +591,8 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
       final emailId = widget.emailToEdit?['id'] ?? widget.emailToEdit?['_id'];
       try {
         if (emailId != null && emailId.toString().isNotEmpty) {
-          try {
-            await api.put('${ApiConstants.activities}/$emailId', data: payload);
-          } catch (_) {
-            await api.patch('${ApiConstants.activities}/$emailId', data: payload);
-          }
+          // PATCH /api/activities/:id is the documented update route.
+          await api.patch('${ApiConstants.activities}/$emailId', data: payload);
         } else {
           await api.post(ApiConstants.activities, data: payload);
         }
@@ -736,12 +842,39 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            Text(
-                              'Cc  Bcc',
-                              style: GoogleFonts.poppins(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF00A884),
+                            // Each opens its own row below To.
+                            InkWell(
+                              onTap: () => _toggleRecipientRow(cc: true),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Text(
+                                  'Cc',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: _showCc
+                                        ? const Color(0xFF0F766E)
+                                        : const Color(0xFF00A884),
+                                    decoration: _showCc ? TextDecoration.underline : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () => _toggleRecipientRow(cc: false),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Text(
+                                  'Bcc',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: _showBcc
+                                        ? const Color(0xFF0F766E)
+                                        : const Color(0xFF00A884),
+                                    decoration: _showBcc ? TextDecoration.underline : null,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -816,6 +949,22 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                           ],
                         ),
                       ),
+
+                      // 4b. Cc / Bcc — their own rows, laid out like To.
+                      if (_showCc)
+                        _buildRecipientRow(
+                          label: 'Cc',
+                          controller: _ccController,
+                          focusNode: _ccFocusNode,
+                          onRemove: () => _toggleRecipientRow(cc: true),
+                        ),
+                      if (_showBcc)
+                        _buildRecipientRow(
+                          label: 'Bcc',
+                          controller: _bccController,
+                          focusNode: _bccFocusNode,
+                          onRemove: () => _toggleRecipientRow(cc: false),
+                        ),
 
                       // 5. Subject Field (Fixed: No duplicate hintText)
                       Container(

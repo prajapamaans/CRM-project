@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/providers/master_data_provider.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/widgets/searchable_dropdown_form_field.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../providers/contact_provider.dart';
@@ -47,6 +48,16 @@ class _ContactInlineFilterSectionState extends State<ContactInlineFilterSection>
     'This quarter',
     'This year',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // The filter row has an MSP pill — make sure GET /api/msp-options ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,6 +193,41 @@ class _ContactInlineFilterSectionState extends State<ContactInlineFilterSection>
                 context.read<ContactProvider>().setCreateDateFilter(val);
               },
             ),
+            const SizedBox(width: 14),
+
+            // 5. MSP Options from API
+            Builder(
+              builder: (context) {
+                final mspList = MspFieldUtils.optionsWith(
+                  masterProvider,
+                  contactProvider.selectedMsp == 'All MSPs'
+                      ? null
+                      : contactProvider.selectedMsp,
+                );
+
+                final mspItems = [
+                  DropdownSearchItem<String>(
+                    value: 'All MSPs',
+                    label: 'All MSPs',
+                  ),
+                  ...mspList.map(
+                    (msp) => DropdownSearchItem<String>(
+                      value: msp,
+                      label: msp,
+                    ),
+                  ),
+                ];
+
+                return _buildFilterPill<String>(
+                  title: 'MSP',
+                  value: contactProvider.selectedMsp ?? 'All MSPs',
+                  items: mspItems,
+                  onChanged: (val) {
+                    context.read<ContactProvider>().setMspFilter(val);
+                  },
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -208,6 +254,7 @@ class _ContactInlineFilterSectionState extends State<ContactInlineFilterSection>
           final bool isFiltered = selectedItem != null &&
               selectedItem.value != 'all' &&
               selectedItem.value != 'All time' &&
+              selectedItem.value != 'All MSPs' &&
               selectedItem.value != 'Select a stage' &&
               selectedItem.value != 'Select a status';
 

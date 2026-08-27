@@ -5,6 +5,8 @@ import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/models/bingo_summary_model.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
@@ -31,10 +33,15 @@ class CompanyDetailsScreen extends StatefulWidget {
   final CompanyModel? company;
   final int initialTabIndex;
 
+  /// Activity to scroll to and highlight in the All-activities list, e.g. the
+  /// one the user tapped on the Calls, Meetings, Emails or Tasks screen.
+  final String? highlightActivityId;
+
   const CompanyDetailsScreen({
     super.key,
     this.company,
     this.initialTabIndex = 0,
+    this.highlightActivityId,
   });
 
   @override
@@ -58,6 +65,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
   late TextEditingController _searchActivitiesController;
   late TextEditingController _startDateController;
   late TextEditingController _endDateController;
+  late TextEditingController _mspController;
 
   String _lifecycleStage = 'Added';
   String _leadStatus = '';
@@ -156,6 +164,14 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
 
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
+
+  /// Activity highlighted in the All-activities list. Seeded from
+  /// [CompanyDetailsScreen.highlightActivityId] and moved when the user taps
+  /// another row, so only ever one row is highlighted.
+  String? _highlightedActivityId;
+  final GlobalKey _highlightedActivityKey = GlobalKey();
+  final ScrollController _activitiesScrollController = ScrollController();
+  bool _hasScrolledToHighlight = false;
   String _lastActivityDateStr = '--';
 
   @override
@@ -182,16 +198,27 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
     _searchActivitiesController = TextEditingController();
     _startDateController = TextEditingController();
     _endDateController = TextEditingController();
+    _mspController = TextEditingController(text: c?.msp ?? '');
 
     _lifecycleStage = c?.lifecycleStage ?? 'Added';
     _leadStatus = c?.leadStatus ?? '';
+
+    final highlightId = widget.highlightActivityId?.trim();
+    if (highlightId != null && highlightId.isNotEmpty) {
+      _highlightedActivityId = highlightId;
+      // 'All activities' is the only sub-tab guaranteed to contain it.
+      _selectedActivitySubTab = 0;
+    }
 
     _fetchActivities();
     _fetchUsers();
     _fetchCompanyDetails();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<MasterDataProvider>().fetchCompanyMasterData();
+      // This screen has an MSP field — make sure GET /api/msp-options ran.
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
     });
   }
 
@@ -254,20 +281,15 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
             _associatedCompanies.clear();
             _associatedCompanies.addAll(companyModel.associatedCompanies!);
           }
-          _associatedMsps.clear();
-          if (companyModel.msp != null && companyModel.msp!.isNotEmpty) {
-            final msps = companyModel.msp!
-                .split(',')
-                .map((s) => s.trim())
-                .where((s) => s.isNotEmpty);
-            for (final mspName in msps) {
-              _associatedMsps.add({
-                'id': mspName,
-                'name': mspName,
+          _associatedMsps
+            ..clear()
+            ..addAll(MspFieldUtils.namesFrom(companyModel.msp).map(
+              (name) => {
+                'id': name,
+                'name': name,
                 'subtext': 'Managed Service Provider',
-              });
-            }
-          }
+              },
+            ));
         });
       }
     } catch (e) {
@@ -563,12 +585,31 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
         setState(() {
           _isLoadingActivities = false;
         });
+        // The timeline is populated now, so the highlighted row can be located.
+        _scrollToHighlightedActivity();
       }
     }
   }
 
+  /// Brings the highlighted activity into view once, after the timeline has
+  /// loaded. Does nothing when nothing is highlighted or the activity is not in
+  /// this record's timeline.
+  Future<void> _scrollToHighlightedActivity() async {
+    final id = _highlightedActivityId;
+    if (id == null || _hasScrolledToHighlight) return;
+    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id)) return;
+
+    // Only counts as done once it actually scrolled — if the Activities tab
+    // was not built yet, the next load tries again.
+    _hasScrolledToHighlight = await ensureListItemVisible(
+      controller: _activitiesScrollController,
+      itemKey: _highlightedActivityKey,
+    );
+  }
+
   @override
   void dispose() {
+    _activitiesScrollController.dispose();
     _tabController.dispose();
     _nameController.dispose();
     _domainController.dispose();
@@ -649,6 +690,9 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
         'lastActivityDate': _lastActivityDateStr,
         'last_activity_date': _lastActivityDateStr,
       },
+      // Without this the MSP About field never reached the API, so it reverted
+      // on the next load. 'None' clears the field.
+      'msp': _mspController.text.trim() == 'None' ? '' : _mspController.text.trim(),
     };
 
     bool success = true;
@@ -1031,33 +1075,6 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                 ),
                               ),
                             ),
-                            InkWell(
-                              onTap: () {
-                                _fetchActivities();
-                                _fetchUsers();
-                                _fetchCompanyDetails();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Refreshing company data...'),
-                                    duration: Duration(seconds: 1),
-                                  ),
-                                );
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFE6F4F1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF64D2B7), width: 1),
-                                ),
-                                child: const Icon(
-                                  Icons.refresh_rounded,
-                                  size: 18,
-                                  color: Color(0xFF00A884),
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 2),
@@ -1418,13 +1435,28 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                   _saveCompanyChanges();
                 },
               ),
-              _buildAboutField(
-                'MSP',
-                'msp',
-                TextEditingController(text: '--'),
-                options: const ['MSP 1', 'MSP 2', 'MSP 3', 'None'],
-                onSelectedOption: (selected) {
-                  _saveCompanyChanges();
+              Builder(
+                builder: (context) {
+                  final masterProvider = context.watch<MasterDataProvider>();
+                  final mspOptionsList = <String>[
+                    ...MspFieldUtils.optionsWith(
+                      masterProvider,
+                      _mspController.text,
+                    ),
+                    'None',
+                  ];
+                  return _buildAboutField(
+                    'MSP',
+                    'msp',
+                    _mspController,
+                    options: mspOptionsList,
+                    onSelectedOption: (selected) {
+                      setState(() {
+                        _mspController.text = selected;
+                      });
+                      _saveCompanyChanges();
+                    },
+                  );
                 },
               ),
               _buildAboutField(
@@ -1523,7 +1555,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
         taskToEdit: TaskModel(
           id: actId,
           title: titleText,
-          dueDate: (act['dueDate'] ?? act['due_date'] ?? act['scheduledAt'] ?? 'Today').toString(),
+          dueDate: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['dueDate'] ?? act['due_date'] ?? '').toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
           assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
@@ -1554,8 +1586,8 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
-          duration: (act['duration'] ?? '5m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1569,8 +1601,8 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
-          duration: (act['duration'] ?? '30m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1596,6 +1628,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
   // ==========================================
   Widget _buildActivitiesTab() {
     return ListView(
+      controller: _activitiesScrollController,
       padding: const EdgeInsets.all(16),
       children: [
         Container(
@@ -1898,10 +1931,16 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                     final bool isTaskCompleted = statusVal == 'COMPLETED';
                     final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
                     final bool isExpanded = _expandedActivityIds.contains(actId);
+                    final bool isHighlighted = actId == _highlightedActivityId;
 
                     return InkWell(
+                      // The key rides along with the highlight so the row can be
+                      // scrolled to once the timeline has been built.
+                      key: isHighlighted ? _highlightedActivityKey : null,
                       onTap: () {
                         setState(() {
+                          // Selecting a row moves the highlight off the previous one.
+                          _highlightedActivityId = actId;
                           if (isExpanded) {
                             _expandedActivityIds.remove(actId);
                           } else {
@@ -1914,11 +1953,13 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: isHighlighted ? const Color(0xFFE6F4F1) : Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: isExpanded ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-                            width: isExpanded ? 1.5 : 1,
+                            color: isExpanded || isHighlighted
+                                ? const Color(0xFF00A884)
+                                : const Color(0xFFE2E8F0),
+                            width: isExpanded || isHighlighted ? 1.5 : 1,
                           ),
                         ),
                         child: Row(
@@ -1932,15 +1973,26 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                       value: isTaskCompleted,
                                       activeColor: const Color(0xFF00A884),
                                       onChanged: (bool? newValue) async {
-                                        final newStatus = newValue == true ? 'COMPLETED' : 'PENDING';
-                                        final updateData = Map<String, dynamic>.from(act);
-                                        updateData['status'] = newStatus;
+                                        // PATCH just the changed field: PUT is not a
+                                        // route, and echoing the whole activity back
+                                        // failed validation, so the toggle never stuck.
+                                        final newStatus = newValue == true ? 'completed' : 'pending';
                                         try {
-                                          await ApiService().put('${ApiConstants.activities}/$actId', data: updateData);
-                                        } catch (_) {}
-                                        try {
-                                          await ApiService().put('/tasks/$actId', data: updateData);
-                                        } catch (_) {}
+                                          await ApiService().patch(
+                                            '${ApiConstants.activities}/$actId',
+                                            data: {'status': newStatus},
+                                          );
+                                        } catch (e) {
+                                          debugPrint('[UPDATE ACTIVITY STATUS ERROR]: $e');
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Failed to update task status: $e'),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
+                                        }
                                         _fetchActivities();
                                       },
                                     ),
@@ -2116,15 +2168,9 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                                 updatePayload['associationsList'] = assocList;
                                                 updatePayload['associations_list'] = assocList;
 
-                                                try {
-                                                  await api.put('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                } catch (_) {
-                                                  try {
-                                                    await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                  } catch (_) {
-                                                    await api.post('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                  }
-                                                }
+                                                // PATCH /api/activities/:id is the
+                                                // documented update route.
+                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
 
                                                if (context.mounted) {
                                                  ScaffoldMessenger.of(context).showSnackBar(

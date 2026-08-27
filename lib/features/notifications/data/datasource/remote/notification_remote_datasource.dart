@@ -8,11 +8,13 @@ abstract class NotificationRemoteDataSource {
     String? contactId,
     String? dealId,
     String? createdDateRange,
+    String? departmentId,
     int? limit,
   });
 
   Future<void> markAsRead(String notificationId);
   Future<void> markAllAsRead();
+  Future<void> deleteNotification(String notificationId);
 }
 
 class NotificationRemoteDataSourceImpl implements NotificationRemoteDataSource {
@@ -27,13 +29,15 @@ class NotificationRemoteDataSourceImpl implements NotificationRemoteDataSource {
     String? contactId,
     String? dealId,
     String? createdDateRange,
+    String? departmentId,
     int? limit,
   }) async {
     final queryParameters = <String, dynamic>{};
-    if (companyId != null) queryParameters['companyId'] = companyId;
-    if (contactId != null) queryParameters['contactId'] = contactId;
-    if (dealId != null) queryParameters['dealId'] = dealId;
-    if (createdDateRange != null) queryParameters['createdDateRange'] = createdDateRange;
+    if (companyId != null && companyId.isNotEmpty) queryParameters['companyId'] = companyId;
+    if (contactId != null && contactId.isNotEmpty) queryParameters['contactId'] = contactId;
+    if (dealId != null && dealId.isNotEmpty) queryParameters['dealId'] = dealId;
+    if (createdDateRange != null && createdDateRange.isNotEmpty) queryParameters['createdDateRange'] = createdDateRange;
+    if (departmentId != null && departmentId.isNotEmpty) queryParameters['department_id'] = departmentId;
     if (limit != null) queryParameters['limit'] = limit;
 
     final response = await _apiService.get(
@@ -47,15 +51,18 @@ class NotificationRemoteDataSourceImpl implements NotificationRemoteDataSource {
     if (rawData is List) {
       list = rawData;
     } else if (rawData is Map<String, dynamic>) {
-      if (rawData.containsKey('data') && rawData['data'] is List) {
-        list = rawData['data'] as List<dynamic>;
-      } else if (rawData.containsKey('notifications') && rawData['notifications'] is List) {
-        list = rawData['notifications'] as List<dynamic>;
+      final dataField = rawData['data'] ?? rawData['notifications'] ?? rawData['items'] ?? rawData['results'];
+      if (dataField is List) {
+        list = dataField;
+      } else if (dataField is Map<String, dynamic>) {
+        final innerList = dataField['data'] ?? dataField['items'] ?? dataField['notifications'];
+        if (innerList is List) list = innerList;
       }
     }
 
     return list
-        .map((item) => NotificationModel.fromJson(item as Map<String, dynamic>))
+        .whereType<Map>()
+        .map((item) => NotificationModel.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 
@@ -67,5 +74,10 @@ class NotificationRemoteDataSourceImpl implements NotificationRemoteDataSource {
   @override
   Future<void> markAllAsRead() async {
     await _apiService.patch('${ApiConstants.notifications}/mark-all-read');
+  }
+
+  @override
+  Future<void> deleteNotification(String notificationId) async {
+    await _apiService.delete('${ApiConstants.notifications}/$notificationId');
   }
 }

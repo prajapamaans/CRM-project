@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:dio/dio.dart';
@@ -7,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../../core/models/master_dropdown_model.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/network/network_exception.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
 import '../../../../core/storage/activity_association_storage.dart';
@@ -42,6 +42,15 @@ class TaskModel {
     this.reminderText = 'No reminder',
     this.rawMap,
   });
+}
+
+/// An activity-date choice: the label shown in the menu and the date it means.
+/// [date] is null for the "Custom Date" entry, which opens a picker instead.
+class _TaskDateOption {
+  final String label;
+  final DateTime? date;
+
+  const _TaskDateOption(this.label, this.date);
 }
 
 class CreateTaskModal extends StatefulWidget {
@@ -94,12 +103,23 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   String _timeText = '8:00 AM';
   String _reminderText = 'No reminder';
 
+  /// Resolved date behind [_activityDateText]. Kept in sync with every pick so
+  /// the payload carries the date the user actually chose.
+  DateTime _activityDate = _defaultActivityDate();
+
+  /// Set when the reminder is a hand-picked date.
+  DateTime? _customReminderAt;
+
   String _selectedTaskType = 'To-do';
   String _selectedPriority = 'None';
   String _selectedQueue = 'None';
   String _selectedAssignee = 'Select ...';
 
   bool _isSubmitting = false;
+
+  /// Last save failure, shown inside the sheet — a SnackBar alone sits behind
+  /// this full-height modal and is invisible to the user.
+  String? _submitError;
 
   // Associations state
   late Map<String, List<Map<String, String>>> _associations;
@@ -182,24 +202,38 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     'Custom Date',
   ];
 
-  static List<String> _generateTaskActivityDateOptions() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    DateTime addBusinessDays(DateTime start, int days) {
-      DateTime current = start;
-      int added = 0;
-      while (added < days) {
-        current = current.add(const Duration(days: 1));
-        if (current.weekday != DateTime.saturday && current.weekday != DateTime.sunday) {
-          added++;
-        }
+  static DateTime _addBusinessDays(DateTime start, int days) {
+    DateTime current = start;
+    int added = 0;
+    while (added < days) {
+      current = current.add(const Duration(days: 1));
+      if (current.weekday != DateTime.saturday && current.weekday != DateTime.sunday) {
+        added++;
       }
-      return current;
     }
+    return current;
+  }
 
-    final in2Biz = addBusinessDays(today, 2);
-    final in3Biz = addBusinessDays(today, 3);
+  static DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  static DateTime _defaultActivityDate() => _addBusinessDays(_today(), 3);
+
+  static const List<String> _monthAbbrs = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  static String _formatDateLabel(DateTime date) =>
+      '${_monthAbbrs[date.month - 1]} ${date.day}, ${date.year}';
+
+  static List<_TaskDateOption> _generateTaskActivityDateOptions() {
+    final today = _today();
+
+    final in2Biz = _addBusinessDays(today, 2);
+    final in3Biz = _addBusinessDays(today, 3);
     final in1Week = today.add(const Duration(days: 7));
     final in2Weeks = today.add(const Duration(days: 14));
 
@@ -225,23 +259,52 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       return names[weekday - 1];
     }
 
-    String monthAbbr(int month) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return months[month - 1];
-    }
+    String monthAbbr(int month) => _monthAbbrs[month - 1];
 
     return [
-      'Today',
-      'Tomorrow',
-      'In 2 business days (${weekdayName(in2Biz.weekday)})',
-      'In 3 business days (${weekdayName(in3Biz.weekday)})',
-      'In 1 week (${monthAbbr(in1Week.month)} ${in1Week.day})',
-      'In 2 weeks (${monthAbbr(in2Weeks.month)} ${in2Weeks.day})',
-      'In 1 month (${monthAbbr(in1Month.month)} ${in1Month.day})',
-      'In 3 months (${monthAbbr(in3Months.month)} ${in3Months.day})',
-      'In 6 months (${monthAbbr(in6Months.month)} ${in6Months.day})',
-      'Custom Date',
+      _TaskDateOption('Today', today),
+      _TaskDateOption('Tomorrow', today.add(const Duration(days: 1))),
+      _TaskDateOption('In 2 business days (${weekdayName(in2Biz.weekday)})', in2Biz),
+      _TaskDateOption('In 3 business days (${weekdayName(in3Biz.weekday)})', in3Biz),
+      _TaskDateOption('In 1 week (${monthAbbr(in1Week.month)} ${in1Week.day})', in1Week),
+      _TaskDateOption('In 2 weeks (${monthAbbr(in2Weeks.month)} ${in2Weeks.day})', in2Weeks),
+      _TaskDateOption('In 1 month (${monthAbbr(in1Month.month)} ${in1Month.day})', in1Month),
+      _TaskDateOption('In 3 months (${monthAbbr(in3Months.month)} ${in3Months.day})', in3Months),
+      _TaskDateOption('In 6 months (${monthAbbr(in6Months.month)} ${in6Months.day})', in6Months),
+      const _TaskDateOption('Custom Date', null),
     ];
+  }
+
+  /// Parses a `h:mm AM/PM` label back into hours/minutes. Falls back to 08:00.
+  static ({int hour, int minute}) _parseTimeLabel(String label) {
+    final match = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', caseSensitive: false)
+        .firstMatch(label.trim());
+    if (match == null) return (hour: 8, minute: 0);
+
+    var hour = int.parse(match.group(1)!) % 12;
+    final minute = int.parse(match.group(2)!);
+    if (match.group(3)!.toUpperCase() == 'PM') hour += 12;
+    return (hour: hour, minute: minute);
+  }
+
+  static String _formatTimeLabel(DateTime date) {
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    final period = date.hour < 12 ? 'AM' : 'PM';
+    return '$hour:${date.minute.toString().padLeft(2, '0')} $period';
+  }
+
+  /// The selected date and time as a single instant, in UTC ISO-8601 —
+  /// the format `scheduledAt` expects.
+  String _resolveScheduledAtIso() {
+    final time = _parseTimeLabel(_timeText);
+    final scheduled = DateTime(
+      _activityDate.year,
+      _activityDate.month,
+      _activityDate.day,
+      time.hour,
+      time.minute,
+    );
+    return scheduled.toUtc().toIso8601String();
   }
 
   static List<String> _generateTaskTimeOptions() {
@@ -314,7 +377,14 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       if (editTask.queue != null && editTask.queue!.isNotEmpty) {
         _selectedQueue = editTask.queue!;
       }
-      if (editTask.activityDateText != null && editTask.activityDateText!.isNotEmpty) {
+      // Prefer the stored due date — it is the only source that survives a
+      // reload; activityDateText carries the model's default otherwise.
+      final storedDue = DateTime.tryParse(editTask.dueDate)?.toLocal();
+      if (storedDue != null) {
+        _activityDate = DateTime(storedDue.year, storedDue.month, storedDue.day);
+        _activityDateText = _formatDateLabel(_activityDate);
+        _timeText = _formatTimeLabel(storedDue);
+      } else if (editTask.activityDateText != null && editTask.activityDateText!.isNotEmpty) {
         _activityDateText = editTask.activityDateText!;
       }
       if (editTask.reminderText != null && editTask.reminderText!.isNotEmpty) {
@@ -370,24 +440,33 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   @override
   Widget build(BuildContext context) {
     final bool isEditing = widget.taskToEdit != null;
-    final prioritiesList = _apiPriorities.isNotEmpty
-        ? _apiPriorities.map((p) => p.label).toList()
-        : const ['None', 'Low', 'Medium', 'High'];
 
-    if (!prioritiesList.contains(_selectedPriority) && prioritiesList.isNotEmpty) {
+    // Growable copies: an existing task's priority/assignee often isn't in the
+    // fallback options, and appending to a const list throws while building.
+    final prioritiesList = <String>[
+      if (_apiPriorities.isNotEmpty)
+        ..._apiPriorities.map((p) => p.label)
+      else
+        ...['None', 'Low', 'Medium', 'High'],
+    ];
+
+    if (_selectedPriority.isNotEmpty && !prioritiesList.contains(_selectedPriority)) {
       prioritiesList.add(_selectedPriority);
     }
 
-    final usersDisplayList = _apiUsers.isNotEmpty
-        ? _apiUsers.map((u) {
-            final first = u['firstName'] as String? ?? u['first_name'] as String? ?? '';
-            final last = u['lastName'] as String? ?? u['last_name'] as String? ?? '';
-            final name = '$first $last'.trim();
-            return name.isNotEmpty ? name : u['email'] as String? ?? 'User';
-          }).toList()
-        : const ['Admin User', 'Abhishek Puranik', 'Select ...'];
+    final usersDisplayList = <String>[
+      if (_apiUsers.isNotEmpty)
+        ..._apiUsers.map((u) {
+          final first = u['firstName'] as String? ?? u['first_name'] as String? ?? '';
+          final last = u['lastName'] as String? ?? u['last_name'] as String? ?? '';
+          final name = '$first $last'.trim();
+          return name.isNotEmpty ? name : u['email'] as String? ?? 'User';
+        })
+      else
+        ...['Admin User', 'Abhishek Puranik', 'Select ...'],
+    ];
 
-    if (!usersDisplayList.contains(_selectedAssignee)) {
+    if (_selectedAssignee.isNotEmpty && !usersDisplayList.contains(_selectedAssignee)) {
       usersDisplayList.add(_selectedAssignee);
     }
 
@@ -525,19 +604,22 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                         if (val == 'Custom Date') {
                           final picked = await showDatePicker(
                             context: context,
-                            initialDate: DateTime.now(),
+                            initialDate: _activityDate,
                             firstDate: DateTime(2020),
                             lastDate: DateTime(2030),
                           );
                           if (picked != null && mounted) {
-                            final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                             setState(() {
-                              _activityDateText = '${months[picked.month - 1]} ${picked.day}, ${picked.year}';
+                              _activityDate = DateTime(picked.year, picked.month, picked.day);
+                              _activityDateText = _formatDateLabel(_activityDate);
                             });
                           }
                         } else {
+                          final option = _generateTaskActivityDateOptions()
+                              .firstWhere((o) => o.label == val, orElse: () => const _TaskDateOption('', null));
                           setState(() {
                             _activityDateText = val;
+                            if (option.date != null) _activityDate = option.date!;
                           });
                         }
                       },
@@ -565,7 +647,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                       ),
                       itemBuilder: (context) {
                         final dates = _generateTaskActivityDateOptions();
-                        return dates.map((d) => _buildPopupMenuItem(d, _activityDateText)).toList();
+                        return dates.map((d) => _buildPopupMenuItem(d.label, _activityDateText)).toList();
                       },
                     ),
                     const SizedBox(width: 12),
@@ -649,13 +731,14 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                         lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
                       );
                       if (picked != null && mounted) {
-                        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                         setState(() {
-                          _reminderText = '${months[picked.month - 1]} ${picked.day}, ${picked.year}';
+                          _customReminderAt = picked;
+                          _reminderText = _formatDateLabel(picked);
                         });
                       }
                     } else {
                       setState(() {
+                        _customReminderAt = null;
                         _reminderText = val;
                       });
                     }
@@ -1014,86 +1097,109 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                 FollowUpTaskSection(
                   initialChecked: false,
                 ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+
+          // Pinned Bottom Action Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Save failures are shown here: a SnackBar renders behind this
+                // full-height sheet and would never be seen.
+                if (_submitError != null) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!_isSubmitting) {
-                            _handleSubmit();
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF70D1C4),
-                          disabledBackgroundColor: const Color(0xFF70D1C4),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(4),
+                      const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _submitError!,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFFDC2626),
                           ),
-                        ),
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(
-                                isEditing ? 'Save' : 'Create',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                      ),
-                      InkWell(
-                        onTap: () async {
-                          final result = await RecordAssociationSheet.show(
-                            context,
-                            initialAssociations: _associations,
-                          );
-                          if (result != null) {
-                            setState(() {
-                              _associations = result;
-                            });
-                          }
-                        },
-                        child: Row(
-                          children: [
-                            Text(
-                              'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
-                              style: GoogleFonts.poppins(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF00A884),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              color: Color(0xFF00A884),
-                              size: 18,
-                            ),
-                          ],
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _isSubmitting ? null : _handleSubmit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00A884),
+                        disabledBackgroundColor: const Color(0xFF70D1C4),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              isEditing ? 'Save' : 'Create',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                    ),
+                    InkWell(
+                      onTap: () async {
+                        final result = await RecordAssociationSheet.show(
+                          context,
+                          initialAssociations: _associations,
+                        );
+                        if (result != null) {
+                          setState(() {
+                            _associations = result;
+                          });
+                        }
+                      },
+                      child: Row(
+                        children: [
+                          Text(
+                            'Associated with $_totalAssociations record${_totalAssociations > 1 ? 's' : ''}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF00A884),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Color(0xFF00A884),
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 160),
               ],
             ),
           ),
@@ -1164,201 +1270,223 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     );
   }
 
+
+  /// Priority values the activities API accepts.
+  static const Set<String> _apiPriorityValues = {'none', 'low', 'medium', 'high'};
+
+  /// Maps the selected priority label onto the API enum, preferring the value
+  /// the master-dropdown API itself supplied. Returns null when the label maps
+  /// to nothing valid, so the field is left out instead of failing validation.
+  String? _resolvePriority() {
+    for (final option in _apiPriorities) {
+      if (option.label == _selectedPriority && option.value.isNotEmpty) {
+        final value = option.value.trim().toLowerCase();
+        if (_apiPriorityValues.contains(value)) return value;
+      }
+    }
+    final fallback = _selectedPriority.trim().toLowerCase();
+    return _apiPriorityValues.contains(fallback) ? fallback : null;
+  }
+
+  String _resolveReminderType() {
+    if (_customReminderAt != null) return 'custom';
+    if (_reminderText == 'No reminder') return 'none';
+    return _reminderText.trim().toLowerCase().replaceAll(' ', '_');
+  }
+
+  /// Resolves the owner: the picked assignee if it matches a fetched user,
+  /// otherwise the signed-in user.
+  String? _resolveOwnerId() {
+    for (final user in _apiUsers) {
+      final first = user['firstName'] as String? ?? user['first_name'] as String? ?? '';
+      final last = user['lastName'] as String? ?? user['last_name'] as String? ?? '';
+      final name = '$first $last'.trim();
+      final email = user['email'] as String? ?? '';
+      if ((name.isNotEmpty && name == _selectedAssignee) ||
+          (email.isNotEmpty && email == _selectedAssignee)) {
+        final id = user['id']?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      return authProvider.currentUser?.id ??
+          authProvider.loginResponse?.user?['id']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static const Map<String, String> _associationObjectTypes = {
+    'Companies': 'company',
+    'Contacts': 'contact',
+    'Deals': 'deal',
+  };
+
+  /// The `associations` field the API expects: a flat `[{objectId, objectType}]`
+  /// list. The record this modal was opened from is always included.
+  List<Map<String, String>> _buildAssociations() {
+    final list = <Map<String, String>>[];
+    final seen = <String>{};
+
+    void add(String? id, String objectType) {
+      final value = id?.trim();
+      if (value == null || value.isEmpty) return;
+      if (!seen.add('$objectType:$value')) return;
+      list.add({'objectId': value, 'objectType': objectType});
+    }
+
+    _associations.forEach((group, records) {
+      final objectType = _associationObjectTypes[group];
+      if (objectType == null) return;
+      for (final record in records) {
+        add(record['id'], objectType);
+      }
+    });
+
+    add(widget.companyId, 'company');
+    add(widget.contactId, 'contact');
+    add(widget.dealId, 'deal');
+
+    return list;
+  }
+
+  /// First association of [objectType], used for the primary `contactId` /
+  /// `companyId` / `dealId` links.
+  String? _primaryId(List<Map<String, String>> associations, String objectType) {
+    for (final association in associations) {
+      if (association['objectType'] == objectType) return association['objectId'];
+    }
+    return null;
+  }
+
+  /// Pulls a readable message out of whatever the server sent back.
+  static String? _serverMessage(dynamic data) {
+    if (data is String && data.trim().isNotEmpty) return data.trim();
+    if (data is Map) {
+      final message = data['message'] ?? data['error'];
+      if (message is String && message.trim().isNotEmpty) return message.trim();
+
+      final errors = data['errors'];
+      if (errors is List && errors.isNotEmpty) {
+        final first = errors.first;
+        if (first is String && first.trim().isNotEmpty) return first.trim();
+        if (first is Map) {
+          final detail = first['message'] ?? first['msg'] ?? first['error'];
+          if (detail is String && detail.trim().isNotEmpty) return detail.trim();
+        }
+      }
+      if (errors is Map && errors.isNotEmpty) {
+        final first = errors.values.first;
+        if (first is String && first.trim().isNotEmpty) return first.trim();
+        if (first is List && first.isNotEmpty) return first.first.toString();
+      }
+    }
+    return null;
+  }
+
+  static String _describeError(Object error) {
+    if (error is NetworkException) {
+      return _serverMessage(error.data) ?? error.message;
+    }
+    if (error is DioException) {
+      return _serverMessage(error.response?.data) ??
+          (error.message?.isNotEmpty == true
+              ? error.message!
+              : 'Request failed. Please try again.');
+    }
+    return error.toString();
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() {
+      _submitError = message;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   Future<void> _handleSubmit() async {
     debugPrint('[CREATE TASK BUTTON CLICKED]');
     if (_isSubmitting) return;
 
-    final finalTitle = _titleController.text.trim().isNotEmpty
-        ? _titleController.text.trim()
-        : 'New Task';
+    final titleText = _titleController.text.trim();
+    if (titleText.isEmpty) {
+      _showError('Please enter a task name');
+      return;
+    }
+    if (titleText.length > 255) {
+      _showError('Task name must be 255 characters or fewer');
+      return;
+    }
+
     final notesText = _notesController.text.trim();
+
+    final taskId = widget.taskToEdit?.id;
+    final isEditing = taskId != null && taskId.isNotEmpty;
 
     setState(() {
       _isSubmitting = true;
+      _submitError = null;
     });
 
     try {
-      // 1. Serialized JSON document for description field as expected by backend API
-      final String descriptionJson = jsonEncode({
-        'type': 'doc',
-        'content': [
-          {
-            'type': 'paragraph',
-            if (notesText.isNotEmpty)
-              'content': [
-                {
-                  'type': 'text',
-                  'text': notesText,
-                }
-              ]
-          }
-        ]
-      });
+      final scheduledAtIso = _resolveScheduledAtIso();
+      final associations = _buildAssociations();
 
-      // 2. Dynamic Associations array
-      String? targetCompanyId;
-      if (_associations['Companies'] != null && _associations['Companies']!.isNotEmpty) {
-        targetCompanyId = _associations['Companies']!.first['id'];
-      } else if (widget.companyId != null && widget.companyId!.isNotEmpty) {
-        targetCompanyId = widget.companyId;
-      }
+      final companyId = _primaryId(associations, 'company');
+      final contactId = _primaryId(associations, 'contact');
+      final dealId = _primaryId(associations, 'deal');
 
-      String? targetContactId;
-      if (_associations['Contacts'] != null && _associations['Contacts']!.isNotEmpty) {
-        targetContactId = _associations['Contacts']!.first['id'];
-      } else if (widget.contactId != null && widget.contactId!.isNotEmpty) {
-        targetContactId = widget.contactId;
-      }
+      final ownerId = _resolveOwnerId();
+      final priority = _resolvePriority();
+      final editedStatus = isEditing ? _normalizeStatus(widget.taskToEdit!.status) : null;
 
-      String? targetDealId;
-      if (_associations['Deals'] != null && _associations['Deals']!.isNotEmpty) {
-        targetDealId = _associations['Deals']!.first['id'];
-      } else if (widget.dealId != null && widget.dealId!.isNotEmpty) {
-        targetDealId = widget.dealId;
-      }
-
-      final List<Map<String, String>> associations = [];
-      _associations['Contacts']?.forEach((c) {
-        if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'contact'});
-      });
-      _associations['Companies']?.forEach((c) {
-        if (c['id'] != null) associations.add({'objectId': c['id']!, 'objectType': 'company'});
-      });
-      _associations['Deals']?.forEach((d) {
-        if (d['id'] != null) associations.add({'objectId': d['id']!, 'objectType': 'deal'});
-      });
-
-      // 3. Owner ID resolution
-      String? ownerId;
-      for (final user in _apiUsers) {
-        final first = user['firstName'] as String? ?? user['first_name'] as String? ?? '';
-        final last = user['lastName'] as String? ?? user['last_name'] as String? ?? '';
-        final name = '$first $last'.trim();
-        final email = user['email'] as String? ?? '';
-        if ((name.isNotEmpty && name == _selectedAssignee) || (email.isNotEmpty && email == _selectedAssignee)) {
-          ownerId = user['id']?.toString();
-          break;
-        }
-      }
-      if (ownerId == null || ownerId.isEmpty) {
-        try {
-          final authProvider = Provider.of<AuthProvider>(context, listen: false);
-          ownerId = authProvider.currentUser?.id ?? authProvider.loginResponse?.user?['id']?.toString();
-        } catch (_) {}
-      }
-
-      // 4. ISO 8601 UTC date string
-      final scheduledDateTime = DateTime.now().add(const Duration(days: 3));
-      final scheduledAtIso = scheduledDateTime.toUtc().toIso8601String();
-
-      final companyIds = _associations['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-      if (targetCompanyId != null && targetCompanyId.isNotEmpty && !companyIds.contains(targetCompanyId)) {
-        companyIds.add(targetCompanyId);
-      }
-
-      final contactIds = _associations['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-      if (targetContactId != null && targetContactId.isNotEmpty && !contactIds.contains(targetContactId)) {
-        contactIds.add(targetContactId);
-      }
-
-      final dealIds = _associations['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-      if (targetDealId != null && targetDealId.isNotEmpty && !dealIds.contains(targetDealId)) {
-        dealIds.add(targetDealId);
-      }
-
-      final List<Map<String, String>> assocList = [];
-      for (final id in companyIds) {
-        assocList.add({'objectId': id, 'objectType': 'company'});
-      }
-      for (final id in contactIds) {
-        assocList.add({'objectId': id, 'objectType': 'contact'});
-      }
-      for (final id in dealIds) {
-        assocList.add({'objectId': id, 'objectType': 'deal'});
-      }
-      final taskPayload = {
+      // Body per POST/PATCH /api/activities.
+      final payload = <String, dynamic>{
         'type': 'task',
-        'title': finalTitle,
-        'subject': finalTitle,
-        'notes': notesText,
+        'title': titleText,
         'description': notesText,
-        'descriptionJson': descriptionJson,
-        'status': widget.taskToEdit?.status ?? 'PENDING',
-        'priority': _selectedPriority.toLowerCase(),
-        'activityDate': scheduledAtIso,
-        'dueDate': scheduledAtIso,
-        'due_date': scheduledAtIso,
         'scheduledAt': scheduledAtIso,
-        'scheduled_at': scheduledAtIso,
-        'associations': _associations,
-        'associationsList': assocList,
-        'associations_list': assocList,
-        'companyIds': companyIds,
-        'company_ids': companyIds,
-        'contactIds': contactIds,
-        'contact_ids': contactIds,
-        'dealIds': dealIds,
-        'deal_ids': dealIds,
-        if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
-          'companyId': targetCompanyId,
-          'company_id': targetCompanyId,
-        },
-        if (targetContactId != null && targetContactId.isNotEmpty) ...{
-          'contactId': targetContactId,
-          'contact_id': targetContactId,
-        },
-        if (targetDealId != null && targetDealId.isNotEmpty) ...{
-          'dealId': targetDealId,
-          'deal_id': targetDealId,
-        },
-        if (ownerId != null && ownerId.isNotEmpty) ...{
-          'ownerId': ownerId,
-          'owner_id': ownerId,
-        },
-        'queue': _selectedQueue != 'None' ? _selectedQueue : null,
-        'reminderType': _reminderText != 'No reminder' ? _reminderText.toLowerCase() : 'none',
+        'reminderType': _resolveReminderType(),
+        if (_customReminderAt != null)
+          'customReminderAt': _customReminderAt!.toUtc().toIso8601String(),
+        if (priority != null) 'priority': priority,
+        if (ownerId != null && ownerId.isNotEmpty) 'ownerId': ownerId,
+        if (_selectedQueue != 'None' && _selectedQueue.isNotEmpty) 'queue': _selectedQueue,
+        if (contactId != null) 'contactId': contactId,
+        if (companyId != null) 'companyId': companyId,
+        if (dealId != null) 'dealId': dealId,
+        if (associations.isNotEmpty) 'associations': associations,
+        // status is only accepted on update.
+        if (isEditing && editedStatus != null) 'status': editedStatus,
       };
 
-      final isEditing = widget.taskToEdit != null &&
-          widget.taskToEdit!.id != null &&
-          widget.taskToEdit!.id!.isNotEmpty;
+      debugPrint('[${isEditing ? 'PATCH' : 'POST'} ${ApiConstants.activities} PAYLOAD]: $payload');
 
-      final fallbackId = widget.taskToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
-
-      Response res;
-      if (isEditing) {
-        final taskId = widget.taskToEdit!.id!;
-        try {
-          res = await ApiService().put(
-            '${ApiConstants.activities}/$taskId',
-            data: taskPayload,
-          );
-        } catch (_) {
-          res = await ApiService().patch(
-            '${ApiConstants.activities}/$taskId',
-            data: taskPayload,
-          );
-        }
-      } else {
-        try {
-          res = await ApiService().post(
-            ApiConstants.activities,
-            data: taskPayload,
-          );
-        } catch (e1) {
-          try {
-            res = await ApiService().post(
-              '/tasks',
-              data: taskPayload,
+      final Response res = isEditing
+          ? await ApiService().patch(
+              '${ApiConstants.activities}/$taskId',
+              data: payload,
+            )
+          : await ApiService().post(
+              ApiConstants.activities,
+              data: payload,
             );
-          } catch (_) {
-            throw e1;
-          }
-        }
-      }
 
-      debugPrint('[POST /api/activities SUCCESS]: ${res.statusCode} -> ${res.data}');
+      debugPrint('[${isEditing ? 'PATCH' : 'POST'} ${ApiConstants.activities} SUCCESS]: ${res.statusCode} -> ${res.data}');
 
+      // 201/200 answer with the raw activity object; tolerate wrapped shapes.
       Map<String, dynamic> dataMap = {};
       if (res.data is Map) {
         final rawMap = Map<String, dynamic>.from(res.data as Map);
@@ -1373,56 +1501,68 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         }
       }
 
-      final createdId = (dataMap['id'] ?? dataMap['_id'] ?? dataMap['activityId'] ?? dataMap['activity_id'])?.toString() ?? fallbackId;
-      await ActivityAssociationStorage.saveAssociations(createdId, _associations);
+      final createdId = (dataMap['id'] ??
+                  dataMap['_id'] ??
+                  dataMap['activityId'] ??
+                  dataMap['activity_id'])
+              ?.toString() ??
+          taskId ??
+          '';
 
-      if (mounted) {
-        final createdTask = TaskModel(
-          id: createdId,
-          title: finalTitle,
-          dueDate: scheduledAtIso,
-          priority: _selectedPriority,
-          status: dataMap['status']?.toString() ?? 'pending',
-          assignedTo: _selectedAssignee != 'Select ...' ? _selectedAssignee : 'Admin User',
-          notes: notesText,
-          taskType: _selectedTaskType,
-          queue: _selectedQueue,
-          activityDateText: _activityDateText,
-          reminderText: _reminderText,
-          rawMap: dataMap.isNotEmpty ? dataMap : taskPayload,
-        );
-
-        Navigator.of(context).pop(createdTask);
+      if (createdId.isNotEmpty) {
+        await ActivityAssociationStorage.saveAssociations(createdId, _associations);
       }
-    } catch (e) {
-      debugPrint('[CREATE TASK API ERROR]: $e');
-      if (mounted) {
-        String errorMsg = e.toString();
-        if (e is DioException) {
-          final resData = e.response?.data;
-          if (resData is Map && resData['message'] != null) {
-            errorMsg = resData['message'].toString();
-          } else if (resData is Map && resData['error'] != null) {
-            errorMsg = resData['error'].toString();
-          } else if (resData is String && resData.isNotEmpty) {
-            errorMsg = resData;
-          } else if (e.message != null && e.message!.isNotEmpty) {
-            errorMsg = e.message!;
-          }
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save task: $errorMsg'),
-            backgroundColor: Colors.red,
+
+      if (!mounted) return;
+
+      final savedTask = TaskModel(
+        id: createdId.isNotEmpty ? createdId : null,
+        title: titleText,
+        dueDate: (dataMap['scheduledAt'] ?? dataMap['dueDate'])?.toString() ?? scheduledAtIso,
+        priority: _selectedPriority,
+        status: dataMap['status']?.toString() ??
+            (isEditing ? widget.taskToEdit!.status : 'pending'),
+        assignedTo: _selectedAssignee != 'Select ...' ? _selectedAssignee : 'Admin User',
+        notes: notesText,
+        taskType: _selectedTaskType,
+        queue: _selectedQueue,
+        activityDateText: _activityDateText,
+        reminderText: _reminderText,
+        rawMap: dataMap.isNotEmpty ? dataMap : payload,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isEditing ? 'Task updated successfully!' : 'Task created successfully!',
+            style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
           ),
-        );
-      }
+          backgroundColor: const Color(0xFF00A884),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Returning the task closes the sheet and tells the caller to refresh.
+      Navigator.of(context).pop(savedTask);
+    } catch (e, stack) {
+      debugPrint('[SAVE TASK ERROR]: $e\n$stack');
+      _showError('Failed to save task: ${_describeError(e)}');
     } finally {
+      // Always release the button, whatever happened above.
       if (mounted) {
         setState(() {
           _isSubmitting = false;
         });
       }
     }
+  }
+
+  /// The API status enum is lowercase (`pending` · `completed` · `cancelled` ·
+  /// `reopened`); the UI carries mixed casing. Anything outside the enum
+  /// returns null so the field is left untouched rather than overwritten.
+  static String? _normalizeStatus(String status) {
+    final normalized = status.trim().toLowerCase();
+    const allowed = {'pending', 'completed', 'cancelled', 'reopened'};
+    return allowed.contains(normalized) ? normalized : null;
   }
 }

@@ -545,7 +545,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 );
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1),
+                                    builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
@@ -557,7 +557,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 );
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1),
+                                    builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
@@ -571,7 +571,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 );
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1),
+                                    builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);

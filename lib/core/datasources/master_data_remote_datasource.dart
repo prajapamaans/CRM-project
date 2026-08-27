@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import '../network/api_constants.dart';
 import '../network/api_service.dart';
@@ -58,30 +60,46 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   MasterDataRemoteDataSourceImpl({ApiService? apiService})
       : _apiService = apiService ?? ApiService();
 
+  /// `GET /api/msp-options` answers with a direct JSON array of names,
+  /// e.g. `["Magnit", "Beeline", "agileOne"]` — there is no `data` wrapper.
   @override
   Future<List<MspOptionModel>> getMspOptions() async {
     final response = await _apiService.get(ApiConstants.mspOptions);
     debugPrint('[GET ${ApiConstants.mspOptions} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
-    List<dynamic> list = [];
+    List<dynamic> list = const [];
 
     if (rawData is List) {
       list = rawData;
-    } else if (rawData is Map<String, dynamic>) {
-      if (rawData['data'] is List) {
-        list = rawData['data'] as List;
-      } else if (rawData['items'] is List) {
-        list = rawData['items'] as List;
-      } else if (rawData.containsKey('id') && rawData.containsKey('name')) {
-        return [MspOptionModel.fromJson(rawData)];
-      }
+    } else if (rawData is String && rawData.trim().isNotEmpty) {
+      // Served without a JSON content type — decode it ourselves.
+      final decoded = jsonDecode(rawData);
+      if (decoded is List) list = decoded;
+    } else if (rawData is Map) {
+      final map = Map<String, dynamic>.from(rawData);
+      final wrapped = map['data'] ?? map['items'] ?? map['mspOptions'];
+      if (wrapped is List) list = wrapped;
     }
 
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map((json) => MspOptionModel.fromJson(json))
-        .toList();
+    final options = <MspOptionModel>[];
+    final seen = <String>{};
+
+    for (var i = 0; i < list.length; i++) {
+      final entry = list[i];
+      MspOptionModel? option;
+
+      if (entry is String) {
+        option = MspOptionModel.fromValue(entry, position: i);
+      } else if (entry is Map) {
+        option = MspOptionModel.fromJson(Map<String, dynamic>.from(entry));
+      }
+
+      if (option == null || option.name.isEmpty) continue;
+      if (seen.add(option.name.toLowerCase())) options.add(option);
+    }
+
+    return options;
   }
 
   @override

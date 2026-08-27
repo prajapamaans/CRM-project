@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/providers/master_data_provider.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/widgets/searchable_dropdown_form_field.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
@@ -58,6 +59,8 @@ class _CreateContactModalState extends State<CreateContactModal> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<CompanyProvider>().fetchCompanies();
       context.read<MasterDataProvider>().fetchAllMasterData();
+      // The form has an MSP field — make sure GET /api/msp-options ran.
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
       final auth = context.read<AuthProvider>();
       if (auth.currentUser != null) {
         setState(() {
@@ -477,32 +480,26 @@ class _CreateContactModalState extends State<CreateContactModal> {
                   const SizedBox(height: 6),
                   Consumer<MasterDataProvider>(
                     builder: (context, masterProvider, child) {
-                      final mspOptions = masterProvider.mspOptions
-                          .map((e) => e.name)
-                          .toList();
+                      final apiMsps =
+                          MspFieldUtils.optionsWith(masterProvider, _selectedMsp);
+                      final placeholder = MspFieldUtils.placeholder(masterProvider);
 
                       final mspItems = [
                         DropdownSearchItem<String>(
                           value: '',
-                          label: 'Select an MSP',
+                          label: placeholder,
                         ),
-                        if (mspOptions.isNotEmpty)
-                          ...mspOptions.map(
-                            (msp) => DropdownSearchItem<String>(
-                              value: msp,
-                              label: msp,
-                            ),
-                          )
-                        else ...[
-                          DropdownSearchItem(value: 'MSP 1', label: 'MSP 1'),
-                          DropdownSearchItem(value: 'MSP 2', label: 'MSP 2'),
-                          DropdownSearchItem(value: 'MSP 3', label: 'MSP 3'),
-                        ]
+                        ...apiMsps.map(
+                          (msp) => DropdownSearchItem<String>(
+                            value: msp,
+                            label: msp,
+                          ),
+                        ),
                       ];
 
                       return SearchableDropdownFormField<String>(
                         initialValue: _selectedMsp ?? '',
-                        hintText: 'Select an MSP',
+                        hintText: placeholder,
                         items: mspItems,
                         onChanged: (val) {
                           setState(() {

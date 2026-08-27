@@ -65,15 +65,54 @@ class SearchableDropdownFormField<T> extends FormField<T> {
 
             return InkWell(
               onTap: () async {
-                final selected = await showModalBottomSheet<T>(
+                final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+                if (renderBox == null) return;
+                final size = renderBox.size;
+                final offset = renderBox.localToGlobal(Offset.zero);
+
+                final selected = await showDialog<T>(
                   context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (ctx) => _SearchableDropdownModal<T>(
-                    title: hintText,
-                    items: items,
-                    selectedValue: state.value,
-                  ),
+                  barrierDismissible: true,
+                  barrierColor: Colors.black26,
+                  builder: (dialogCtx) {
+                    final mediaQuery = MediaQuery.of(dialogCtx);
+                    final screenHeight = mediaQuery.size.height;
+                    final dropdownHeight = items.length > 5 ? 260.0 : (items.length * 48.0 + 60.0).clamp(120.0, 260.0);
+                    final spaceBelow = screenHeight - offset.dy - size.height;
+                    final showAbove = spaceBelow < dropdownHeight && offset.dy > dropdownHeight;
+                    final topPos = showAbove
+                        ? (offset.dy - dropdownHeight - 4).clamp(10.0, screenHeight - 100.0)
+                        : (offset.dy + size.height + 4).clamp(10.0, screenHeight - dropdownHeight - 10.0);
+
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: offset.dx.clamp(8.0, mediaQuery.size.width - size.width - 8.0),
+                          top: topPos,
+                          width: size.width,
+                          child: Material(
+                            elevation: 8,
+                            borderRadius: BorderRadius.circular(10),
+                            color: Colors.white,
+                            shadowColor: Colors.black26,
+                            child: Container(
+                              height: dropdownHeight,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+                              ),
+                              child: _SearchableDropdownModal<T>(
+                                title: hintText,
+                                items: items,
+                                selectedValue: state.value,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 );
 
                 if (selected != null || state.value != null) {
@@ -152,10 +191,10 @@ class _SearchableDropdownModal<T> extends StatefulWidget {
 
   @override
   State<_SearchableDropdownModal<T>> createState() =>
-      __SearchableDropdownModalState<T>();
+      _SearchableDropdownModalState<T>();
 }
 
-class __SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T>> {
+class _SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T>> {
   String _searchQuery = '';
 
   @override
@@ -168,59 +207,16 @@ class __SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T
       return labelMatch || subMatch;
     }).toList();
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.65,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        children: [
-          // Drag handle
-          const SizedBox(height: 10),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFFCBD5E1),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Header
+    return Column(
+      children: [
+        if (widget.items.length > 3)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  widget.title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1E293B),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded, color: Color(0xFF64748B)),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // Search input box
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.all(8.0),
             child: Container(
-              height: 42,
+              height: 36,
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
               child: TextField(
@@ -230,120 +226,117 @@ class __SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T
                   });
                 },
                 style: GoogleFonts.poppins(
-                  fontSize: 13.5,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w500,
                   color: const Color(0xFF1E293B),
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Search...',
+                  hintText: 'Search ${widget.title}...',
                   hintStyle: GoogleFonts.poppins(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 12,
                     color: const Color(0xFF94A3B8),
                   ),
                   prefixIcon: const Icon(
                     Icons.search_rounded,
                     color: Color(0xFF94A3B8),
-                    size: 20,
+                    size: 16,
                   ),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
-          // Items list
-          Expanded(
-            child: filteredItems.isEmpty
-                ? Center(
-                    child: Text(
-                      'No options found',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFF64748B),
-                      ),
+        // Items list
+        Expanded(
+          child: filteredItems.isEmpty
+              ? Center(
+                  child: Text(
+                    'No options found',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF64748B),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: filteredItems.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(height: 1, color: Color(0xFFF1F5F9)),
-                    itemBuilder: (context, index) {
-                      final item = filteredItems[index];
-                      final isSelected = item.value == widget.selectedValue;
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: filteredItems.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                  itemBuilder: (context, index) {
+                    final item = filteredItems[index];
+                    final isSelected = item.value == widget.selectedValue;
 
-                      return InkWell(
-                        onTap: () {
-                          Navigator.of(context).pop(item.value);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                          color: isSelected ? const Color(0xFFF0FDF4) : Colors.transparent,
-                          child: Row(
-                            children: [
-                              if (item.dotColor != null) ...[
-                                Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    color: item.dotColor,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                              ],
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.label,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13.5,
-                                        fontWeight: isSelected
-                                            ? FontWeight.w600
-                                            : FontWeight.w500,
-                                        color: isSelected
-                                            ? const Color(0xFF00A884)
-                                            : const Color(0xFF1E293B),
-                                      ),
-                                    ),
-                                    if (item.subtext != null &&
-                                        item.subtext!.isNotEmpty)
-                                      Text(
-                                        item.subtext!,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                          color: const Color(0xFF64748B),
-                                        ),
-                                      ),
-                                  ],
+                    return InkWell(
+                      onTap: () {
+                        Navigator.of(context).pop(item.value);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        color: isSelected ? const Color(0xFFF0FDF4) : Colors.transparent,
+                        child: Row(
+                          children: [
+                            if (item.dotColor != null) ...[
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: item.dotColor,
+                                  shape: BoxShape.circle,
                                 ),
                               ),
-                              if (isSelected)
-                                const Icon(
-                                  Icons.check_rounded,
-                                  color: Color(0xFF00A884),
-                                  size: 18,
-                                ),
+                              const SizedBox(width: 8),
                             ],
-                          ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.label,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12.5,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.w500,
+                                      color: isSelected
+                                          ? const Color(0xFF00A884)
+                                          : const Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                  if (item.subtext != null &&
+                                      item.subtext!.isNotEmpty)
+                                    Text(
+                                      item.subtext!,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        color: const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (isSelected)
+                              const Icon(
+                                Icons.check_rounded,
+                                color: Color(0xFF00A884),
+                                size: 16,
+                              ),
+                          ],
                         ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

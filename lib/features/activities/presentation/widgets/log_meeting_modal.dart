@@ -209,8 +209,17 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     if (em != null) {
       _titleController.text = parseActivityDescription(em.title);
       _notesController.text = parseActivityDescription(em.notes);
-      _selectedOutcome = em.outcome;
-      _selectedDuration = em.duration;
+      if (em.outcome.trim().isNotEmpty) {
+        _selectedOutcome = _canonicalOutcome(em.outcome);
+      }
+      // The value may arrive as '30', '30m' or '30 Minutes' depending on the
+      // screen that opened this form — normalise it onto a picker option.
+      final raw = em.rawMap;
+      final minutes = parseDurationMinutes(em.duration) ??
+          parseDurationMinutes(raw?['durationMinutes'] ?? raw?['duration_minutes']);
+      if (minutes != null) {
+        _selectedDuration = formatDurationLabel(minutes);
+      }
     }
 
     final cId = widget.contactId ?? em?.contactId;
@@ -222,13 +231,24 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
       'Contacts': cId != null && cId.isNotEmpty ? [{'id': cId, 'name': widget.associatedRecordName}] : [],
       'Deals': dId != null && dId.isNotEmpty ? [{'id': dId, 'name': widget.associatedRecordName}] : [],
     };
-    final now = DateTime.now();
-    final d = now.day.toString().padLeft(2, '0');
-    final m = now.month.toString().padLeft(2, '0');
-    final y = now.year.toString();
+    final scheduledAt = em == null
+        ? null
+        : parseActivityDateTimeOrNull(em.startTime) ??
+            parseActivityDateTimeOrNull(em.rawMap?['scheduledAt'] ?? em.rawMap?['scheduled_at']);
     _startTimeController = TextEditingController(
-      text: (em != null && em.startTime.isNotEmpty) ? em.startTime : '$m/$d/$y 6:13 PM',
+      text: formatActivityDateTimeInput(scheduledAt ?? DateTime.now()),
     );
+  }
+
+  /// Matches a stored outcome (often lowercase, e.g. `completed`) back onto the
+  /// option label so the picker shows the value the meeting was saved with.
+  String _canonicalOutcome(String raw) {
+    final value = raw.trim();
+    for (final option in _outcomes) {
+      if (option.toLowerCase() == value.toLowerCase()) return option;
+    }
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
   }
 
   @override
@@ -273,12 +293,17 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
   Widget build(BuildContext context) {
     final bool canSubmit = _titleController.text.trim().isNotEmpty;
     final provider = context.watch<MasterDataProvider>();
-    final outcomes = provider.meetingOutcomeOptions.isNotEmpty
-        ? provider.meetingOutcomeOptions.map((o) => o.label).toList()
-        : _outcomes;
+    // Growable copy, and the meeting's own outcome is appended rather than
+    // replaced — overwriting it here silently discarded the saved value.
+    final outcomes = <String>[
+      if (provider.meetingOutcomeOptions.isNotEmpty)
+        ...provider.meetingOutcomeOptions.map((o) => o.label)
+      else
+        ..._outcomes,
+    ];
 
-    if (!outcomes.contains(_selectedOutcome) && outcomes.isNotEmpty) {
-      _selectedOutcome = outcomes.first;
+    if (_selectedOutcome.isNotEmpty && !outcomes.contains(_selectedOutcome)) {
+      outcomes.add(_selectedOutcome);
     }
 
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -323,30 +348,6 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                 ),
                 Row(
                   children: [
-                    IconButton(
-                      onPressed: () {
-                        setState(() {
-                          _titleController.clear();
-                          _notesController.clear();
-                          _createFollowUpTask = false;
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Meeting form data refreshed'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                      icon: const Icon(
-                        Icons.refresh_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                      tooltip: 'Refresh Form Data',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                    const SizedBox(width: 14),
                     const Icon(Icons.drag_indicator_rounded, color: Colors.white70, size: 18),
                     const SizedBox(width: 14),
                     IconButton(
@@ -829,16 +830,27 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                                 assocList.add({'objectId': id, 'objectType': 'deal'});
                               }
 
+                              // The API stores these as durationMinutes (int)
+                              // and scheduledAt (ISO); the display strings are
+                              // kept for the endpoints that echo them back.
+                              final durationMinutes = parseDurationMinutes(_selectedDuration);
+                              final scheduledAt =
+                                  parseActivityDateTimeOrNull(_startTimeController.text.trim());
+
                               final meetingData = {
                                 'title': title.isNotEmpty ? title : 'Meeting Activity',
                                 'type': 'meeting',
                                 'outcome': outcomeValue,
                                 'duration': _selectedDuration,
+                                if (durationMinutes != null) 'durationMinutes': durationMinutes,
+                                if (scheduledAt != null)
+                                  'scheduledAt': scheduledAt.toUtc().toIso8601String(),
                                 'startTime': _startTimeController.text.trim(),
                                 'notes': notes,
                                 'description': notes,
                                 'createFollowUpTask': _createFollowUpTask,
-                                'activityDate': DateTime.now().toIso8601String(),
+                                'activityDate': (scheduledAt ?? DateTime.now()).toIso8601String(),
+                                if (assocList.isNotEmpty) 'associations': assocList,
                                 'associationsList': assocList,
                                 'associations_list': assocList,
                                 'companyIds': companyIds,
@@ -866,11 +878,12 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                               Response? res;
                               try {
                                 if (existingId != null && existingId.isNotEmpty) {
-                                  try {
-                                    res = await ApiService().put('${ApiConstants.activities}/$existingId', data: meetingData);
-                                  } catch (e) {
-                                    res = await ApiService().patch('${ApiConstants.activities}/$existingId', data: meetingData);
-                                  }
+                                  // PATCH /api/activities/:id is the documented
+                                  // update route; PUT is not exposed.
+                                  res = await ApiService().patch(
+                                    '${ApiConstants.activities}/$existingId',
+                                    data: meetingData,
+                                  );
                                 } else {
                                   res = await ApiService().post(ApiConstants.activities, data: meetingData);
                                 }

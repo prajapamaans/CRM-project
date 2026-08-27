@@ -176,13 +176,7 @@ class _MoreSheetContent extends StatelessWidget {
 
                     // SECTION 3: CONTENT
                     _buildSectionTitle('CONTENT'),
-                    _buildMenuItem(
-                      context,
-                      navProvider: navProvider,
-                      icon: Icons.folder_open_outlined,
-                      title: 'Documents',
-                      screenIndex: 15,
-                    ),
+
                     _buildMenuItem(
                       context,
                       navProvider: navProvider,

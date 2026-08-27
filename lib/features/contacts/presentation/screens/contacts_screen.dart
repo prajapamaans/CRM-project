@@ -23,7 +23,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = false;
+  bool _isFilterExpanded = true;
   final Set<String> _selectedContactIds = {};
 
   @override
@@ -87,7 +87,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final provider = context.read<ContactProvider>();
     final idsToDelete = List<String>.from(_selectedContactIds);
@@ -163,6 +163,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     },
                     isFilterActive: contactProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
+                    onToggleFilterExpanded: () {
+                      setState(() {
+                        _isFilterExpanded = !_isFilterExpanded;
+                      });
+                    },
                     onRefreshTap: () {
                       context.read<ContactProvider>().fetchContacts();
                     },

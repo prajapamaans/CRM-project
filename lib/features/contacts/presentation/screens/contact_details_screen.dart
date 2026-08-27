@@ -5,7 +5,10 @@ import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
+import '../../../../core/utils/msp_field_utils.dart';
 import '../../../../core/models/bingo_summary_model.dart';
+import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/widgets/add_association_modal.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
@@ -30,10 +33,15 @@ class ContactDetailsScreen extends StatefulWidget {
   final ContactModel? contact;
   final int initialTabIndex;
 
+  /// Activity to scroll to and highlight in the All-activities list, e.g. the
+  /// one the user tapped on the Calls, Meetings, Emails or Tasks screen.
+  final String? highlightActivityId;
+
   const ContactDetailsScreen({
     super.key,
     this.contact,
     this.initialTabIndex = 0,
+    this.highlightActivityId,
   });
 
   @override
@@ -153,6 +161,14 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
+
+  /// Activity highlighted in the All-activities list. Seeded from
+  /// [ContactDetailsScreen.highlightActivityId] and moved when the user taps
+  /// another row, so only ever one row is highlighted.
+  String? _highlightedActivityId;
+  final GlobalKey _highlightedActivityKey = GlobalKey();
+  final ScrollController _activitiesScrollController = ScrollController();
+  bool _hasScrolledToHighlight = false;
   String _lastActivityDateStr = '--';
 
   @override
@@ -181,9 +197,22 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     _lifecycleStage = c?.lifecycleStage ?? 'Added';
     _leadStatus = c?.leadStatus ?? '';
 
+    final highlightId = widget.highlightActivityId?.trim();
+    if (highlightId != null && highlightId.isNotEmpty) {
+      _highlightedActivityId = highlightId;
+      // 'All activities' is the only sub-tab guaranteed to contain it.
+      _selectedActivitySubTab = 0;
+    }
+
     _fetchActivities();
     _fetchUsers();
     _fetchContactDetails();
+
+    // This screen has an MSP field — make sure GET /api/msp-options ran.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MasterDataProvider>().ensureMspOptionsLoaded();
+    });
   }
 
   bool _isLoadingDetails = false;
@@ -275,10 +304,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
           if (contactModel.msp != null && contactModel.msp!.isNotEmpty) {
             _mspController.text = contactModel.msp!;
-            _associatedMsps = [{'name': contactModel.msp!}];
-          } else {
-            _associatedMsps = [];
           }
+          // Several MSPs can be stored on one record as a comma-separated
+          // string; keeping them whole showed 'Magnit, Beeline' as one entry.
+          _associatedMsps = MspFieldUtils.namesFrom(contactModel.msp)
+              .map((name) => {
+                    'id': name,
+                    'name': name,
+                    'subtext': 'Managed Service Provider',
+                  })
+              .toList();
         });
       }
     } catch (e) {
@@ -575,12 +610,31 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         setState(() {
           _isLoadingActivities = false;
         });
+        // The timeline is populated now, so the highlighted row can be located.
+        _scrollToHighlightedActivity();
       }
     }
   }
 
+  /// Brings the highlighted activity into view once, after the timeline has
+  /// loaded. Does nothing when nothing is highlighted or the activity is not in
+  /// this record's timeline.
+  Future<void> _scrollToHighlightedActivity() async {
+    final id = _highlightedActivityId;
+    if (id == null || _hasScrolledToHighlight) return;
+    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id)) return;
+
+    // Only counts as done once it actually scrolled — if the Activities tab
+    // was not built yet, the next load tries again.
+    _hasScrolledToHighlight = await ensureListItemVisible(
+      controller: _activitiesScrollController,
+      itemKey: _highlightedActivityKey,
+    );
+  }
+
   @override
   void dispose() {
+    _activitiesScrollController.dispose();
     _tabController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
@@ -630,6 +684,12 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     return formatLastActivityDateFromList(_activities, fallback: _lastActivityDateStr);
   }
 
+  /// The MSP value to persist. The picker's 'None' entry means "no MSP".
+  String _mspValueForApi() {
+    final value = _mspController.text.trim();
+    return value == 'None' ? '' : value;
+  }
+
   Future<void> _saveContactChanges() async {
     final contactId = widget.contact?.id;
     if (contactId == null || contactId.isEmpty) return;
@@ -666,6 +726,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         'lastActivityDate': _lastActivityDateStr,
         'last_activity_date': _lastActivityDateStr,
       },
+      // Without this the MSP association (and the About field) never reached
+      // the API, so it reverted on the next load. 'None' clears the field.
+      'msp': _mspValueForApi(),
     };
 
     final success = await context.read<ContactProvider>().updateContact(contactId, payload);
@@ -1047,33 +1110,6 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                 ),
                               ),
                             ),
-                            InkWell(
-                              onTap: () {
-                                _fetchActivities();
-                                _fetchUsers();
-                                _fetchContactDetails();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Refreshing contact data...'),
-                                    duration: Duration(seconds: 1),
-                                  ),
-                                );
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFE6F4F1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF64D2B7), width: 1),
-                                ),
-                                child: const Icon(
-                                  Icons.refresh_rounded,
-                                  size: 18,
-                                  color: Color(0xFF00A884),
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 2),
@@ -1437,16 +1473,28 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   _saveContactChanges();
                 },
               ),
-              _buildAboutField(
-                'MSP',
-                'msp',
-                _mspController,
-                options: const ['MSP 1', 'MSP 2', 'MSP 3', 'None'],
-                onSelectedOption: (selected) {
-                  setState(() {
-                    _mspController.text = selected;
-                  });
-                  _saveContactChanges();
+              Builder(
+                builder: (context) {
+                  final masterProvider = context.watch<MasterDataProvider>();
+                  final mspOptionsList = <String>[
+                    ...MspFieldUtils.optionsWith(
+                      masterProvider,
+                      _mspController.text,
+                    ),
+                    'None',
+                  ];
+                  return _buildAboutField(
+                    'MSP',
+                    'msp',
+                    _mspController,
+                    options: mspOptionsList,
+                    onSelectedOption: (selected) {
+                      setState(() {
+                        _mspController.text = selected;
+                      });
+                      _saveContactChanges();
+                    },
+                  );
                 },
               ),
               _buildAboutField(
@@ -1534,7 +1582,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         taskToEdit: TaskModel(
           id: actId,
           title: titleText,
-          dueDate: (act['dueDate'] ?? act['due_date'] ?? act['scheduledAt'] ?? 'Today').toString(),
+          dueDate: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['dueDate'] ?? act['due_date'] ?? '').toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
           assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
@@ -1565,8 +1613,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
-          duration: (act['duration'] ?? '5m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1580,8 +1628,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
-          duration: (act['duration'] ?? '30m').toString(),
-          startTime: (act['startTime'] ?? '10:00 AM').toString(),
+          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
+          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1607,6 +1655,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   // ==========================================
   Widget _buildActivitiesTab() {
     return ListView(
+      controller: _activitiesScrollController,
       padding: const EdgeInsets.all(16),
       children: [
         Container(
@@ -1925,10 +1974,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                     final bool isTaskCompleted = statusVal == 'COMPLETED';
                     final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$formattedDate').toString();
                     final bool isExpanded = _expandedActivityIds.contains(actId);
+                    final bool isHighlighted = actId == _highlightedActivityId;
 
                     return InkWell(
+                      // The key rides along with the highlight so the row can be
+                      // scrolled to once the timeline has been built.
+                      key: isHighlighted ? _highlightedActivityKey : null,
                       onTap: () {
                         setState(() {
+                          // Selecting a row moves the highlight off the previous one.
+                          _highlightedActivityId = actId;
                           if (isExpanded) {
                             _expandedActivityIds.remove(actId);
                           } else {
@@ -1941,11 +1996,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: isHighlighted ? const Color(0xFFE6F4F1) : Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: isExpanded ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-                            width: isExpanded ? 1.5 : 1,
+                            color: isExpanded || isHighlighted
+                                ? const Color(0xFF00A884)
+                                : const Color(0xFFE2E8F0),
+                            width: isExpanded || isHighlighted ? 1.5 : 1,
                           ),
                         ),
                         child: Row(
@@ -1959,15 +2016,26 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                       value: isTaskCompleted,
                                       activeColor: const Color(0xFF00A884),
                                       onChanged: (bool? newValue) async {
-                                        final newStatus = newValue == true ? 'COMPLETED' : 'PENDING';
-                                        final updateData = Map<String, dynamic>.from(act);
-                                        updateData['status'] = newStatus;
+                                        // PATCH just the changed field: PUT is not a
+                                        // route, and echoing the whole activity back
+                                        // failed validation, so the toggle never stuck.
+                                        final newStatus = newValue == true ? 'completed' : 'pending';
                                         try {
-                                          await ApiService().put('${ApiConstants.activities}/$actId', data: updateData);
-                                        } catch (_) {}
-                                        try {
-                                          await ApiService().put('/tasks/$actId', data: updateData);
-                                        } catch (_) {}
+                                          await ApiService().patch(
+                                            '${ApiConstants.activities}/$actId',
+                                            data: {'status': newStatus},
+                                          );
+                                        } catch (e) {
+                                          debugPrint('[UPDATE ACTIVITY STATUS ERROR]: $e');
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Failed to update task status: $e'),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
+                                        }
                                         _fetchActivities();
                                       },
                                     ),
@@ -2143,15 +2211,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                               updatePayload['associationsList'] = assocList;
                                               updatePayload['associations_list'] = assocList;
 
-                                              try {
-                                                await api.put('${ApiConstants.activities}/$actId', data: updatePayload);
-                                              } catch (_) {
-                                                try {
-                                                  await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                } catch (_) {
-                                                  await api.post('${ApiConstants.activities}/$actId', data: updatePayload);
-                                                }
-                                              }
+                                              // PATCH /api/activities/:id is the
+                                              // documented update route.
+                                              await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
                                               if (context.mounted) {
                                                 ScaffoldMessenger.of(context).showSnackBar(
                                                   const SnackBar(
@@ -2779,12 +2841,27 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           entityType: 'msp',
           associatedItems: _associatedMsps,
           onPressed: () async {
-            final res = await AssociateMspModal.show(context, initialMsp: _mspController.text.trim());
-            if (res != null && res.isNotEmpty) {
+            final currentMsps = _associatedMsps
+                .map((m) => (m['name'] ?? '').toString())
+                .where((s) => s.isNotEmpty)
+                .toList();
+            final res = await AssociateMspModal.show(
+              context,
+              initialSelectedMsps: currentMsps.isNotEmpty
+                  ? currentMsps
+                  : (_mspController.text.trim().isNotEmpty ? [_mspController.text.trim()] : null),
+            );
+            if (res != null) {
+              final newMspString = res.join(', ');
               setState(() {
-                _mspController.text = res.join(', ');
-                _associatedMsps = res.map((m) => {'name': m}).toList();
+                _mspController.text = newMspString;
+                _associatedMsps = res.map((m) => {
+                  'id': m,
+                  'name': m,
+                  'subtext': 'Managed Service Provider',
+                }).toList();
               });
+              _saveContactChanges();
             }
           },
         ),

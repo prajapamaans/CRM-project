@@ -28,6 +28,7 @@ class NotificationProvider extends ChangeNotifier {
     String? contactId,
     String? dealId,
     String? createdDateRange,
+    String? departmentId,
     int? limit = 50,
   }) async {
     _isLoading = true;
@@ -41,6 +42,7 @@ class NotificationProvider extends ChangeNotifier {
         contactId: contactId,
         dealId: dealId,
         createdDateRange: createdDateRange,
+        departmentId: departmentId,
         limit: limit,
       );
       _state = NotificationState.loaded;
@@ -112,5 +114,13 @@ class NotificationProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error marking all notifications as read: $e');
     }
+  }
+
+  /// Deletes notification by ID via DELETE /api/activities/notifications/:id
+  /// and removes it from the local provider list upon success.
+  Future<void> deleteNotification(String notificationId) async {
+    await _repository.deleteNotification(notificationId);
+    _notifications.removeWhere((n) => n.id == notificationId);
+    notifyListeners();
   }
 }

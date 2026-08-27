@@ -27,6 +27,7 @@ class DealProvider extends ChangeNotifier {
   String? _selectedPriority;
   String? _selectedCreateDate;
   String? _selectedStaleDays;
+  String? _selectedMsp;
 
   // Sorting
   ContactSortOption _sortOption = ContactSortOption.mostRecent;
@@ -82,6 +83,17 @@ class DealProvider extends ChangeNotifier {
       }).toList();
     }
 
+    // Apply MSP filter
+    if (_selectedMsp != null &&
+        _selectedMsp!.isNotEmpty &&
+        _selectedMsp != 'All MSPs' &&
+        _selectedMsp != 'all') {
+      filtered = filtered.where((d) {
+        final msp = (d.msp ?? '').toLowerCase();
+        return msp.contains(_selectedMsp!.toLowerCase());
+      }).toList();
+    }
+
     // Apply Sorting
     switch (_sortOption) {
       case ContactSortOption.aToZ:
@@ -107,6 +119,7 @@ class DealProvider extends ChangeNotifier {
   String? get selectedPriority => _selectedPriority;
   String? get selectedCreateDate => _selectedCreateDate;
   String? get selectedStaleDays => _selectedStaleDays;
+  String? get selectedMsp => _selectedMsp;
   ContactSortOption get sortOption => _sortOption;
 
   bool get isFilterActive =>
@@ -123,6 +136,10 @@ class DealProvider extends ChangeNotifier {
           _selectedPriority!.isNotEmpty &&
           _selectedPriority != 'Select a priority' &&
           _selectedPriority != 'all') ||
+      (_selectedMsp != null &&
+          _selectedMsp!.isNotEmpty &&
+          _selectedMsp != 'All MSPs' &&
+          _selectedMsp != 'all') ||
       (_selectedCreateDate != null && _selectedCreateDate!.isNotEmpty);
 
   int get totalCount => isFilterActive ? deals.length : _totalCount;
@@ -147,6 +164,11 @@ class DealProvider extends ChangeNotifier {
 
   void setStageFilter(String? stage) {
     _selectedStage = stage;
+    notifyListeners();
+  }
+
+  void setMspFilter(String? msp) {
+    _selectedMsp = msp;
     notifyListeners();
   }
 

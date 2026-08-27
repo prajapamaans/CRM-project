@@ -108,6 +108,95 @@ String formatActivityDateTime(DateTime dt, {bool multiLine = true}) {
   return '$month/$day/$year $timeStr $tzStr';
 }
 
+/// Parses whatever an activity carries as a duration into whole minutes:
+/// `30`, `'30'`, `'30m'`, `'30 Minutes'`, `'1 Hour'`, `'1h 30m'`.
+/// Returns null when nothing sensible can be read.
+int? parseDurationMinutes(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is num) {
+    final minutes = raw.round();
+    return minutes > 0 ? minutes : null;
+  }
+
+  final text = raw.toString().trim().toLowerCase();
+  if (text.isEmpty) return null;
+
+  final plain = int.tryParse(text);
+  if (plain != null) return plain > 0 ? plain : null;
+
+  int total = 0;
+  final hourMatch = RegExp(r'(\d+)\s*(h|hr|hrs|hour|hours)\b').firstMatch(text);
+  if (hourMatch != null) total += int.parse(hourMatch.group(1)!) * 60;
+
+  final minuteMatch = RegExp(r'(\d+)\s*(m|min|mins|minute|minutes)\b').firstMatch(text);
+  if (minuteMatch != null) total += int.parse(minuteMatch.group(1)!);
+
+  if (total == 0) {
+    // A bare leading number, e.g. "45 (custom)".
+    final leading = RegExp(r'^(\d+)').firstMatch(text);
+    if (leading != null) total = int.parse(leading.group(1)!);
+  }
+
+  return total > 0 ? total : null;
+}
+
+/// Renders minutes with the same wording the duration pickers use, so a stored
+/// value lines up with an existing option instead of showing as a stray entry.
+String formatDurationLabel(int minutes) {
+  if (minutes <= 0) return '15 Minutes';
+  if (minutes % 60 == 0) {
+    final hours = minutes ~/ 60;
+    return hours == 1 ? '1 Hour' : '$hours Hours';
+  }
+  return '$minutes Minutes';
+}
+
+/// Parses an activity's scheduled date/time. Accepts ISO-8601 as well as the
+/// `MM/dd/yyyy h:mm AM` text the call/meeting forms display.
+DateTime? parseActivityDateTimeOrNull(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is DateTime) return raw;
+
+  final text = raw.toString().trim();
+  if (text.isEmpty) return null;
+
+  final iso = DateTime.tryParse(text);
+  if (iso != null) return iso.isUtc ? iso.toLocal() : iso;
+
+  final match = RegExp(
+    r'^(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$',
+    caseSensitive: false,
+  ).firstMatch(text);
+  if (match == null) return null;
+
+  var hour = int.tryParse(match.group(4) ?? '0') ?? 0;
+  final minute = int.tryParse(match.group(5) ?? '0') ?? 0;
+  final period = match.group(6)?.toUpperCase();
+  if (period != null) {
+    hour = hour % 12;
+    if (period == 'PM') hour += 12;
+  }
+
+  return DateTime(
+    int.parse(match.group(3)!),
+    int.parse(match.group(1)!),
+    int.parse(match.group(2)!),
+    hour,
+    minute,
+  );
+}
+
+/// `MM/dd/yyyy h:mm AM` — the format the call and meeting start-time fields use.
+String formatActivityDateTimeInput(DateTime dt) {
+  final month = dt.month.toString().padLeft(2, '0');
+  final day = dt.day.toString().padLeft(2, '0');
+  var hour = dt.hour % 12;
+  if (hour == 0) hour = 12;
+  final minute = dt.minute.toString().padLeft(2, '0');
+  final period = dt.hour >= 12 ? 'PM' : 'AM';
+  return '$month/$day/${dt.year} $hour:$minute $period';
+}
+
 /// Dynamic calculation of Last Activity Date from sorted activities list.
 String formatLastActivityDateFromList(List<dynamic> activities, {String fallback = '--', bool multiLine = true}) {
   if (activities.isEmpty) return fallback;
