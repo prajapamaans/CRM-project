@@ -33,7 +33,9 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../core/navigation/app_router.dart';
 import '../core/providers/font_size_provider.dart';
 import '../core/providers/master_data_provider.dart';
 import '../features/activities/presentation/providers/meeting_scheduler_provider.dart';
@@ -44,13 +46,23 @@ import '../features/dashboard/presentation/providers/dashboard_provider.dart';
 import '../features/deals/presentation/providers/deal_provider.dart';
 import '../features/departments/presentation/providers/department_provider.dart';
 import '../features/navigation/presentation/providers/navigation_provider.dart';
-import '../features/navigation/presentation/screens/splash_screen.dart';
 import '../features/notifications/presentation/providers/notification_provider.dart';
 import 'theme/app_theme.dart';
 
-/// Root Application Widget configuring providers, theme scaling, and initial home route.
-class CrmApp extends StatelessWidget {
+/// Root Application Widget configuring providers, theme scaling, and the
+/// application's single navigation tree ([AppRouter]).
+class CrmApp extends StatefulWidget {
   const CrmApp({super.key});
+
+  @override
+  State<CrmApp> createState() => _CrmAppState();
+}
+
+class _CrmAppState extends State<CrmApp> {
+  /// One AuthProvider instance shared by the widget tree and the router, so a
+  /// login or logout re-evaluates the current route immediately.
+  final AuthProvider _authProvider = AuthProvider();
+  late final GoRouter _router = AppRouter.create(_authProvider);
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +70,7 @@ class CrmApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => FontSizeProvider()),
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider.value(value: _authProvider),
         ChangeNotifierProvider(create: (_) => NavigationProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProvider(create: (_) => DepartmentProvider()),
@@ -74,9 +86,10 @@ class CrmApp extends StatelessWidget {
         builder: (context, fontProvider, child) {
           final userScale = fontProvider.fontSize / 16.0;
 
-          return MaterialApp(
+          return MaterialApp.router(
             title: 'APIDEL CRM',
             debugShowCheckedModeBanner: false,
+            routerConfig: _router,
             // Apply customized theme with selected base font size
             theme: AppTheme.getThemeWithFontSize(fontProvider.fontSize),
             builder: (context, child) {
@@ -89,8 +102,6 @@ class CrmApp extends StatelessWidget {
                 child: child!,
               );
             },
-            // Set initial screen route to SplashScreen
-            home: const SplashScreen(),
           );
         },
       ),

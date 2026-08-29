@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -24,10 +27,6 @@ import '../../data/models/contact_model.dart';
 import '../../data/repositories/contact_repository.dart';
 import '../providers/contact_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
-import 'package:crmproject/features/companies/presentation/screens/company_details_screen.dart';
-import 'package:crmproject/features/companies/data/models/company_model.dart';
-import 'package:crmproject/features/deals/presentation/screens/deal_details_screen.dart';
-import 'package:crmproject/features/deals/data/models/deal_model.dart';
 
 class ContactDetailsScreen extends StatefulWidget {
   final ContactModel? contact;
@@ -37,11 +36,16 @@ class ContactDetailsScreen extends StatefulWidget {
   /// one the user tapped on the Calls, Meetings, Emails or Tasks screen.
   final String? highlightActivityId;
 
+  /// Id of the contact to show when the screen is opened by route
+  /// (`/contacts/details/:id`) rather than handed a loaded model.
+  final String? contactId;
+
   const ContactDetailsScreen({
     super.key,
     this.contact,
     this.initialTabIndex = 0,
     this.highlightActivityId,
+    this.contactId,
   });
 
   @override
@@ -162,6 +166,14 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
 
+  /// Id of the contact on screen, whether it arrived as a loaded model or as
+  /// the `:id` path parameter of `/contacts/details/:id`.
+  String? get _recordId {
+    final routeId = widget.contactId?.trim();
+    if (routeId != null && routeId.isNotEmpty) return routeId;
+    return widget.contact?.id;
+  }
+
   /// Activity highlighted in the All-activities list. Seeded from
   /// [ContactDetailsScreen.highlightActivityId] and moved when the user taps
   /// another row, so only ever one row is highlighted.
@@ -218,7 +230,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   bool _isLoadingDetails = false;
 
   Future<void> _fetchContactDetails() async {
-    final contactId = widget.contact?.id;
+    final contactId = _recordId;
     if (contactId == null || contactId.isEmpty) return;
 
     setState(() {
@@ -533,7 +545,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   }
 
   Future<void> _fetchActivities() async {
-    final contactId = widget.contact?.id;
+    final contactId = _recordId;
     if (contactId == null || contactId.isEmpty) return;
 
     setState(() {
@@ -691,7 +703,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   }
 
   Future<void> _saveContactChanges() async {
-    final contactId = widget.contact?.id;
+    final contactId = _recordId;
     if (contactId == null || contactId.isEmpty) return;
 
     final first = _firstNameController.text.trim();
@@ -1589,21 +1601,21 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('email')) {
       result = await CreateEmailModal.show(
         context,
         emailToEdit: act,
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('note')) {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('call')) {
@@ -1618,7 +1630,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('meeting')) {
@@ -1633,14 +1645,14 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
-        contactId: widget.contact?.id,
+        contactId: _recordId,
         associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     }
@@ -2145,7 +2157,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                       onTap: () async {
                                         final initialAssoc = _extractAssociations(
                                           act,
-                                          defaultContactId: widget.contact?.id,
+                                          defaultContactId: _recordId,
                                           defaultContactName: widget.contact?.name,
                                         );
 
@@ -2236,7 +2248,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                             builder: (context) {
                                               final assocMap = _extractAssociations(
                                                 act,
-                                                defaultContactId: widget.contact?.id,
+                                                defaultContactId: _recordId,
                                                 defaultContactName: widget.contact?.name,
                                               );
                                               final cnt = assocMap['Companies']!.length + assocMap['Contacts']!.length + assocMap['Deals']!.length;
@@ -2749,7 +2761,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   onPressed: _isLoadingAiSummary
                       ? null
                       : () {
-                          final contactId = widget.contact?.id;
+                          final contactId = _recordId;
                           if (contactId != null && contactId.isNotEmpty) {
                             _fetchAiSummary('contact', contactId);
                           }
@@ -2899,7 +2911,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           isTeal: true,
           topActionText: '+ Add',
           onPressed: () async {
-            final contactId = widget.contact?.id;
+            final contactId = _recordId;
             final res = await CreateTaskModal.show(context, contactId: contactId);
             if (res != null) {
               setState(() {
@@ -2917,51 +2929,19 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
   void _navigateToEntityDetails(String entityType, Map<String, dynamic> item) {
     final id = (item['id'] ?? '').toString();
-    final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
-    final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+    if (id.isEmpty) return;
 
-    if (entityType == 'contact') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ContactDetailsScreen(
-            contact: ContactModel(
-              id: id,
-              firstName: name,
-              email: subtext,
-            ),
-          ),
-        ),
-      );
-    } else if (entityType == 'company') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CompanyDetailsScreen(
-            company: CompanyModel(
-              id: id,
-              name: name,
-              domain: subtext,
-            ),
-          ),
-        ),
-      );
-    } else if (entityType == 'deal') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DealDetailsScreen(
-            deal: DealModel(
-              id: id,
-              title: name,
-              amount: 0,
-              stage: '',
-              probability: 0,
-            ),
-          ),
-        ),
-      );
-    }
+    // /contacts|companies|deals/details/:id — the target screen loads the
+    // record from the id.
+    const routeByType = {
+      'contact': RouteNames.contactDetails,
+      'company': RouteNames.companyDetails,
+      'deal': RouteNames.dealDetails,
+    };
+    final routeName = routeByType[entityType];
+    if (routeName == null) return;
+
+    context.pushNamed(routeName, pathParameters: {RoutePaths.idParam: id});
   }
 
   Widget _buildAssociationCard({
@@ -3261,7 +3241,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   }
 
   void _openActivityModal(String type) async {
-    final contactId = widget.contact?.id;
+    final contactId = _recordId;
     final name = widget.contact?.name.isNotEmpty == true ? widget.contact!.name : 'xyzzzz';
     dynamic result;
 

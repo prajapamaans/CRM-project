@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:provider/provider.dart';
@@ -10,13 +13,6 @@ import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/create_task_modal.dart';
-import 'task_details_screen.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
-import '../../../companies/data/models/company_model.dart';
-import '../../../contacts/presentation/screens/contact_details_screen.dart';
-import '../../../contacts/data/models/contact_model.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
-import '../../../deals/data/models/deal_model.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
@@ -762,13 +758,10 @@ class _TasksScreenState extends State<TasksScreen> {
           final act = task.rawMap ?? {};
 
           String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null))?.toString();
-          String? compName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null))?.toString();
 
           String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
-          String? contactName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['name'] : null))?.toString();
 
           String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null))?.toString();
-          String? dealName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['title'] : null))?.toString();
 
           if (act['associations'] is Map) {
             final assocMap = act['associations'] as Map;
@@ -776,21 +769,18 @@ class _TasksScreenState extends State<TasksScreen> {
               final item = (assocMap['Companies'] as List).first;
               if (item is Map) {
                 compId = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-                compName = (item['name'] ?? item['title'])?.toString();
               }
             }
             if ((contactId == null || contactId.isEmpty) && assocMap['Contacts'] is List && (assocMap['Contacts'] as List).isNotEmpty) {
               final item = (assocMap['Contacts'] as List).first;
               if (item is Map) {
                 contactId = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-                contactName = (item['name'] ?? item['title'])?.toString();
               }
             }
             if ((dealId == null || dealId.isEmpty) && assocMap['Deals'] is List && (assocMap['Deals'] as List).isNotEmpty) {
               final item = (assocMap['Deals'] as List).first;
               if (item is Map) {
                 dealId = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-                dealName = (item['name'] ?? item['title'])?.toString();
               }
             }
           } else if (act['associations'] is List) {
@@ -798,17 +788,13 @@ class _TasksScreenState extends State<TasksScreen> {
               if (item is Map) {
                 final id = (item['objectId'] ?? item['id'] ?? item['_id'])?.toString();
                 final type = (item['objectType'] ?? item['type'])?.toString().toLowerCase();
-                final name = (item['name'] ?? item['title'])?.toString();
                 if (id != null && id.isNotEmpty) {
                   if ((type == 'company' || type == 'companies') && (compId == null || compId.isEmpty)) {
                     compId = id;
-                    compName = name;
                   } else if ((type == 'contact' || type == 'contacts') && (contactId == null || contactId.isEmpty)) {
                     contactId = id;
-                    contactName = name;
                   } else if ((type == 'deal' || type == 'deals') && (dealId == null || dealId.isEmpty)) {
                     dealId = id;
-                    dealName = name;
                   }
                 }
               }
@@ -816,60 +802,33 @@ class _TasksScreenState extends State<TasksScreen> {
           }
 
           if (compId != null && compId.isNotEmpty) {
-            Map<String, dynamic> match = _companies.firstWhere(
-              (c) => (c['id'] ?? c['_id'])?.toString() == compId,
-              orElse: () => {'id': compId, 'name': compName ?? 'Company'},
-            );
-            final companyModel = CompanyModel(
-              id: (match['id'] ?? match['_id'])?.toString() ?? compId,
-              name: (match['name'] ?? compName ?? 'Company').toString(),
-            );
-            await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: task.id),
-              ),
+            await context.pushNamed(
+              RouteNames.companyDetails,
+              pathParameters: {RoutePaths.idParam: compId},
+              queryParameters: RoutePaths.recordActivityQuery(task.id),
             );
             _fetchTasks(resetPage: true);
           } else if (contactId != null && contactId.isNotEmpty) {
-            Map<String, dynamic> match = _contacts.firstWhere(
-              (c) => (c['id'] ?? c['_id'])?.toString() == contactId,
-              orElse: () => {'id': contactId, 'firstName': contactName ?? 'Contact', 'email': ''},
-            );
-            final contactModel = ContactModel(
-              id: (match['id'] ?? match['_id'])?.toString() ?? contactId,
-              firstName: match['firstName']?.toString() ?? contactName ?? 'Contact',
-              lastName: match['lastName']?.toString(),
-              email: match['email']?.toString() ?? '',
-            );
-            await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: task.id),
-              ),
+            await context.pushNamed(
+              RouteNames.contactDetails,
+              pathParameters: {RoutePaths.idParam: contactId},
+              queryParameters: RoutePaths.recordActivityQuery(task.id),
             );
             _fetchTasks(resetPage: true);
           } else if (dealId != null && dealId.isNotEmpty) {
-            Map<String, dynamic> match = _deals.firstWhere(
-              (d) => (d['id'] ?? d['_id'])?.toString() == dealId,
-              orElse: () => {'id': dealId, 'title': dealName ?? 'Deal'},
-            );
-            final dealModel = DealModel(
-              id: (match['id'] ?? match['_id'])?.toString() ?? dealId,
-              title: (match['title'] ?? dealName ?? 'Deal').toString(),
-              amount: (match['amount'] as num?)?.toDouble() ?? 0.0,
-              stage: (match['stage'] ?? match['stageName'] ?? '').toString(),
-              probability: (match['probability'] as num?)?.toInt() ?? 0,
-            );
-            await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: task.id),
-              ),
+            await context.pushNamed(
+              RouteNames.dealDetails,
+              pathParameters: {RoutePaths.idParam: dealId},
+              queryParameters: RoutePaths.recordActivityQuery(task.id),
             );
             _fetchTasks(resetPage: true);
           } else {
-            final refreshed = await Navigator.of(context).push<bool>(
-              MaterialPageRoute(
-                builder: (_) => TaskDetailsScreen(task: task),
-              ),
+            // /activities/tasks/details/:id
+            final taskId = task.id;
+            if (taskId == null || taskId.isEmpty) return;
+            final refreshed = await context.pushNamed<bool>(
+              RouteNames.taskDetails,
+              pathParameters: {RoutePaths.idParam: taskId},
             );
             if (refreshed == true) {
               _fetchTasks(resetPage: true);

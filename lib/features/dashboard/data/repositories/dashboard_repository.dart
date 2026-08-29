@@ -6,7 +6,12 @@ import '../models/activity_stats_model.dart';
 import '../models/dashboard_unified_model.dart';
 
 abstract class DashboardRepository {
-  Future<ActivityStatsModel> getActivityStats({String? ownerId, String? departmentId});
+  Future<ActivityStatsModel> getActivityStats({
+    String? ownerId,
+    String? departmentId,
+    String? startDate,
+    String? endDate,
+  });
   Future<DashboardUnifiedResponseModel> getDashboardUnified({
     String? ownerId,
     String? departmentId,
@@ -24,9 +29,19 @@ class DashboardRepositoryImpl implements DashboardRepository {
       : _remoteDataSource = remoteDataSource ?? DashboardRemoteDataSourceImpl();
 
   @override
-  Future<ActivityStatsModel> getActivityStats({String? ownerId, String? departmentId}) async {
+  Future<ActivityStatsModel> getActivityStats({
+    String? ownerId,
+    String? departmentId,
+    String? startDate,
+    String? endDate,
+  }) async {
     try {
-      return await _remoteDataSource.getActivityStats(ownerId: ownerId, departmentId: departmentId);
+      return await _remoteDataSource.getActivityStats(
+        ownerId: ownerId,
+        departmentId: departmentId,
+        startDate: startDate,
+        endDate: endDate,
+      );
     } catch (e) {
       debugPrint('[GET /api/activities/stats ERROR]: $e');
       if (e is DioException) {

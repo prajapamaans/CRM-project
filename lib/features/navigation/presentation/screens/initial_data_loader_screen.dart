@@ -36,6 +36,8 @@
 // • `PageRouteBuilder` & `FadeTransition`: Creates a custom smooth route transition.
 // ============================================================================
 
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -131,16 +133,9 @@ class _InitialDataLoaderScreenState extends State<InitialDataLoaderScreen> {
 
       if (!mounted) return;
 
-      // 4. Navigate smoothly to MainLayoutScreen once all data is fully loaded
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 500),
-          pageBuilder: (context, animation, secondaryAnimation) => FadeTransition(
-            opacity: animation,
-            child: const MainLayoutScreen(),
-          ),
-        ),
-      );
+      // 4. Enter the main application once all data is fully loaded. `go`
+      // replaces the loader, so it never sits under the dashboard.
+      context.goNamed(RouteNames.dashboard);
     } catch (e) {
       debugPrint('[InitialDataLoaderScreen Error]: $e');
       if (!mounted) return;

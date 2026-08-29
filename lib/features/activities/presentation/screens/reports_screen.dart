@@ -1,8 +1,9 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
 import 'package:provider/provider.dart';
 
+import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/widgets/app_refresh_indicator.dart';
 import '../../../companies/data/models/company_model.dart';
@@ -47,6 +48,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   bool _isLoading = false;
   ActivityStatsModel? _stats;
+  Map<String, dynamic>? _reportsAnalyticsData;
 
   List<ContactModel> _contactsList = [];
   List<CompanyModel> _companiesList = [];
@@ -55,6 +57,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   bool _isTabLoading = false;
   String? _lastDepartmentId;
+
+  String _mapRangeToParam(String durationOption) {
+    switch (durationOption) {
+      case 'Today': return 'today';
+      case 'Yesterday': return 'yesterday';
+      case 'This Week': return 'this_week';
+      case 'Last Week': return 'last_week';
+      case 'This Month': return 'this_month';
+      case 'Last Month': return 'last_month';
+      case 'This Year': return 'this_year';
+      case 'All Time': return 'all_time';
+      case 'Custom Range': return 'custom';
+      default: return 'all_time';
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -75,14 +92,246 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _fetchTabSpecificData();
   }
 
+  static const List<String> _durationOptions = [
+    'Today',
+    'Yesterday',
+    'This Week',
+    'Last Week',
+    'This Month',
+    'Last Month',
+    'This Year',
+    'All Time',
+    'Custom Range',
+  ];
+
+  void _onDurationChanged(String durationOption) {
+    final now = DateTime.now();
+    DateTime? start;
+    DateTime? end;
+
+    switch (durationOption) {
+      case 'Today':
+        start = DateTime(now.year, now.month, now.day);
+        end = DateTime(now.year, now.month, now.day);
+        break;
+      case 'Yesterday':
+        final y = now.subtract(const Duration(days: 1));
+        start = DateTime(y.year, y.month, y.day);
+        end = DateTime(y.year, y.month, y.day);
+        break;
+      case 'This Week':
+        final sun = now.subtract(Duration(days: now.weekday % 7));
+        start = DateTime(sun.year, sun.month, sun.day);
+        end = DateTime(now.year, now.month, now.day);
+        break;
+      case 'Last Week':
+        final sunThisWeek = now.subtract(Duration(days: now.weekday % 7));
+        final sunLastWeek = sunThisWeek.subtract(const Duration(days: 7));
+        final satLastWeek = sunThisWeek.subtract(const Duration(days: 1));
+        start = DateTime(sunLastWeek.year, sunLastWeek.month, sunLastWeek.day);
+        end = DateTime(satLastWeek.year, satLastWeek.month, satLastWeek.day);
+        break;
+      case 'This Month':
+        start = DateTime(now.year, now.month, 1);
+        end = DateTime(now.year, now.month, now.day);
+        break;
+      case 'Last Month':
+        final firstOfThisMonth = DateTime(now.year, now.month, 1);
+        final lastOfLastMonth = firstOfThisMonth.subtract(const Duration(days: 1));
+        start = DateTime(lastOfLastMonth.year, lastOfLastMonth.month, 1);
+        end = DateTime(lastOfLastMonth.year, lastOfLastMonth.month, lastOfLastMonth.day);
+        break;
+      case 'This Year':
+        start = DateTime(now.year, 1, 1);
+        end = DateTime(now.year, now.month, now.day);
+        break;
+      case 'All Time':
+        start = null;
+        end = null;
+        break;
+      case 'Custom Range':
+        start = _startDate;
+        end = _endDate;
+        break;
+    }
+
+    setState(() {
+      _selectedTimeRange = durationOption;
+      _startDate = start;
+      _endDate = end;
+    });
+
+    _fetchReportsData();
+    _fetchTabSpecificData();
+  }
+
+  Map<String, String?> _calculateDateRange(String durationOption) {
+    if (durationOption == 'All Time') {
+      return {'startDate': null, 'endDate': null};
+    }
+
+    DateTime? start = _startDate;
+    DateTime? end = _endDate;
+
+    if (start == null || end == null) {
+      final now = DateTime.now();
+      switch (durationOption) {
+        case 'Today':
+          start = DateTime(now.year, now.month, now.day);
+          end = DateTime(now.year, now.month, now.day);
+          break;
+        case 'Yesterday':
+          final y = now.subtract(const Duration(days: 1));
+          start = DateTime(y.year, y.month, y.day);
+          end = DateTime(y.year, y.month, y.day);
+          break;
+        case 'This Week':
+          final sun = now.subtract(Duration(days: now.weekday % 7));
+          start = DateTime(sun.year, sun.month, sun.day);
+          end = DateTime(now.year, now.month, now.day);
+          break;
+        case 'Last Week':
+          final sunThisWeek = now.subtract(Duration(days: now.weekday % 7));
+          final sunLastWeek = sunThisWeek.subtract(const Duration(days: 7));
+          final satLastWeek = sunThisWeek.subtract(const Duration(days: 1));
+          start = DateTime(sunLastWeek.year, sunLastWeek.month, sunLastWeek.day);
+          end = DateTime(satLastWeek.year, satLastWeek.month, satLastWeek.day);
+          break;
+        case 'This Month':
+          start = DateTime(now.year, now.month, 1);
+          end = DateTime(now.year, now.month, now.day);
+          break;
+        case 'Last Month':
+          final firstOfThisMonth = DateTime(now.year, now.month, 1);
+          final lastOfLastMonth = firstOfThisMonth.subtract(const Duration(days: 1));
+          start = DateTime(lastOfLastMonth.year, lastOfLastMonth.month, 1);
+          end = DateTime(lastOfLastMonth.year, lastOfLastMonth.month, lastOfLastMonth.day);
+          break;
+        case 'This Year':
+          start = DateTime(now.year, 1, 1);
+          end = DateTime(now.year, now.month, now.day);
+          break;
+      }
+    }
+
+    String? startStr = start != null
+        ? "${start.year.toString().padLeft(4, '0')}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}"
+        : null;
+    String? endStr = end != null
+        ? "${end.year.toString().padLeft(4, '0')}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}"
+        : null;
+
+    return {'startDate': startStr, 'endDate': endStr};
+  }
+
+  bool _isWithinDateRange(dynamic dateValue) {
+    if (_selectedTimeRange == 'All Time') return true;
+    if (dateValue == null) return false;
+
+    DateTime? dt;
+    if (dateValue is DateTime) {
+      dt = dateValue;
+    } else {
+      final str = dateValue.toString().trim();
+      if (str.isEmpty) return false;
+      try {
+        dt = DateTime.parse(str);
+      } catch (_) {
+        return true; // Keep if unparseable string
+      }
+    }
+
+    final dateRange = _calculateDateRange(_selectedTimeRange);
+    final startStr = dateRange['startDate'];
+    final endStr = dateRange['endDate'];
+
+    if (startStr != null) {
+      final startDt = DateTime.parse(startStr);
+      if (dt.isBefore(startDt)) return false;
+    }
+    if (endStr != null) {
+      final endParts = endStr.split('-');
+      if (endParts.length == 3) {
+        final endDt = DateTime(
+          int.parse(endParts[0]),
+          int.parse(endParts[1]),
+          int.parse(endParts[2]),
+          23,
+          59,
+          59,
+          999,
+        );
+        if (dt.isAfter(endDt)) return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool _isUserMatching(dynamic record) {
+    if (_selectedUser == 'All Users') return true;
+    if (record == null) return true;
+
+    String? ownerId;
+    if (_users.isNotEmpty) {
+      final match = _users.firstWhere(
+        (u) {
+          final name = '${u['firstName'] ?? u['name'] ?? ''} ${u['lastName'] ?? ''}'.trim();
+          return name == _selectedUser || u['id']?.toString() == _selectedUser;
+        },
+        orElse: () => {},
+      );
+      if (match.isNotEmpty) {
+        ownerId = match['id']?.toString();
+      }
+    }
+    if (ownerId == null || ownerId.isEmpty) return true;
+
+    final recOwner = record is ContactModel
+        ? record.ownerId
+        : record is CompanyModel
+            ? record.ownerId
+            : (record is Map ? (record['ownerId'] ?? record['owner_id'] ?? record['userId'] ?? record['createdBy']) : null);
+    if (recOwner == null) return true;
+    return recOwner.toString() == ownerId;
+  }
+
   Future<void> _fetchTabSpecificData() async {
     setState(() => _isTabLoading = true);
     try {
       final api = ApiService();
+      String? userId;
+      if (_selectedUser != 'All Users' && _users.isNotEmpty) {
+        final match = _users.firstWhere(
+          (u) {
+            final name = '${u['firstName'] ?? u['name'] ?? ''} ${u['lastName'] ?? ''}'.trim();
+            return name == _selectedUser || u['id']?.toString() == _selectedUser;
+          },
+          orElse: () => {},
+        );
+        if (match.isNotEmpty) {
+          userId = match['id']?.toString();
+        }
+      }
+
+      final dateRange = _calculateDateRange(_selectedTimeRange);
+      final queryParams = <String, dynamic>{
+        'page': 1,
+        'limit': 100,
+        'range': _mapRangeToParam(_selectedTimeRange),
+      };
+      if (userId != null && userId.isNotEmpty) queryParams['userId'] = userId;
+      if (dateRange['startDate'] != null) queryParams['startDate'] = dateRange['startDate'];
+      if (dateRange['endDate'] != null) queryParams['endDate'] = dateRange['endDate'];
       
-      // 1. Fetch Contacts (GET /api/contacts?range=all&limit=100)
+      // 1. Fetch Contacts (GET /api/reports/contacts)
       try {
-        final resp = await api.get('/contacts', queryParameters: {'range': 'all', 'limit': 100});
+        Response resp;
+        try {
+          resp = await api.get(ApiConstants.reportsContacts, queryParameters: queryParams);
+        } catch (_) {
+          resp = await api.get('/contacts', queryParameters: {...queryParams, 'range': 'all'});
+        }
         final raw = resp.data;
         List<dynamic> list = [];
         if (raw is List) {
@@ -97,9 +346,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
         debugPrint('[ReportsScreen fetch contacts error]: $e');
       }
 
-      // 2. Fetch Companies (GET /api/companies?range=all&limit=100)
+      // 2. Fetch Companies (GET /api/reports/companies)
       try {
-        final resp = await api.get('/companies', queryParameters: {'range': 'all', 'limit': 100});
+        Response resp;
+        try {
+          resp = await api.get(ApiConstants.reportsCompanies, queryParameters: queryParams);
+        } catch (_) {
+          resp = await api.get('/companies', queryParameters: {...queryParams, 'range': 'all'});
+        }
         final raw = resp.data;
         List<dynamic> list = [];
         if (raw is List) {
@@ -114,9 +368,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
         debugPrint('[ReportsScreen fetch companies error]: $e');
       }
 
-      // 3. Fetch Deals (GET /api/deals?page=1&limit=50)
+      // 3. Fetch Deals (GET /api/reports/deals)
       try {
-        final resp = await api.get('/deals', queryParameters: {'page': 1, 'limit': 50});
+        Response resp;
+        try {
+          resp = await api.get(ApiConstants.reportsDeals, queryParameters: queryParams);
+        } catch (_) {
+          resp = await api.get('/deals', queryParameters: {...queryParams, 'page': 1, 'limit': 50});
+        }
         final raw = resp.data;
         List<dynamic> list = [];
         if (raw is List) {
@@ -131,9 +390,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
         debugPrint('[ReportsScreen fetch deals error]: $e');
       }
 
-      // 4. Fetch Activities (GET /api/activities?limit=100)
+      // 4. Fetch Activities (GET /api/reports/activities)
       try {
-        final resp = await api.get('/activities', queryParameters: {'limit': 100});
+        Response resp;
+        try {
+          resp = await api.get(ApiConstants.reportsActivities, queryParameters: queryParams);
+        } catch (_) {
+          resp = await api.get('/activities', queryParameters: queryParams);
+        }
         final raw = resp.data;
         List<dynamic> list = [];
         if (raw is List) {
@@ -155,7 +419,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _fetchUsers() async {
     try {
-      final resp = await ApiService().get('/users?limit=1000');
+      Response resp;
+      try {
+        resp = await ApiService().get(ApiConstants.reportsUsers, queryParameters: {'page': 1, 'limit': 100});
+      } catch (_) {
+        resp = await ApiService().get('/users?limit=1000');
+      }
       final dynamic raw = resp.data;
       List<Map<String, dynamic>> usersList = [];
       if (raw is List) {
@@ -179,7 +448,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<void> _fetchReportsData() async {
     setState(() => _isLoading = true);
     try {
-      String? ownerId;
+      String? userId;
       if (_selectedUser != 'All Users' && _users.isNotEmpty) {
         final match = _users.firstWhere(
           (u) {
@@ -189,17 +458,40 @@ class _ReportsScreenState extends State<ReportsScreen> {
           orElse: () => {},
         );
         if (match.isNotEmpty) {
-          ownerId = match['id']?.toString();
+          userId = match['id']?.toString();
         }
       }
 
-      final ds = DashboardRemoteDataSourceImpl();
-      final statsResult = await ds.getActivityStats(ownerId: ownerId);
+      final dateRange = _calculateDateRange(_selectedTimeRange);
+      final queryParams = <String, dynamic>{
+        'range': _mapRangeToParam(_selectedTimeRange),
+      };
+      if (userId != null && userId.isNotEmpty) queryParams['userId'] = userId;
+      if (dateRange['startDate'] != null) queryParams['startDate'] = dateRange['startDate'];
+      if (dateRange['endDate'] != null) queryParams['endDate'] = dateRange['endDate'];
 
-      if (mounted) {
-        setState(() {
-          _stats = statsResult;
-        });
+      final api = ApiService();
+      try {
+        final resp = await api.get(ApiConstants.reportsDashboardAnalytics, queryParameters: queryParams);
+        final raw = resp.data;
+        if (mounted && raw is Map<String, dynamic>) {
+          setState(() {
+            _reportsAnalyticsData = raw;
+          });
+        }
+      } catch (e) {
+        debugPrint('[GET ${ApiConstants.reportsDashboardAnalytics} fallback]: $e');
+        final ds = DashboardRemoteDataSourceImpl();
+        final statsResult = await ds.getActivityStats(
+          ownerId: userId,
+          startDate: dateRange['startDate'],
+          endDate: dateRange['endDate'],
+        );
+        if (mounted) {
+          setState(() {
+            _stats = statsResult;
+          });
+        }
       }
     } catch (e) {
       debugPrint('[ReportsScreen fetch data error]: $e');
@@ -223,7 +515,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
       lastDate: DateTime(2030),
     );
     if (picked != null && mounted) {
+      if (isStart && _endDate != null && picked.isAfter(_endDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('From Date cannot be after To Date.')),
+        );
+        return;
+      }
+      if (!isStart && _startDate != null && picked.isBefore(_startDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('To Date cannot be before From Date.')),
+        );
+        return;
+      }
+
       setState(() {
+        _selectedTimeRange = 'Custom Range';
         if (isStart) {
           _startDate = picked;
         } else {
@@ -231,6 +537,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         }
       });
       _fetchReportsData();
+      _fetchTabSpecificData();
     }
   }
 
@@ -282,7 +589,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
                 const SizedBox(height: 14),
 
-                // 2. Filter Controls Row: User, Time Range, Custom Date Range Pickers (2nd & 3rd Image)
+                // 2. Filter Controls Row: User, Time Range, Custom Date Range Pickers
                 Wrap(
                   spacing: 8,
                   runSpacing: 10,
@@ -308,6 +615,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           if (val != null) {
                             setState(() => _selectedUser = val);
                             _fetchReportsData();
+                            _fetchTabSpecificData();
                           }
                         },
                         items: usersDropdownList
@@ -324,7 +632,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: DropdownButton<String>(
-                        value: _selectedTimeRange,
+                        value: _durationOptions.contains(_selectedTimeRange) ? _selectedTimeRange : 'All Time',
                         underline: const SizedBox(),
                         isDense: true,
                         icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B), size: 18),
@@ -335,17 +643,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         ),
                         onChanged: (val) {
                           if (val != null) {
-                            setState(() => _selectedTimeRange = val);
-                            _fetchReportsData();
+                            _onDurationChanged(val);
                           }
                         },
-                        items: const ['All Time', 'Today', 'This Week', 'This Month', 'Custom']
+                        items: _durationOptions
                             .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                             .toList(),
                       ),
                     ),
 
-                    // Start Date Picker (Image 3 dd-mm-yyyy)
+                    // Start Date Picker (dd-mm-yyyy)
                     InkWell(
                       onTap: () => _selectDate(context, true),
                       child: Container(
@@ -387,7 +694,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ),
                     ),
 
-                    // End Date Picker (Image 3 dd-mm-yyyy)
+                    // End Date Picker (dd-mm-yyyy)
                     InkWell(
                       onTap: () => _selectDate(context, false),
                       child: Container(
@@ -486,14 +793,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   /// Grid view corresponding to Image 1: Detailed Reports Metrics Cards
   Widget _buildDashboardGrid() {
-    final contactsCount = _stats?.totalContacts ?? 0;
-    final companiesCount = _stats?.totalCompanies ?? 0;
-    final dealsCount = _stats?.totalDeals ?? 0;
-    final tasksCompletedCount = _stats?.completed ?? 0;
-    final emailsSentCount = _stats?.emails ?? 0;
-    final meetingsHeldCount = _stats?.meetings ?? 0;
-    final callsMadeCount = _stats?.calls ?? 0;
-    final notesCreatedCount = _stats?.notes ?? 0;
+    final filteredContacts = _contactsList.where((c) => _isWithinDateRange(c.createdAt) && _isUserMatching(c)).toList();
+    final filteredCompanies = _companiesList.where((comp) => _isWithinDateRange(comp.createdAt) && _isUserMatching(comp)).toList();
+    final filteredDeals = _dealsList.where((d) => _isWithinDateRange(d['createdAt'] ?? d['created_at']) && _isUserMatching(d)).toList();
+    final filteredActivities = _activitiesList.where((a) => _isWithinDateRange(a['createdAt'] ?? a['created_at'] ?? a['dueDate']) && _isUserMatching(a)).toList();
+
+    final map = _reportsAnalyticsData ?? {};
+    final rawData = map['data'] is Map<String, dynamic> ? map['data'] as Map<String, dynamic> : map;
+
+    final contactsCount = rawData['totalContacts'] ?? rawData['contactsCount'] ?? rawData['contacts'] ?? _stats?.totalContacts ?? filteredContacts.length;
+    final companiesCount = rawData['totalCompanies'] ?? rawData['companiesCount'] ?? rawData['companies'] ?? _stats?.totalCompanies ?? filteredCompanies.length;
+    final dealsCount = rawData['totalDeals'] ?? rawData['dealsCount'] ?? rawData['deals'] ?? _stats?.totalDeals ?? filteredDeals.length;
+    final tasksCompletedCount = rawData['completedTasks'] ?? rawData['tasksCompleted'] ?? rawData['completed'] ?? rawData['tasks'] ?? _stats?.completed ?? filteredActivities.where((a) => (a['type'] ?? '').toString().toLowerCase().contains('task')).length;
+    final emailsSentCount = rawData['emailsSent'] ?? rawData['emails'] ?? _stats?.emails ?? filteredActivities.where((a) => (a['type'] ?? '').toString().toLowerCase().contains('email')).length;
+    final meetingsHeldCount = rawData['meetingsHeld'] ?? rawData['meetings'] ?? _stats?.meetings ?? filteredActivities.where((a) => (a['type'] ?? '').toString().toLowerCase().contains('meeting')).length;
+    final callsMadeCount = rawData['callsMade'] ?? rawData['calls'] ?? _stats?.calls ?? filteredActivities.where((a) => (a['type'] ?? '').toString().toLowerCase().contains('call')).length;
+    final notesCreatedCount = rawData['notesCreated'] ?? rawData['notes'] ?? _stats?.notes ?? filteredActivities.where((a) => (a['type'] ?? '').toString().toLowerCase().contains('note')).length;
 
     return GridView.count(
       crossAxisCount: 2,
@@ -657,18 +972,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   /// --------------------------------------------------------------------------
-  /// TAB 1: CONTACTS LIST VIEW (Matching 1st Screenshot layout: xyz, Mansii, Saurav)
+  /// TAB 1: CONTACTS LIST VIEW
   /// --------------------------------------------------------------------------
   Widget _buildContactsList() {
-    if (_contactsList.isEmpty) return _buildEmptyTabState('No contacts found');
+    final filtered = _contactsList.where((c) => _isWithinDateRange(c.createdAt) && _isUserMatching(c)).toList();
+    if (filtered.isEmpty) return _buildEmptyTabState('No contacts found');
 
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _contactsList.length,
+      itemCount: filtered.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final c = _contactsList[index];
+        final c = filtered[index];
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -700,18 +1016,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   /// --------------------------------------------------------------------------
-  /// TAB 2: COMPANIES LIST VIEW (Matching 2nd Screenshot layout: apidel, test.com)
+  /// TAB 2: COMPANIES LIST VIEW
   /// --------------------------------------------------------------------------
   Widget _buildCompaniesList() {
-    if (_companiesList.isEmpty) return _buildEmptyTabState('No companies found');
+    final filtered = _companiesList.where((comp) => _isWithinDateRange(comp.createdAt) && _isUserMatching(comp)).toList();
+    if (filtered.isEmpty) return _buildEmptyTabState('No companies found');
 
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _companiesList.length,
+      itemCount: filtered.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final comp = _companiesList[index];
+        final comp = filtered[index];
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -786,15 +1103,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
   /// TAB 4: DEALS LIST VIEW
   /// --------------------------------------------------------------------------
   Widget _buildDealsList() {
-    if (_dealsList.isEmpty) return _buildEmptyTabState('No deals found');
+    final filtered = _dealsList.where((d) => _isWithinDateRange(d['createdAt'] ?? d['created_at']) && _isUserMatching(d)).toList();
+    if (filtered.isEmpty) return _buildEmptyTabState('No deals found');
 
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _dealsList.length,
+      itemCount: filtered.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final d = _dealsList[index];
+        final d = filtered[index];
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -827,6 +1145,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   /// --------------------------------------------------------------------------
   Widget _buildActivitiesListForTab(String tabName) {
     final filtered = _activitiesList.where((a) {
+      if (!_isWithinDateRange(a['createdAt'] ?? a['created_at'] ?? a['dueDate'])) return false;
+      if (!_isUserMatching(a)) return false;
       final type = (a['type'] ?? a['activityType'] ?? '').toString().toLowerCase();
       if (tabName == 'Tasks') return type.contains('task');
       if (tabName == 'Meetings') return type.contains('meeting');

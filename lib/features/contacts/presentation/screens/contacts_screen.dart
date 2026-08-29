@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -10,7 +13,6 @@ import '../../../departments/presentation/providers/department_provider.dart';
 import '../providers/contact_provider.dart';
 import '../widgets/contact_inline_filter_section.dart';
 import '../widgets/create_contact_modal.dart';
-import 'contact_details_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -407,12 +409,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                   });
                                 },
                                 onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => ContactDetailsScreen(
-                                        contact: contact,
-                                      ),
-                                    ),
+                                  // /contacts/details/:id — the details screen
+                                  // loads the record from the id.
+                                  await context.pushNamed(
+                                    RouteNames.contactDetails,
+                                    pathParameters: {RoutePaths.idParam: contact.id},
                                   );
                                   if (mounted) {
                                     _loadContactsForSegment(_selectedSegment);

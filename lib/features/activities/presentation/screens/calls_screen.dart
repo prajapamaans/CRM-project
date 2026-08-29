@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -9,16 +12,9 @@ import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/log_call_modal.dart';
-import '../../../companies/data/models/company_model.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
-import '../../../contacts/data/models/contact_model.dart';
-import '../../../contacts/presentation/screens/contact_details_screen.dart';
-import '../../../deals/data/models/deal_model.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../widgets/call_inline_filter_section.dart';
-import 'call_details_screen.dart';
 
 class CallsScreen extends StatefulWidget {
   const CallsScreen({super.key});
@@ -583,13 +579,10 @@ class _CallsScreenState extends State<CallsScreen> {
         final act = call.rawMap ?? {};
 
         String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? call.companyId)?.toString();
-        String? compName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null))?.toString();
 
         String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null) ?? call.contactId)?.toString();
-        String? contactName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['firstName'] ?? act['contact']['name'] : null))?.toString();
 
         String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null) ?? call.dealId)?.toString();
-        String? dealName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['title'] : null))?.toString();
 
         if (act['associations'] is Map) {
           final assocMap = act['associations'] as Map;
@@ -597,21 +590,18 @@ class _CallsScreenState extends State<CallsScreen> {
             final firstComp = (assocMap['Companies'] as List).first;
             if (firstComp is Map) {
               compId = (firstComp['id'] ?? firstComp['_id'] ?? firstComp['objectId'])?.toString();
-              compName = (firstComp['name'] ?? firstComp['title'])?.toString();
             }
           }
           if ((contactId == null || contactId.isEmpty) && assocMap['Contacts'] is List && (assocMap['Contacts'] as List).isNotEmpty) {
             final firstContact = (assocMap['Contacts'] as List).first;
             if (firstContact is Map) {
               contactId = (firstContact['id'] ?? firstContact['_id'] ?? firstContact['objectId'])?.toString();
-              contactName = (firstContact['name'] ?? firstContact['title'])?.toString();
             }
           }
           if ((dealId == null || dealId.isEmpty) && assocMap['Deals'] is List && (assocMap['Deals'] as List).isNotEmpty) {
             final firstDeal = (assocMap['Deals'] as List).first;
             if (firstDeal is Map) {
               dealId = (firstDeal['id'] ?? firstDeal['_id'] ?? firstDeal['objectId'])?.toString();
-              dealName = (firstDeal['name'] ?? firstDeal['title'])?.toString();
             }
           }
         } else if (act['associations'] is List) {
@@ -619,17 +609,13 @@ class _CallsScreenState extends State<CallsScreen> {
             if (assoc is Map) {
               final id = (assoc['objectId'] ?? assoc['id'] ?? assoc['_id'])?.toString();
               final type = (assoc['objectType'] ?? assoc['type'])?.toString().toLowerCase();
-              final name = (assoc['name'] ?? assoc['title'])?.toString();
               if (id != null && id.isNotEmpty) {
                 if ((type == 'company' || type == 'companies') && (compId == null || compId.isEmpty)) {
                   compId = id;
-                  compName = name;
                 } else if ((type == 'contact' || type == 'contacts') && (contactId == null || contactId.isEmpty)) {
                   contactId = id;
-                  contactName = name;
                 } else if ((type == 'deal' || type == 'deals') && (dealId == null || dealId.isEmpty)) {
                   dealId = id;
-                  dealName = name;
                 }
               }
             }
@@ -637,47 +623,33 @@ class _CallsScreenState extends State<CallsScreen> {
         }
 
         if (compId != null && compId.isNotEmpty) {
-          final companyModel = CompanyModel(
-            id: compId,
-            name: compName ?? 'Company',
-          );
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: call.id),
-            ),
-          );
+          await context.pushNamed(
+              RouteNames.companyDetails,
+              pathParameters: {RoutePaths.idParam: compId},
+              queryParameters: RoutePaths.recordActivityQuery(call.id),
+            );
           _loadCalls();
         } else if (contactId != null && contactId.isNotEmpty) {
-          final contactModel = ContactModel(
-            id: contactId,
-            firstName: contactName ?? 'Contact',
-            email: '',
-          );
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: call.id),
-            ),
-          );
+          await context.pushNamed(
+              RouteNames.contactDetails,
+              pathParameters: {RoutePaths.idParam: contactId},
+              queryParameters: RoutePaths.recordActivityQuery(call.id),
+            );
           _loadCalls();
         } else if (dealId != null && dealId.isNotEmpty) {
-          final dealModel = DealModel(
-            id: dealId,
-            title: dealName ?? 'Deal',
-            amount: 0.0,
-            stage: '',
-            probability: 0,
-          );
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: call.id),
-            ),
-          );
+          await context.pushNamed(
+              RouteNames.dealDetails,
+              pathParameters: {RoutePaths.idParam: dealId},
+              queryParameters: RoutePaths.recordActivityQuery(call.id),
+            );
           _loadCalls();
         } else {
-          final refreshed = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(
-              builder: (_) => CallDetailsScreen(call: call),
-            ),
+          // /activities/calls/details/:id
+          final callId = call.id;
+          if (callId == null || callId.isEmpty) return;
+          final refreshed = await context.pushNamed<bool>(
+            RouteNames.callDetails,
+            pathParameters: {RoutePaths.idParam: callId},
           );
           if (refreshed == true) {
             _loadCalls();

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -7,17 +10,10 @@ import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
-import '../../../companies/data/models/company_model.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
-import '../../../contacts/data/models/contact_model.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
-import '../../../contacts/presentation/screens/contact_details_screen.dart';
-import '../../../deals/data/models/deal_model.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/email_inline_filter_section.dart';
-import 'email_details_screen.dart';
 
 class EmailsScreen extends StatefulWidget {
   const EmailsScreen({super.key});
@@ -651,18 +647,12 @@ class _EmailsScreenState extends State<EmailsScreen> {
   }
 
   Future<void> _onEmailTileTap(Map<String, dynamic> act) async {
-    final title = (act['title'] ?? act['subject'] ?? 'Email').toString();
-    final status = (act['status'] ?? act['state'] ?? 'Sent').toString();
-    final startTime = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['createdAt'] ?? '').toString();
 
     String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null))?.toString();
-    String? compName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null))?.toString();
 
     String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
-    String? contactName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['firstName'] ?? act['contact']['name'] : null))?.toString();
 
     String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null))?.toString();
-    String? dealName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['title'] : null))?.toString();
 
     if (act['associations'] is Map) {
       final assocMap = act['associations'] as Map;
@@ -670,21 +660,18 @@ class _EmailsScreenState extends State<EmailsScreen> {
         final firstComp = (assocMap['Companies'] as List).first;
         if (firstComp is Map) {
           compId = (firstComp['id'] ?? firstComp['_id'] ?? firstComp['objectId'])?.toString();
-          compName = (firstComp['name'] ?? firstComp['title'])?.toString();
         }
       }
       if ((contactId == null || contactId.isEmpty) && assocMap['Contacts'] is List && (assocMap['Contacts'] as List).isNotEmpty) {
         final firstContact = (assocMap['Contacts'] as List).first;
         if (firstContact is Map) {
           contactId = (firstContact['id'] ?? firstContact['_id'] ?? firstContact['objectId'])?.toString();
-          contactName = (firstContact['name'] ?? firstContact['title'])?.toString();
         }
       }
       if ((dealId == null || dealId.isEmpty) && assocMap['Deals'] is List && (assocMap['Deals'] as List).isNotEmpty) {
         final firstDeal = (assocMap['Deals'] as List).first;
         if (firstDeal is Map) {
           dealId = (firstDeal['id'] ?? firstDeal['_id'] ?? firstDeal['objectId'])?.toString();
-          dealName = (firstDeal['name'] ?? firstDeal['title'])?.toString();
         }
       }
     } else if (act['associations'] is List) {
@@ -692,17 +679,13 @@ class _EmailsScreenState extends State<EmailsScreen> {
         if (assoc is Map) {
           final id = (assoc['objectId'] ?? assoc['id'] ?? assoc['_id'])?.toString();
           final type = (assoc['objectType'] ?? assoc['type'])?.toString().toLowerCase();
-          final name = (assoc['name'] ?? assoc['title'])?.toString();
           if (id != null && id.isNotEmpty) {
             if ((type == 'company' || type == 'companies') && (compId == null || compId.isEmpty)) {
               compId = id;
-              compName = name;
             } else if ((type == 'contact' || type == 'contacts') && (contactId == null || contactId.isEmpty)) {
               contactId = id;
-              contactName = name;
             } else if ((type == 'deal' || type == 'deals') && (dealId == null || dealId.isEmpty)) {
               dealId = id;
-              dealName = name;
             }
           }
         }
@@ -710,54 +693,33 @@ class _EmailsScreenState extends State<EmailsScreen> {
     }
 
     if (compId != null && compId.isNotEmpty) {
-      final companyModel = CompanyModel(
-        id: compId,
-        name: compName ?? 'Company',
-      );
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
-        ),
+      await context.pushNamed(
+        RouteNames.companyDetails,
+        pathParameters: {RoutePaths.idParam: compId},
+        queryParameters: RoutePaths.recordActivityQuery((act['id'] ?? act['_id'])?.toString()),
       );
       _fetchEmails(reset: true);
     } else if (contactId != null && contactId.isNotEmpty) {
-      final contactModel = ContactModel(
-        id: contactId,
-        firstName: contactName ?? 'Contact',
-        email: '',
-      );
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
-        ),
+      await context.pushNamed(
+        RouteNames.contactDetails,
+        pathParameters: {RoutePaths.idParam: contactId},
+        queryParameters: RoutePaths.recordActivityQuery((act['id'] ?? act['_id'])?.toString()),
       );
       _fetchEmails(reset: true);
     } else if (dealId != null && dealId.isNotEmpty) {
-      final dealModel = DealModel(
-        id: dealId,
-        title: dealName ?? 'Deal',
-        amount: 0.0,
-        stage: '',
-        probability: 0,
-      );
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: (act['id'] ?? act['_id'])?.toString()),
-        ),
+      await context.pushNamed(
+        RouteNames.dealDetails,
+        pathParameters: {RoutePaths.idParam: dealId},
+        queryParameters: RoutePaths.recordActivityQuery((act['id'] ?? act['_id'])?.toString()),
       );
       _fetchEmails(reset: true);
     } else {
-      final emailModel = EmailModel(
-        id: (act['id'] ?? act['_id'])?.toString(),
-        title: title,
-        status: status,
-        startTime: startTime,
-        notes: (act['notes'] ?? act['description'] ?? act['body'] ?? '').toString(),
-      );
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => EmailDetailsScreen(email: emailModel),
-        ),
+      // /activities/emails/details/:id
+      final emailId = (act['id'] ?? act['_id'])?.toString();
+      if (emailId == null || emailId.isEmpty) return;
+      await context.pushNamed(
+        RouteNames.emailDetails,
+        pathParameters: {RoutePaths.idParam: emailId},
       );
       _fetchEmails(reset: true);
     }

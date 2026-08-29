@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
 
 class QuarterViewScreen extends StatefulWidget {
   const QuarterViewScreen({super.key});
@@ -328,11 +329,9 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
                                             associatedName: assocName,
                                             currentQuarterIndex: currentQ,
                                             onTap: () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => DealDetailsScreen(deal: deal),
-                                                ),
+                                              context.pushNamed(
+                                                RouteNames.dealDetails,
+                                                pathParameters: {RoutePaths.idParam: deal.id},
                                               );
                                             },
                                             onSelectQuarter: (targetQ) async {
@@ -390,11 +389,9 @@ class _QuarterViewScreenState extends State<QuarterViewScreen> {
                                             associatedName: assocName,
                                             currentQuarterIndex: currentQ,
                                             onTap: () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => CompanyDetailsScreen(company: company),
-                                                ),
+                                              context.pushNamed(
+                                                RouteNames.companyDetails,
+                                                pathParameters: {RoutePaths.idParam: company.id},
                                               );
                                             },
                                             onSelectQuarter: (targetQ) {

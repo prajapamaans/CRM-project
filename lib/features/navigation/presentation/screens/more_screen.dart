@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+
+import '../../../../core/navigation/app_router.dart';
 import '../../../../core/widgets/font_size_modal.dart';
 import '../providers/navigation_provider.dart';
 
@@ -148,7 +151,33 @@ class _MoreSheetContent extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // SECTION 2: PRODUCTIVITY
+                    // SECTION 2: CRM CORE
+                    _buildSectionTitle('CRM CORE'),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.domain_outlined,
+                      title: 'Companies',
+                      screenIndex: 2,
+                    ),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.people_outline_rounded,
+                      title: 'Contacts',
+                      screenIndex: 1,
+                    ),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.attach_money_rounded,
+                      title: 'Deals',
+                      screenIndex: 3,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // SECTION 3: PRODUCTIVITY
                     _buildSectionTitle('PRODUCTIVITY'),
                     _buildMenuItem(
                       context,
@@ -174,9 +203,20 @@ class _MoreSheetContent extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // SECTION 3: CONTENT
-                    _buildSectionTitle('CONTENT'),
+                    // SECTION 4: REPORTS & ANALYTICS
+                    _buildSectionTitle('REPORTS & ANALYTICS'),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.bar_chart_rounded,
+                      title: 'Reports',
+                      screenIndex: 4,
+                    ),
 
+                    const SizedBox(height: 20),
+
+                    // SECTION 5: CONTENT
+                    _buildSectionTitle('CONTENT'),
                     _buildMenuItem(
                       context,
                       navProvider: navProvider,
@@ -184,10 +224,43 @@ class _MoreSheetContent extends StatelessWidget {
                       title: 'Templates',
                       screenIndex: 16,
                     ),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.folder_open_outlined,
+                      title: 'Documents',
+                      screenIndex: 15,
+                    ),
 
                     const SizedBox(height: 20),
 
-                    // SECTION 5: GENERAL
+                    // SECTION 6: ADMINISTRATION
+                    _buildSectionTitle('ADMINISTRATION'),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.people_outline_rounded,
+                      title: 'User Management',
+                      screenIndex: 17,
+                    ),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.list_alt_rounded,
+                      title: 'Master Dropdowns',
+                      screenIndex: 18,
+                    ),
+                    _buildMenuItem(
+                      context,
+                      navProvider: navProvider,
+                      icon: Icons.apartment_rounded,
+                      title: 'Departments Configuration',
+                      screenIndex: 19,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // SECTION 7: GENERAL
                     _buildSectionTitle('GENERAL'),
                     _buildMenuItem(
                       context,
@@ -283,7 +356,13 @@ class _MoreSheetContent extends StatelessWidget {
           ),
           onTap: () {
             navProvider.selectScreen(screenIndex);
-            Navigator.of(context).popUntil((route) => route.isFirst);
+            final location = AppRouter.locationForTab(screenIndex);
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            }
+            if (location != null && location.isNotEmpty) {
+              context.go(location);
+            }
           },
         ),
       ),

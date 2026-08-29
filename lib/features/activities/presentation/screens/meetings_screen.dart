@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -8,19 +11,12 @@ import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
-import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
-import '../../../contacts/data/models/contact_model.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
-import '../../../contacts/presentation/screens/contact_details_screen.dart';
-import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/log_meeting_modal.dart';
-import 'meeting_details_screen.dart';
 
 class MeetingsScreen extends StatefulWidget {
   const MeetingsScreen({super.key});
@@ -295,7 +291,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     final ownersSet = <String>{'All owners'};
     final auth = context.read<AuthProvider>();
     if (auth.currentUser?.fullName != null) {
-      ownersSet.add(auth.currentUser!.fullName!);
+      ownersSet.add(auth.currentUser!.fullName);
     }
     ownersSet.add('Admin User');
     for (final u in _apiUsers) {
@@ -1191,64 +1187,36 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
         // 1. If meeting was created from / associated with Contact, open Contact Details
         if (meeting.contactId != null && meeting.contactId!.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ContactDetailsScreen(
-                contact: ContactModel(
-                  id: meeting.contactId!,
-                  email: '',
-                  firstName: '',
-                  lastName: '',
-                ),
-                initialTabIndex: 1,
-                highlightActivityId: meeting.id,
-              ),
-            ),
+          context.pushNamed(
+            RouteNames.contactDetails,
+            pathParameters: {RoutePaths.idParam: meeting.contactId!},
+            queryParameters: RoutePaths.recordActivityQuery(meeting.id),
           );
         }
         // 2. If meeting was created from / associated with Company, open Company Details
         else if (meeting.companyId != null && meeting.companyId!.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CompanyDetailsScreen(
-                company: CompanyModel(
-                  id: meeting.companyId!,
-                  name: '',
-                ),
-                initialTabIndex: 1,
-                highlightActivityId: meeting.id,
-              ),
-            ),
+          context.pushNamed(
+            RouteNames.companyDetails,
+            pathParameters: {RoutePaths.idParam: meeting.companyId!},
+            queryParameters: RoutePaths.recordActivityQuery(meeting.id),
           );
         }
         // 3. If meeting was created from / associated with Deal, open Deal Details
         else if (meeting.dealId != null && meeting.dealId!.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DealDetailsScreen(
-                deal: DealModel(
-                  id: meeting.dealId!,
-                  title: '',
-                  amount: 0.0,
-                  stage: '',
-                  probability: 0,
-                ),
-                initialTabIndex: 1,
-                highlightActivityId: meeting.id,
-              ),
-            ),
+          context.pushNamed(
+            RouteNames.dealDetails,
+            pathParameters: {RoutePaths.idParam: meeting.dealId!},
+            queryParameters: RoutePaths.recordActivityQuery(meeting.id),
           );
         }
         // 4. Standalone / Unassigned meeting created on Meetings screen -> Open MeetingDetailsScreen
         else {
-          final refresh = await Navigator.push<bool>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => MeetingDetailsScreen(meeting: meeting),
-            ),
+          // /activities/meetings/details/:id
+          final meetingId = meeting.id;
+          if (meetingId == null || meetingId.isEmpty) return;
+          final refresh = await context.pushNamed<bool>(
+            RouteNames.meetingDetails,
+            pathParameters: {RoutePaths.idParam: meetingId},
           );
 
           if (refresh == true) {

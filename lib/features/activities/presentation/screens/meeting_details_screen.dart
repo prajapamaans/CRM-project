@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
+import '../../../../core/widgets/record_loading_scaffold.dart';
 import '../../../companies/data/models/company_model.dart';
 import '../../../companies/presentation/screens/company_details_screen.dart';
 import '../../../contacts/data/models/contact_model.dart';
@@ -12,11 +14,16 @@ import '../../../deals/presentation/screens/deal_details_screen.dart';
 import '../widgets/log_meeting_modal.dart';
 
 class MeetingDetailsScreen extends StatefulWidget {
-  final MeetingModel meeting;
+  final MeetingModel? meeting;
+
+  /// Id of the meeting to load when opened by route
+  /// (`/activities/meetings/details/:id`) rather than handed a loaded model.
+  final String? meetingId;
 
   const MeetingDetailsScreen({
     super.key,
-    required this.meeting,
+    this.meeting,
+    this.meetingId,
   });
 
   @override
@@ -29,11 +36,75 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
 
   /// Popped back to the list so it reloads the updated meeting.
   bool _isEdited = false;
+  bool _isLoadingById = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _currentMeeting = widget.meeting;
+    final meeting = widget.meeting;
+    if (meeting != null) {
+      _currentMeeting = meeting;
+    } else {
+      // Placeholder while the record is fetched; build shows a spinner until
+      // the real meeting arrives, so this is never rendered.
+      _currentMeeting =
+          MeetingModel(title: '', outcome: '', duration: '', startTime: '', notes: '');
+      _isLoadingById = true;
+      _loadMeetingById();
+    }
+  }
+
+  /// Loads the meeting behind the `:id` path parameter.
+  Future<void> _loadMeetingById() async {
+    final id = widget.meetingId?.trim();
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'No meeting was specified.';
+      });
+      return;
+    }
+
+    try {
+      final res = await ApiService().get('${ApiConstants.activities}/$id');
+      final raw = res.data;
+      final data = raw is Map && raw['data'] is Map ? raw['data'] : raw;
+      if (data is! Map) throw Exception('Unexpected response');
+
+      final item = Map<String, dynamic>.from(data);
+      final minutes = parseDurationMinutes(
+        item['durationMinutes'] ?? item['duration_minutes'] ?? item['duration'],
+      );
+      final scheduledAt = parseActivityDateTimeOrNull(
+        item['scheduledAt'] ?? item['scheduled_at'] ?? item['startTime'],
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _currentMeeting = MeetingModel(
+          id: (item['id'] ?? item['_id'])?.toString(),
+          title: (item['title'] ?? item['subject'] ?? 'Meeting').toString(),
+          outcome: (item['outcome'] ?? 'Scheduled').toString(),
+          duration: minutes != null ? formatDurationLabel(minutes) : '15 Minutes',
+          startTime: scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '',
+          notes: (item['description'] ?? item['notes'] ?? '').toString(),
+          assignedTo: (item['ownerName'] ?? 'Admin User').toString(),
+          contactId: (item['contactId'] ?? item['contact_id'])?.toString(),
+          companyId: (item['companyId'] ?? item['company_id'])?.toString(),
+          dealId: (item['dealId'] ?? item['deal_id'])?.toString(),
+          rawMap: item,
+        );
+        _isLoadingById = false;
+      });
+    } catch (e) {
+      debugPrint('[MeetingDetailsScreen load error]: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'This meeting could not be loaded.';
+      });
+    }
   }
 
   String _formatDisplayDate(String raw) {
@@ -264,6 +335,10 @@ class _MeetingDetailsScreenState extends State<MeetingDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingById || _loadError != null) {
+      return RecordLoadingScaffold(title: 'Meeting Details', error: _loadError);
+    }
+
     final statusLabel = _currentMeeting.outcome.isNotEmpty
         ? _currentMeeting.outcome.toUpperCase()
         : 'PENDING';

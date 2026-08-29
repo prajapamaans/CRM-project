@@ -5,7 +5,12 @@ import '../../models/activity_stats_model.dart';
 import '../../models/dashboard_unified_model.dart';
 
 abstract class DashboardRemoteDataSource {
-  Future<ActivityStatsModel> getActivityStats({String? ownerId, String? departmentId});
+  Future<ActivityStatsModel> getActivityStats({
+    String? ownerId,
+    String? departmentId,
+    String? startDate,
+    String? endDate,
+  });
   Future<DashboardUnifiedResponseModel> getDashboardUnified({
     String? ownerId,
     String? departmentId,
@@ -23,13 +28,24 @@ class DashboardRemoteDataSourceImpl implements DashboardRemoteDataSource {
       : _apiService = apiService ?? ApiService();
 
   @override
-  Future<ActivityStatsModel> getActivityStats({String? ownerId, String? departmentId}) async {
+  Future<ActivityStatsModel> getActivityStats({
+    String? ownerId,
+    String? departmentId,
+    String? startDate,
+    String? endDate,
+  }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) {
       queryParameters['ownerId'] = ownerId;
     }
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
+    }
+    if (startDate != null && startDate.isNotEmpty) {
+      queryParameters['startDate'] = startDate;
+    }
+    if (endDate != null && endDate.isNotEmpty) {
+      queryParameters['endDate'] = endDate;
     }
 
     final response = await _apiService.get(

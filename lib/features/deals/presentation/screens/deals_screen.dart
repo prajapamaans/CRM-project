@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
@@ -12,7 +15,6 @@ import 'package:crmproject/features/contacts/presentation/providers/contact_prov
 import '../providers/deal_provider.dart';
 import '../widgets/create_deal_modal.dart';
 import '../widgets/deal_inline_filter_section.dart';
-import 'deal_details_screen.dart';
 
 class DealsScreen extends StatefulWidget {
   const DealsScreen({super.key});
@@ -398,12 +400,10 @@ class _DealsScreenState extends State<DealsScreen> {
                                   });
                                 },
                                 onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => DealDetailsScreen(
-                                        deal: deal,
-                                      ),
-                                    ),
+                                  // /deals/details/:id
+                                  await context.pushNamed(
+                                    RouteNames.dealDetails,
+                                    pathParameters: {RoutePaths.idParam: deal.id},
                                   );
                                   if (mounted) {
                                     _loadDealsForSegment(_selectedSegment);

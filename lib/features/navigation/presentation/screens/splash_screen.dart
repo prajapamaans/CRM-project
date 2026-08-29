@@ -12,17 +12,17 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../../core/navigation/route_names.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
-import '../../../authentication/presentation/screens/login_screen.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
-import 'main_layout_screen.dart';
 
 /// Animated splash screen displaying Apidel branding for min 5s while pre-loading initial CRM data.
 class SplashScreen extends StatefulWidget {
@@ -127,15 +127,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 600),
-        pageBuilder: (context, animation, secondaryAnimation) => FadeTransition(
-          opacity: animation,
-          child: isLoggedIn ? const MainLayoutScreen() : const LoginScreen(),
-        ),
-      ),
-    );
+    // `go` replaces the splash rather than stacking on it, so Back from the
+    // dashboard never returns here or to login.
+    context.goNamed(isLoggedIn ? RouteNames.dashboard : RouteNames.login);
   }
 
   @override

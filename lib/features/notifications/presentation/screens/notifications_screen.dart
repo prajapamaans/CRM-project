@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
@@ -348,16 +351,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             _buildDateHeader(dateHeader, itemsForDate.length),
             const SizedBox(height: 8),
             ...itemsForDate.map((item) {
-              return InkWell(
-                onTap: () {
-                  if (!item.isRead) {
-                    provider.markAsRead(item.id);
-                  }
-                  _openNotificationActivity(item);
-                },
-                child: _buildNotificationItem(
-                  item: item,
-                ),
+              return _buildNotificationItem(
+                item: item,
               );
             }),
             const SizedBox(height: 12),
@@ -478,11 +473,90 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   ///
   /// Notifications for other activity types (or without an activity id) are
   /// left alone — the tap just marks them read as before.
-  void _openNotificationActivity(NotificationModel item) {
-    context.read<NavigationProvider>().openActivity(
-          activityType: item.activityType ?? item.entityType ?? item.type,
-          activityId: item.entityId,
-        );
+  /// Handles tapping a notification item:
+  /// - For Activity notifications (Task, Call, Meeting, Note, Email):
+  ///   - If linked to Deal, Contact, or Company: opens entity screen on Activities tab (initialTabIndex: 1) with highlight.
+  ///   - Otherwise: navigates to the global Activity screen (Calls, Meetings, Emails, Tasks) with highlight.
+  /// - For Entity notifications (Deal, Contact, Company updates):
+  ///   - Opens entity screen on Overview tab (initialTabIndex: 0).
+  void _onNotificationTap(NotificationModel item) {
+    if (!item.isRead) {
+      context.read<NotificationProvider>().markAsRead(item.id);
+    }
+
+    final entityType = (item.entityType ?? '').toLowerCase();
+    final type = item.type.toLowerCase();
+    final actType = (item.activityType ?? '').toLowerCase();
+
+    final isActivityNotification = type.contains('call') ||
+        type.contains('meeting') ||
+        type.contains('email') ||
+        type.contains('task') ||
+        type.contains('note') ||
+        type.contains('activity') ||
+        actType.isNotEmpty;
+
+    final targetActivityId = item.entityId ?? item.id;
+
+    // 1. Redirect to Deal screen
+    final dealId = item.dealId ??
+        (entityType == 'deal' || (type.contains('deal') && !isActivityNotification) ? item.entityId : null);
+    if (dealId != null && dealId.isNotEmpty) {
+      context.pushNamed(
+        RouteNames.dealDetails,
+        pathParameters: {RoutePaths.idParam: dealId},
+        queryParameters: {
+          'tab': isActivityNotification ? '1' : '0',
+          if (isActivityNotification && targetActivityId != null)
+            'activityId': targetActivityId,
+        },
+      );
+      return;
+    }
+
+    // 2. Redirect to Contact screen
+    final contactId = item.contactId ??
+        (entityType == 'contact' || (type.contains('contact') && !isActivityNotification) ? item.entityId : null);
+    if (contactId != null && contactId.isNotEmpty) {
+      context.pushNamed(
+        RouteNames.contactDetails,
+        pathParameters: {RoutePaths.idParam: contactId},
+        queryParameters: {
+          'tab': isActivityNotification ? '1' : '0',
+          if (isActivityNotification && targetActivityId != null)
+            'activityId': targetActivityId,
+        },
+      );
+      return;
+    }
+
+    // 3. Redirect to Company screen
+    final companyId = item.companyId ??
+        (entityType == 'company' || (type.contains('company') && !isActivityNotification) ? item.entityId : null);
+    if (companyId != null && companyId.isNotEmpty) {
+      context.pushNamed(
+        RouteNames.companyDetails,
+        pathParameters: {RoutePaths.idParam: companyId},
+        queryParameters: {
+          'tab': isActivityNotification ? '1' : '0',
+          if (isActivityNotification && targetActivityId != null)
+            'activityId': targetActivityId,
+        },
+      );
+      return;
+    }
+
+    // 4. Global Activity screen navigation via NavigationProvider (Calls, Meetings, Emails, Tasks)
+    final activityTypeToOpen = item.activityType ?? item.entityType ?? item.type;
+    final lowerType = activityTypeToOpen.toLowerCase();
+    if (lowerType.contains('task') || lowerType.contains('note')) {
+      context.read<NavigationProvider>().selectScreen(11, activityId: targetActivityId);
+    } else {
+      context.read<NavigationProvider>().openActivity(
+            activityType: activityTypeToOpen,
+            activityId: targetActivityId,
+          );
+    }
   }
 
   Widget _buildNotificationItem({
@@ -496,91 +570,100 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isNew ? const Color(0xFFE6F4F1).withValues(alpha: 0.3) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isNew ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(item.dynamicIcon, color: Colors.white, size: 16),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _onNotificationTap(item),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title.toUpperCase(),
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF1E293B),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(
-                      timeStr,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: const Color(0xFF94A3B8),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  item.message,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: const Color(0xFF475569),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isNew ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                    borderRadius: BorderRadius.circular(10),
                   ),
+                  child: Icon(item.dynamicIcon, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title.toUpperCase(),
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF1E293B),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            timeStr,
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: const Color(0xFF94A3B8),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.message,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: const Color(0xFF475569),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: _deletingNotificationIds.contains(item.id)
+                      ? const Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFEF4444),
+                            ),
+                          ),
+                        )
+                      : IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: Color(0xFF94A3B8),
+                            size: 20,
+                          ),
+                          hoverColor: const Color(0xFFFEE2E2),
+                          splashRadius: 18,
+                          onPressed: () => _handleDeleteNotification(item),
+                        ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 32,
-            height: 32,
-            child: _deletingNotificationIds.contains(item.id)
-                ? const Center(
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFFEF4444),
-                      ),
-                    ),
-                  )
-                : IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Color(0xFF94A3B8),
-                      size: 20,
-                    ),
-                    hoverColor: const Color(0xFFFEE2E2),
-                    splashRadius: 18,
-                    onPressed: () => _handleDeleteNotification(item),
-                  ),
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/widgets/record_loading_scaffold.dart';
 import '../widgets/create_email_modal.dart';
 class EmailModel {
   final String? id;
@@ -23,9 +24,13 @@ class EmailModel {
 }
 
 class EmailDetailsScreen extends StatefulWidget {
-  final EmailModel email;
+  final EmailModel? email;
 
-  const EmailDetailsScreen({super.key, required this.email});
+  /// Id of the email to load when opened by route
+  /// (`/activities/emails/details/:id`) rather than handed a loaded model.
+  final String? emailId;
+
+  const EmailDetailsScreen({super.key, this.email, this.emailId});
 
   @override
   State<EmailDetailsScreen> createState() => _EmailDetailsScreenState();
@@ -35,11 +40,62 @@ class _EmailDetailsScreenState extends State<EmailDetailsScreen> {
   late EmailModel _currentEmail;
   bool _isDeleting = false;
   bool _isEdited = false;
+  bool _isLoadingById = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _currentEmail = widget.email;
+    final email = widget.email;
+    if (email != null) {
+      _currentEmail = email;
+    } else {
+      // Placeholder while the record is fetched; build shows a spinner until
+      // the real email arrives, so this is never rendered.
+      _currentEmail = EmailModel(title: '');
+      _isLoadingById = true;
+      _loadEmailById();
+    }
+  }
+
+  /// Loads the email behind the `:id` path parameter.
+  Future<void> _loadEmailById() async {
+    final id = widget.emailId?.trim();
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'No email was specified.';
+      });
+      return;
+    }
+
+    try {
+      final res = await ApiService().get('${ApiConstants.activities}/$id');
+      final raw = res.data;
+      final data = raw is Map && raw['data'] is Map ? raw['data'] : raw;
+      if (data is! Map) throw Exception('Unexpected response');
+
+      final item = Map<String, dynamic>.from(data);
+      if (!mounted) return;
+      setState(() {
+        _currentEmail = EmailModel(
+          id: (item['id'] ?? item['_id'])?.toString(),
+          title: (item['title'] ?? item['subject'] ?? 'Email').toString(),
+          status: (item['status'] ?? 'Logged').toString(),
+          startTime: (item['scheduledAt'] ?? item['scheduled_at'] ?? item['createdAt'] ?? '').toString(),
+          assignedTo: (item['ownerName'] ?? 'Admin User').toString(),
+          notes: (item['description'] ?? item['notes'] ?? '').toString(),
+        );
+        _isLoadingById = false;
+      });
+    } catch (e) {
+      debugPrint('[EmailDetailsScreen load error]: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'This email could not be loaded.';
+      });
+    }
   }
 
   String _formatDetailDate(String raw) {
@@ -154,6 +210,10 @@ class _EmailDetailsScreenState extends State<EmailDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingById || _loadError != null) {
+      return RecordLoadingScaffold(title: 'Email Details', error: _loadError);
+    }
+
     return WillPopScope(
       onWillPop: () async {
         Navigator.of(context).pop(_isEdited);

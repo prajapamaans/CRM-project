@@ -156,6 +156,14 @@ class NavigationProvider extends ChangeNotifier {
     return _pinnedKeys.contains(key);
   }
 
+  /// Mirrors the tab the router is currently showing, so the sidebar and
+  /// bottom bar highlight the right entry without driving navigation.
+  void syncSelectedIndex(int index) {
+    if (_selectedIndex == index) return;
+    _selectedIndex = index;
+    notifyListeners();
+  }
+
   /// Selects active screen index.
   ///
   /// Pass [activityId] to tell the destination screen which activity to scroll

@@ -3,12 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import 'package:crmproject/core/utils/activity_utils.dart';
+import '../../../../core/network/api_constants.dart';
+import '../../../../core/network/api_service.dart';
+import '../../../../core/widgets/record_loading_scaffold.dart';
 import '../widgets/create_task_modal.dart';
 
 class TaskDetailsScreen extends StatefulWidget {
-  final TaskModel task;
+  final TaskModel? task;
 
-  const TaskDetailsScreen({super.key, required this.task});
+  /// Id of the task to load when opened by route
+  /// (`/activities/tasks/details/:id`) rather than handed a loaded model.
+  final String? taskId;
+
+  const TaskDetailsScreen({super.key, this.task, this.taskId});
 
   @override
   State<TaskDetailsScreen> createState() => _TaskDetailsScreenState();
@@ -16,15 +23,79 @@ class TaskDetailsScreen extends StatefulWidget {
 
 class _TaskDetailsScreenState extends State<TaskDetailsScreen> {
   late TaskModel _task;
+  bool _isLoadingById = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _task = widget.task;
+    final task = widget.task;
+    if (task != null) {
+      _task = task;
+    } else {
+      // Placeholder while the record is fetched; build shows a spinner until
+      // the real task arrives, so this is never rendered.
+      _task = TaskModel(
+        title: '',
+        dueDate: '',
+        priority: '',
+        status: '',
+        assignedTo: '',
+      );
+      _isLoadingById = true;
+      _loadTaskById();
+    }
+  }
+
+  /// Loads the task behind the `:id` path parameter.
+  Future<void> _loadTaskById() async {
+    final id = widget.taskId?.trim();
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'No task was specified.';
+      });
+      return;
+    }
+
+    try {
+      final res = await ApiService().get('${ApiConstants.activities}/$id');
+      final raw = res.data;
+      final data = raw is Map && raw['data'] is Map ? raw['data'] : raw;
+      if (data is! Map) throw Exception('Unexpected response');
+
+      final item = Map<String, dynamic>.from(data);
+      if (!mounted) return;
+      setState(() {
+        _task = TaskModel(
+          id: (item['id'] ?? item['_id'])?.toString(),
+          title: (item['title'] ?? item['subject'] ?? 'Untitled Activity').toString(),
+          dueDate: (item['scheduledAt'] ?? item['dueDate'] ?? item['createdAt'] ?? '').toString(),
+          priority: (item['priority'] ?? 'None').toString(),
+          status: (item['status'] ?? 'pending').toString(),
+          assignedTo: (item['ownerName'] ?? item['assignedTo'] ?? 'Admin User').toString(),
+          notes: (item['description'] ?? item['notes'] ?? '').toString(),
+          taskType: (item['type'] ?? 'task').toString(),
+          rawMap: item,
+        );
+        _isLoadingById = false;
+      });
+    } catch (e) {
+      debugPrint('[TaskDetailsScreen load error]: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'This task could not be loaded.';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingById || _loadError != null) {
+      return RecordLoadingScaffold(title: 'Task Details', error: _loadError);
+    }
+
     final rawNotes = _task.notes.isNotEmpty
         ? _task.notes
         : (_task.rawMap?['description']?.toString() ?? _task.rawMap?['notes']?.toString() ?? '');

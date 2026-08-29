@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import '../navigation/route_names.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'font_size_modal.dart';
 import '../../features/authentication/presentation/providers/auth_provider.dart';
-import '../../features/authentication/presentation/screens/login_screen.dart';
 
 /// Reusable User Profile menu displaying avatar, name, role badge,
 /// and popup menu options ("Edit Profile" and "Sign Out").
@@ -179,10 +180,9 @@ class UserProfileMenu extends StatelessWidget {
               } else if (value == 2) {
                 await authProvider.logout();
                 if (!context.mounted) return;
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  (route) => false,
-                );
+                // `go` clears the stack, so Back after logout cannot return to
+                // the dashboard.
+                context.goNamed(RouteNames.login);
               }
             },
             child: Padding(

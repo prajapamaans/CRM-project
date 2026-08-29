@@ -1,20 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/network/api_service.dart';
 import '../widgets/create_task_modal.dart';
-import '../widgets/log_call_modal.dart';
 import '../widgets/log_meeting_modal.dart';
-import '../../../companies/data/models/company_model.dart';
-import '../../../companies/presentation/screens/company_details_screen.dart';
-import '../../../contacts/data/models/contact_model.dart';
-import '../../../contacts/presentation/screens/contact_details_screen.dart';
-import '../../../deals/data/models/deal_model.dart';
-import '../../../deals/presentation/screens/deal_details_screen.dart';
-import 'call_details_screen.dart';
-import 'email_details_screen.dart';
-import 'meeting_details_screen.dart';
-import 'task_details_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -485,13 +477,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               final act = item;
 
                               String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null))?.toString();
-                              String? compName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null))?.toString();
 
                               String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
-                              String? contactName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['firstName'] ?? act['contact']['name'] : null))?.toString();
 
                               String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null))?.toString();
-                              String? dealName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['title'] : null))?.toString();
 
                               if (act['associations'] is Map) {
                                 final assocMap = act['associations'] as Map;
@@ -499,21 +488,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                   final firstComp = (assocMap['Companies'] as List).first;
                                   if (firstComp is Map) {
                                     compId = (firstComp['id'] ?? firstComp['_id'] ?? firstComp['objectId'])?.toString();
-                                    compName = (firstComp['name'] ?? firstComp['title'])?.toString();
                                   }
                                 }
                                 if ((contactId == null || contactId.isEmpty) && assocMap['Contacts'] is List && (assocMap['Contacts'] as List).isNotEmpty) {
                                   final firstContact = (assocMap['Contacts'] as List).first;
                                   if (firstContact is Map) {
                                     contactId = (firstContact['id'] ?? firstContact['_id'] ?? firstContact['objectId'])?.toString();
-                                    contactName = (firstContact['name'] ?? firstContact['title'])?.toString();
                                   }
                                 }
                                 if ((dealId == null || dealId.isEmpty) && assocMap['Deals'] is List && (assocMap['Deals'] as List).isNotEmpty) {
                                   final firstDeal = (assocMap['Deals'] as List).first;
                                   if (firstDeal is Map) {
                                     dealId = (firstDeal['id'] ?? firstDeal['_id'] ?? firstDeal['objectId'])?.toString();
-                                    dealName = (firstDeal['name'] ?? firstDeal['title'])?.toString();
                                   }
                                 }
                               } else if (act['associations'] is List) {
@@ -521,17 +507,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                   if (assoc is Map) {
                                     final id = (assoc['objectId'] ?? assoc['id'] ?? assoc['_id'])?.toString();
                                     final type = (assoc['objectType'] ?? assoc['type'])?.toString().toLowerCase();
-                                    final name = (assoc['name'] ?? assoc['title'])?.toString();
                                     if (id != null && id.isNotEmpty) {
                                       if ((type == 'company' || type == 'companies') && (compId == null || compId.isEmpty)) {
                                         compId = id;
-                                        compName = name;
                                       } else if ((type == 'contact' || type == 'contacts') && (contactId == null || contactId.isEmpty)) {
                                         contactId = id;
-                                        contactName = name;
                                       } else if ((type == 'deal' || type == 'deals') && (dealId == null || dealId.isEmpty)) {
                                         dealId = id;
-                                        dealName = name;
                                       }
                                     }
                                   }
@@ -539,107 +521,66 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               }
 
                               if (compId != null && compId.isNotEmpty) {
-                                final companyModel = CompanyModel(
-                                  id: compId,
-                                  name: compName ?? 'Company',
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => CompanyDetailsScreen(company: companyModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
+                                await context.pushNamed(
+                                  RouteNames.companyDetails,
+                                  pathParameters: {RoutePaths.idParam: compId},
+                                  queryParameters: RoutePaths.recordActivityQuery(
+                                    (item['id'] ?? item['_id'])?.toString(),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else if (contactId != null && contactId.isNotEmpty) {
-                                final contactModel = ContactModel(
-                                  id: contactId,
-                                  firstName: contactName ?? 'Contact',
-                                  email: '',
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ContactDetailsScreen(contact: contactModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
+                                await context.pushNamed(
+                                  RouteNames.contactDetails,
+                                  pathParameters: {RoutePaths.idParam: contactId},
+                                  queryParameters: RoutePaths.recordActivityQuery(
+                                    (item['id'] ?? item['_id'])?.toString(),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else if (dealId != null && dealId.isNotEmpty) {
-                                final dealModel = DealModel(
-                                  id: dealId,
-                                  title: dealName ?? 'Deal',
-                                  amount: 0.0,
-                                  stage: '',
-                                  probability: 0,
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => DealDetailsScreen(deal: dealModel, initialTabIndex: 1, highlightActivityId: (item['id'] ?? item['_id'])?.toString()),
+                                await context.pushNamed(
+                                  RouteNames.dealDetails,
+                                  pathParameters: {RoutePaths.idParam: dealId},
+                                  queryParameters: RoutePaths.recordActivityQuery(
+                                    (item['id'] ?? item['_id'])?.toString(),
                                   ),
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else if (lowerType == 'meeting') {
-                                final meetingModel = MeetingModel(
-                                  id: (item['id'] ?? item['_id'])?.toString(),
-                                  title: title.toString(),
-                                  outcome: (item['outcome'] ?? item['status'] ?? 'Scheduled').toString(),
-                                  duration: (item['duration'] ?? '30 Minutes').toString(),
-                                  startTime: (item['scheduledAt'] ?? item['dueDate'] ?? item['createdAt'] ?? '').toString(),
-                                  notes: (item['notes'] ?? item['description'] ?? '').toString(),
-                                  contactId: (item['contactId'] ?? item['contact_id'])?.toString(),
-                                  companyId: (item['companyId'] ?? item['company_id'])?.toString(),
-                                  dealId: (item['dealId'] ?? item['deal_id'])?.toString(),
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (context) => MeetingDetailsScreen(meeting: meetingModel),
-                                  ),
+                                await context.pushNamed(
+                                  RouteNames.meetingDetails,
+                                  pathParameters: {
+                                    RoutePaths.idParam:
+                                        (item['id'] ?? item['_id']).toString(),
+                                  },
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else if (lowerType == 'call') {
-                                final callModel = CallModel(
-                                  id: (item['id'] ?? item['_id'])?.toString(),
-                                  title: title.toString(),
-                                  outcome: (item['outcome'] ?? item['status'] ?? 'Connected').toString(),
-                                  duration: (item['duration'] ?? '5 Minutes').toString(),
-                                  startTime: (item['scheduledAt'] ?? item['dueDate'] ?? item['createdAt'] ?? '').toString(),
-                                  notes: (item['notes'] ?? item['description'] ?? '').toString(),
-                                  contactId: (item['contactId'] ?? item['contact_id'])?.toString(),
-                                  companyId: (item['companyId'] ?? item['company_id'])?.toString(),
-                                  dealId: (item['dealId'] ?? item['deal_id'])?.toString(),
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (context) => CallDetailsScreen(call: callModel),
-                                  ),
+                                await context.pushNamed(
+                                  RouteNames.callDetails,
+                                  pathParameters: {
+                                    RoutePaths.idParam:
+                                        (item['id'] ?? item['_id']).toString(),
+                                  },
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else if (lowerType == 'email') {
-                                final emailModel = EmailModel(
-                                  id: (item['id'] ?? item['_id'])?.toString(),
-                                  title: title.toString(),
-                                  status: (item['status'] ?? 'Logged').toString(),
-                                  startTime: (item['scheduledAt'] ?? item['createdAt'] ?? '').toString(),
-                                  notes: (item['notes'] ?? item['description'] ?? item['body'] ?? '').toString(),
-                                );
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (context) => EmailDetailsScreen(email: emailModel),
-                                  ),
+                                await context.pushNamed(
+                                  RouteNames.emailDetails,
+                                  pathParameters: {
+                                    RoutePaths.idParam:
+                                        (item['id'] ?? item['_id']).toString(),
+                                  },
                                 );
                                 _fetchCalendarActivities(forceRefresh: true);
                               } else {
-                                final taskModel = TaskModel(
-                                  id: (item['id'] ?? item['_id'])?.toString(),
-                                  title: title.toString(),
-                                  dueDate: (item['dueDate'] ?? item['due_date'] ?? item['scheduledAt'] ?? item['createdAt'] ?? '').toString(),
-                                  priority: (item['priority'] ?? 'Medium').toString(),
-                                  status: (item['status'] ?? 'Pending').toString(),
-                                  assignedTo: (item['assignedTo'] ?? item['owner']?['name'] ?? 'Admin User').toString(),
-                                  notes: (item['notes'] ?? item['description'] ?? '').toString(),
-                                  rawMap: item,
-                                );
-                                final refreshed = await Navigator.of(context).push<bool>(
-                                  MaterialPageRoute(
-                                    builder: (context) => TaskDetailsScreen(task: taskModel),
-                                  ),
+                                final refreshed = await context.pushNamed<bool>(
+                                  RouteNames.taskDetails,
+                                  pathParameters: {
+                                    RoutePaths.idParam:
+                                        (item['id'] ?? item['_id']).toString(),
+                                  },
                                 );
                                 if (refreshed == true) {
                                   _fetchCalendarActivities(forceRefresh: true);

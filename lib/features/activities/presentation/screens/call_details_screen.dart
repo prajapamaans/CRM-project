@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
+import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/widgets/record_loading_scaffold.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../widgets/log_call_modal.dart';
 
 class CallDetailsScreen extends StatefulWidget {
-  final CallModel call;
+  final CallModel? call;
 
-  const CallDetailsScreen({super.key, required this.call});
+  /// Id of the call to load when opened by route
+  /// (`/activities/calls/details/:id`) rather than handed a loaded model.
+  final String? callId;
+
+  const CallDetailsScreen({super.key, this.call, this.callId});
 
   @override
   State<CallDetailsScreen> createState() => _CallDetailsScreenState();
@@ -18,11 +24,74 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
   late CallModel _currentCall;
   bool _isDeleting = false;
   bool _isEdited = false;
+  bool _isLoadingById = false;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _currentCall = widget.call;
+    final call = widget.call;
+    if (call != null) {
+      _currentCall = call;
+    } else {
+      // Placeholder while the record is fetched; build shows a spinner until
+      // the real call arrives, so this is never rendered.
+      _currentCall = CallModel(title: '', outcome: '', duration: '', startTime: '', notes: '');
+      _isLoadingById = true;
+      _loadCallById();
+    }
+  }
+
+  /// Loads the call behind the `:id` path parameter.
+  Future<void> _loadCallById() async {
+    final id = widget.callId?.trim();
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'No call was specified.';
+      });
+      return;
+    }
+
+    try {
+      final res = await ApiService().get('${ApiConstants.activities}/$id');
+      final raw = res.data;
+      final data = raw is Map && raw['data'] is Map ? raw['data'] : raw;
+      if (data is! Map) throw Exception('Unexpected response');
+
+      final item = Map<String, dynamic>.from(data);
+      final minutes = parseDurationMinutes(
+        item['durationMinutes'] ?? item['duration_minutes'] ?? item['duration'],
+      );
+      final scheduledAt = parseActivityDateTimeOrNull(
+        item['scheduledAt'] ?? item['scheduled_at'] ?? item['startTime'],
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _currentCall = CallModel(
+          id: (item['id'] ?? item['_id'])?.toString(),
+          title: (item['title'] ?? item['subject'] ?? 'Call').toString(),
+          outcome: (item['outcome'] ?? 'Scheduled').toString(),
+          duration: minutes != null ? formatDurationLabel(minutes) : '15 Minutes',
+          startTime: scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '',
+          notes: (item['description'] ?? item['notes'] ?? '').toString(),
+          assignedTo: (item['ownerName'] ?? 'Admin User').toString(),
+          priority: (item['priority'] ?? 'Medium').toString(),
+          status: (item['status'] ?? 'PENDING').toString(),
+          type: (item['type'] ?? 'call').toString(),
+          rawMap: item,
+        );
+        _isLoadingById = false;
+      });
+    } catch (e) {
+      debugPrint('[CallDetailsScreen load error]: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingById = false;
+        _loadError = 'This call could not be loaded.';
+      });
+    }
   }
 
   String _formatDetailDate(String raw) {
@@ -138,6 +207,10 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingById || _loadError != null) {
+      return RecordLoadingScaffold(title: 'Call Details', error: _loadError);
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {

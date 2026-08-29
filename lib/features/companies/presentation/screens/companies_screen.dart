@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -11,7 +14,6 @@ import 'package:crmproject/features/contacts/presentation/providers/contact_prov
 import '../providers/company_provider.dart';
 import '../widgets/company_inline_filter_section.dart';
 import '../widgets/create_company_modal.dart';
-import 'company_details_screen.dart';
 
 class CompaniesScreen extends StatefulWidget {
   const CompaniesScreen({super.key});
@@ -408,12 +410,10 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                                   });
                                 },
                                 onTap: () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => CompanyDetailsScreen(
-                                        company: company,
-                                      ),
-                                    ),
+                                  // /companies/details/:id
+                                  await context.pushNamed(
+                                    RouteNames.companyDetails,
+                                    pathParameters: {RoutePaths.idParam: company.id},
                                   );
                                   if (mounted) {
                                     _loadCompaniesForSegment(_selectedSegment);

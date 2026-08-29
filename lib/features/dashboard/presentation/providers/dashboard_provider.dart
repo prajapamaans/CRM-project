@@ -30,7 +30,13 @@ class DashboardProvider extends ChangeNotifier {
   String? get statsError => _statsError;
   String? get feedError => _feedError;
 
-  Future<void> loadDashboardData({String? ownerId, String? departmentId, String? departmentName}) async {
+  Future<void> loadDashboardData({
+    String? ownerId,
+    String? departmentId,
+    String? departmentName,
+    String? startDate,
+    String? endDate,
+  }) async {
     // Clear previous state to prevent showing stale data while loading new department
     _stats = null;
     _unifiedFeed = null;
@@ -38,19 +44,39 @@ class DashboardProvider extends ChangeNotifier {
     notifyListeners();
 
     await Future.wait([
-      fetchActivityStats(ownerId: ownerId, departmentId: departmentId),
-      fetchDashboardUnified(ownerId: ownerId, departmentId: departmentId),
+      fetchActivityStats(
+        ownerId: ownerId,
+        departmentId: departmentId,
+        startDate: startDate,
+        endDate: endDate,
+      ),
+      fetchDashboardUnified(
+        ownerId: ownerId,
+        departmentId: departmentId,
+        startDate: startDate,
+        endDate: endDate,
+      ),
       fetchReportsDashboardsDefault(departmentId: departmentId, departmentName: departmentName),
     ]);
   }
 
-  Future<void> fetchActivityStats({String? ownerId, String? departmentId}) async {
+  Future<void> fetchActivityStats({
+    String? ownerId,
+    String? departmentId,
+    String? startDate,
+    String? endDate,
+  }) async {
     _isLoadingStats = true;
     _statsError = null;
     notifyListeners();
 
     try {
-      _stats = await _repository.getActivityStats(ownerId: ownerId, departmentId: departmentId);
+      _stats = await _repository.getActivityStats(
+        ownerId: ownerId,
+        departmentId: departmentId,
+        startDate: startDate,
+        endDate: endDate,
+      );
     } catch (e) {
       _statsError = e.toString();
     } finally {

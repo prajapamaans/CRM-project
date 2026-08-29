@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
@@ -24,10 +27,6 @@ import '../../data/models/deal_model.dart';
 import '../../data/repositories/deal_repository.dart';
 import '../providers/deal_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
-import 'package:crmproject/features/contacts/presentation/screens/contact_details_screen.dart';
-import 'package:crmproject/features/contacts/data/models/contact_model.dart';
-import 'package:crmproject/features/companies/presentation/screens/company_details_screen.dart';
-import 'package:crmproject/features/companies/data/models/company_model.dart';
 
 class DealDetailsScreen extends StatefulWidget {
   final DealModel? deal;
@@ -37,11 +36,16 @@ class DealDetailsScreen extends StatefulWidget {
   /// one the user tapped on the Calls, Meetings, Emails or Tasks screen.
   final String? highlightActivityId;
 
+  /// Id of the deal to show when the screen is opened by route
+  /// (`/deals/details/:id`) rather than handed a loaded model.
+  final String? dealId;
+
   const DealDetailsScreen({
     super.key,
     this.deal,
     this.initialTabIndex = 0,
     this.highlightActivityId,
+    this.dealId,
   });
 
   @override
@@ -166,6 +170,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   List<Map<String, dynamic>> _userList = [];
   final Set<String> _expandedActivityIds = {};
 
+  /// Id of the deal on screen, whether it arrived as a loaded model or as the
+  /// `:id` path parameter of `/deals/details/:id`.
+  String? get _recordId {
+    final routeId = widget.dealId?.trim();
+    if (routeId != null && routeId.isNotEmpty) return routeId;
+    return widget.deal?.id;
+  }
+
   /// Activity highlighted in the All-activities list. Seeded from
   /// [DealDetailsScreen.highlightActivityId] and moved when the user taps
   /// another row, so only ever one row is highlighted.
@@ -228,7 +240,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   bool _isLoadingDetails = false;
 
   Future<void> _fetchDealDetails() async {
-    final dealId = widget.deal?.id;
+    final dealId = _recordId;
     if (dealId == null || dealId.isEmpty) return;
 
     setState(() {
@@ -510,7 +522,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   Future<void> _fetchActivities() async {
-    final dealId = widget.deal?.id;
+    final dealId = _recordId;
     if (dealId == null || dealId.isEmpty) return;
 
     setState(() {
@@ -706,7 +718,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
     // Moving a deal goes through PATCH /api/deals/:id/stage, which validates
     // the transition; the generic update does not move the stage.
-    final dealId = widget.deal?.id ?? context.read<DealProvider>().selectedDeal?.id;
+    final dealId = _recordId ?? context.read<DealProvider>().selectedDeal?.id;
     if (dealId != null && dealId.isNotEmpty) {
       try {
         await ApiService().patch(
@@ -733,7 +745,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   Future<void> _saveDealChanges() async {
-    final dealId = widget.deal?.id ?? context.read<DealProvider>().selectedDeal?.id;
+    final dealId = _recordId ?? context.read<DealProvider>().selectedDeal?.id;
     final amountNum = double.tryParse(_amountController.text.trim());
     final titleStr = _nameController.text.trim();
     final pipelineStr = _pipelineController.text.trim();
@@ -1568,21 +1580,21 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     } else if (type.contains('email')) {
       result = await CreateEmailModal.show(
         context,
         emailToEdit: act,
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     } else if (type.contains('note')) {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     } else if (type.contains('call')) {
@@ -1597,7 +1609,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     } else if (type.contains('meeting')) {
@@ -1612,14 +1624,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           notes: notesText,
           rawMap: act,
         ),
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     } else {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
-        dealId: widget.deal?.id,
+        dealId: _recordId,
         associatedRecordName: widget.deal?.title ?? 'Deal',
       );
     }
@@ -2108,7 +2120,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                        onTap: () async {
                                          final initialAssoc = _extractAssociations(
                                            act,
-                                           defaultDealId: widget.deal?.id,
+                                           defaultDealId: _recordId,
                                            defaultDealName: widget.deal?.title,
                                          );
 
@@ -2199,7 +2211,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                              builder: (context) {
                                                final assocMap = _extractAssociations(
                                                  act,
-                                                 defaultDealId: widget.deal?.id,
+                                                 defaultDealId: _recordId,
                                                  defaultDealName: widget.deal?.title,
                                                );
                                                final cnt = assocMap['Companies']!.length + assocMap['Contacts']!.length + assocMap['Deals']!.length;
@@ -2711,7 +2723,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   onPressed: _isLoadingAiSummary
                       ? null
                       : () {
-                          final dealId = widget.deal?.id;
+                          final dealId = _recordId;
                           if (dealId != null && dealId.isNotEmpty) {
                             _fetchAiSummary('deal', dealId);
                           }
@@ -2820,7 +2832,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                 }).toList();
               });
 
-              final dealId = widget.deal?.id;
+              final dealId = _recordId;
               if (dealId != null && dealId.isNotEmpty) {
                 try {
                   final repo = DealRepositoryImpl();
@@ -2843,7 +2855,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           isTeal: true,
           topActionText: '+ Add',
           onPressed: () async {
-            final dealId = widget.deal?.id;
+            final dealId = _recordId;
             final res = await CreateTaskModal.show(context, dealId: dealId);
             if (res != null) {
               setState(() {
@@ -2861,51 +2873,19 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
   void _navigateToEntityDetails(String entityType, Map<String, dynamic> item) {
     final id = (item['id'] ?? '').toString();
-    final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
-    final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+    if (id.isEmpty) return;
 
-    if (entityType == 'contact') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ContactDetailsScreen(
-            contact: ContactModel(
-              id: id,
-              firstName: name,
-              email: subtext,
-            ),
-          ),
-        ),
-      );
-    } else if (entityType == 'company') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CompanyDetailsScreen(
-            company: CompanyModel(
-              id: id,
-              name: name,
-              domain: subtext,
-            ),
-          ),
-        ),
-      );
-    } else if (entityType == 'deal') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DealDetailsScreen(
-            deal: DealModel(
-              id: id,
-              title: name,
-              amount: 0,
-              stage: '',
-              probability: 0,
-            ),
-          ),
-        ),
-      );
-    }
+    // /contacts|companies|deals/details/:id — the target screen loads the
+    // record from the id.
+    const routeByType = {
+      'contact': RouteNames.contactDetails,
+      'company': RouteNames.companyDetails,
+      'deal': RouteNames.dealDetails,
+    };
+    final routeName = routeByType[entityType];
+    if (routeName == null) return;
+
+    context.pushNamed(routeName, pathParameters: {RoutePaths.idParam: id});
   }
 
   Widget _buildAssociationCard({
@@ -3207,7 +3187,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   void _openActivityModal(String type) async {
-    final dealId = widget.deal?.id;
+    final dealId = _recordId;
     final name = widget.deal?.title.isNotEmpty == true ? widget.deal!.title : 'xyzzzz';
     dynamic result;
 

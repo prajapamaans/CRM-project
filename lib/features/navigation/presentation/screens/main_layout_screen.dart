@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/navigation/app_router.dart';
 import '../../../../theme/app_theme.dart';
 import '../../../../core/widgets/bottom_nav_bar.dart';
 import '../../../../core/widgets/desktop_header.dart';
@@ -29,7 +31,12 @@ import '../../../departments/presentation/screens/departments_screen.dart';
 import '../providers/navigation_provider.dart';
 
 class MainLayoutScreen extends StatefulWidget {
-  const MainLayoutScreen({super.key});
+  /// The routed screen to show in the body. Supplied by the shell route in
+  /// [AppRouter]; when null the screen falls back to the index-driven list,
+  /// which keeps the layout usable on its own (e.g. in widget tests).
+  final Widget? child;
+
+  const MainLayoutScreen({super.key, this.child});
 
   @override
   State<MainLayoutScreen> createState() => _MainLayoutScreenState();
@@ -85,17 +92,46 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     'Departments Configuration',
   ];
 
+  /// Switches main tab. Under the router this is a `go`, which replaces the
+  /// current tab rather than stacking a second copy of it; without the router
+  /// it falls back to the index the layout was already using.
+  void _goToTab(BuildContext context, NavigationProvider navProvider, int index) {
+    final location = AppRouter.locationForTab(index);
+    if (widget.child != null && location != null) {
+      if (GoRouterState.of(context).uri.path == location) return;
+      context.go(location);
+      return;
+    }
+    navProvider.selectScreen(index);
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isDesktop = MediaQuery.of(context).size.width >= 800;
     final deptProvider = context.watch<DepartmentProvider>();
 
+    // Under the router the current location decides the tab; the provider is
+    // still what the sidebar and bottom bar read, so keep the two in step.
+    final routedChild = widget.child;
+    if (routedChild != null) {
+      final location = GoRouterState.of(context).uri.path;
+      final routedIndex = AppRouter.tabIndexForLocation(location);
+      final navProvider = context.read<NavigationProvider>();
+      if (navProvider.selectedIndex != routedIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) navProvider.syncSelectedIndex(routedIndex);
+        });
+      }
+    }
+
     return Consumer<NavigationProvider>(
       builder: (context, navProvider, child) {
-        final int activeIndex = navProvider.selectedIndex >= 0 &&
-                navProvider.selectedIndex < _screens.length
-            ? navProvider.selectedIndex
-            : 0;
+        final int activeIndex = routedChild != null
+            ? AppRouter.tabIndexForLocation(GoRouterState.of(context).uri.path)
+            : (navProvider.selectedIndex >= 0 &&
+                    navProvider.selectedIndex < _screens.length
+                ? navProvider.selectedIndex
+                : 0);
 
         return Scaffold(
           backgroundColor: const Color(0xFFF8FAFC),
@@ -107,7 +143,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                     isFullScreen: false,
                     onToggleFullScreen: () {},
                     onItemSelected: (index) {
-                      navProvider.selectScreen(index);
+                      _goToTab(context, navProvider, index);
                       Navigator.of(context).pop();
                     },
                     onClose: () => Navigator.of(context).pop(),
@@ -254,7 +290,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
               const SizedBox(width: 6),
               IconButton(
                 onPressed: () {
-                  navProvider.selectScreen(6);
+                  _goToTab(context, navProvider, 6);
                 },
                 icon: Stack(
                   children: [
@@ -299,7 +335,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                         });
                       },
                       onItemSelected: (index) {
-                        navProvider.selectScreen(index);
+                        _goToTab(context, navProvider, index);
                       },
                     ),
                   Expanded(
@@ -307,7 +343,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                       children: [
                         if (isDesktop) const DesktopHeader(),
                         Expanded(
-                          child: _screens[activeIndex],
+                          child: routedChild ?? _screens[activeIndex],
                         ),
                       ],
                     ),
@@ -325,7 +361,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                       });
                     },
                     onItemSelected: (index) {
-                      navProvider.selectScreen(index);
+                      _goToTab(context, navProvider, index);
                       setState(() {
                         _isFullScreenMenu = false;
                       });
@@ -388,7 +424,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
               ? CustomBottomNavBar(
                   currentIndex: activeIndex,
                   onTap: (index) {
-                    navProvider.selectScreen(index);
+                    _goToTab(context, navProvider, index);
                   },
                 )
               : null,

@@ -50,6 +50,8 @@
 // • `AutovalidateMode.onUserInteraction`: Triggers validation automatically as user types into fields.
 // ============================================================================
 
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -197,10 +199,9 @@ class _LoginScreenState extends State<LoginScreen> {
         await context.read<DepartmentProvider>().initFromUser(user);
       }
       if (!mounted) return;
-      // Navigate to InitialDataLoaderScreen to pre-fetch initial application data
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const InitialDataLoaderScreen()),
-      );
+      // Pre-fetch initial application data. `go` replaces login rather than
+      // stacking on it, so Back from the dashboard never returns here.
+      context.goNamed(RouteNames.dataLoader);
     } else {
       _showError(authProvider.error ?? 'Login failed');
     }

@@ -18,8 +18,12 @@ class NetworkException implements Exception {
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
       case DioExceptionType.connectionError:
-        return const NetworkException(
-          message: 'Connection failed. Please check your internet connection.',
+        final errDetail = dioException.message ?? dioException.error?.toString();
+        final detailMsg = errDetail != null && errDetail.isNotEmpty && !errDetail.contains('DioException')
+            ? ' ($errDetail)'
+            : '';
+        return NetworkException(
+          message: 'Connection failed. Please check your internet connection.$detailMsg',
         );
       case DioExceptionType.badResponse:
         final response = dioException.response;

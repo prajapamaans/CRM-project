@@ -15,6 +15,8 @@ import '../../../deals/data/models/deal_model.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../../core/network/api_service.dart';
+import '../../../../core/models/bingo_summary_model.dart';
 import '../../data/models/activity_stats_model.dart';
 import '../providers/dashboard_provider.dart';
 
@@ -30,6 +32,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedTimeFilter = 1; // 0: 7 Days, 1: 30 Days, 2: 90 Days, 3: All time
   String? _lastDepartmentId;
   Future<List<Map<String, dynamic>>>? _meetingsBookedFuture;
+  bool _isGeneratingBingoAi = false;
+
+  Map<String, String?> _getDashboardTimeFilterRange() {
+    final now = DateTime.now();
+    DateTime? start;
+    DateTime? end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+    switch (_selectedTimeFilter) {
+      case 0: // 7 Days
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 7));
+        break;
+      case 1: // 30 Days
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
+        break;
+      case 2: // 90 Days
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 90));
+        break;
+      case 3: // All time
+      default:
+        start = null;
+        end = null;
+        break;
+    }
+
+    final startStr = start != null
+        ? "${start.year.toString().padLeft(4, '0')}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}"
+        : null;
+    final endStr = end != null
+        ? "${end.year.toString().padLeft(4, '0')}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}"
+        : null;
+
+    return {'startDate': startStr, 'endDate': endStr};
+  }
 
   @override
   void didChangeDependencies() {
@@ -48,10 +83,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final auth = context.read<AuthProvider>();
       final currentUserId = auth.currentUser?.id;
       final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      final range = _getDashboardTimeFilterRange();
       
       context.read<DashboardProvider>().loadDashboardData(
         ownerId: _selectedPillIndex == 1 ? currentUserId : null,
         departmentId: deptId,
+        startDate: range['startDate'],
+        endDate: range['endDate'],
       );
       context.read<ContactProvider>().fetchContacts(departmentId: deptId);
       context.read<DealProvider>().fetchDeals(departmentId: deptId);
@@ -70,10 +108,297 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final auth = context.read<AuthProvider>();
     final ownerId = index == 1 ? auth.currentUser?.id : null;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    final range = _getDashboardTimeFilterRange();
+
     context.read<DashboardProvider>().loadDashboardData(
       ownerId: ownerId,
       departmentId: deptId,
+      startDate: range['startDate'],
+      endDate: range['endDate'],
     );
+  }
+
+  void _onTimeFilterChanged(int index) {
+    setState(() {
+      _selectedTimeFilter = index;
+    });
+    final auth = context.read<AuthProvider>();
+    final ownerId = _selectedPillIndex == 1 ? auth.currentUser?.id : null;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    final range = _getDashboardTimeFilterRange();
+
+    context.read<DashboardProvider>().loadDashboardData(
+      ownerId: ownerId,
+      departmentId: deptId,
+      startDate: range['startDate'],
+      endDate: range['endDate'],
+    );
+  }
+
+  Future<void> _handleAskBingoTap() async {
+    if (_isGeneratingBingoAi) return;
+
+    final auth = context.read<AuthProvider>();
+    final userId = auth.currentUser?.id ?? 'me';
+
+    setState(() {
+      _isGeneratingBingoAi = true;
+    });
+
+    // Show Bingo AI Modal
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return FutureBuilder<BingoSummaryResponse>(
+              future: ApiService().getBingoSummary(
+                recordType: 'dashboard',
+                recordId: userId,
+              ),
+              builder: (context, snapshot) {
+                return Container(
+                  height: MediaQuery.of(context).size.height * 0.7,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3E8FF),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: const Color(0xFFD8B4FE)),
+                                ),
+                                child: const Icon(
+                                  Icons.auto_awesome_rounded,
+                                  color: Color(0xFF7C3AED),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Bingo AI Assistant',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: const Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                  Text(
+                                    'CRM Workspace Analysis',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      color: const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close_rounded, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                      const SizedBox(height: 16),
+
+                      // Content State
+                      Expanded(
+                        child: snapshot.connectionState == ConnectionState.waiting
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const CircularProgressIndicator(color: Color(0xFF7C3AED)),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Bingo AI is analyzing your CRM data...',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : snapshot.hasError
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.error_outline_rounded,
+                                          color: Color(0xFFEF4444),
+                                          size: 40,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          'Failed to generate AI analysis',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: const Color(0xFF1E293B),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          snapshot.error.toString(),
+                                          textAlign: TextAlign.center,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            color: const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF7C3AED),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                          ),
+                                          onPressed: () {
+                                            setModalState(() {});
+                                          },
+                                          icon: const Icon(Icons.refresh, color: Colors.white, size: 16),
+                                          label: Text(
+                                            'Retry',
+                                            style: GoogleFonts.poppins(color: Colors.white, fontSize: 13),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : SingleChildScrollView(
+                                    physics: const BouncingScrollPhysics(),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(14),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFF8FAFC),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                                          ),
+                                          child: Text(
+                                            snapshot.data?.data.summary.isNotEmpty == true
+                                                ? snapshot.data!.data.summary
+                                                : 'Bingo AI has compiled key data from your workspace. Review active leads, pending tasks, and deals to stay on track!',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              height: 1.5,
+                                              color: const Color(0xFF334155),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        if (snapshot.data?.data.activities.isNotEmpty == true) ...[
+                                          Text(
+                                            'Key Recommended Activities',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: const Color(0xFF1E293B),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ...snapshot.data!.data.activities.map(
+                                            (act) => Container(
+                                              margin: const EdgeInsets.only(bottom: 8),
+                                              padding: const EdgeInsets.all(10),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.task_alt_rounded,
+                                                    color: Color(0xFF00A884),
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      act.title ?? act.description ?? act.type,
+                                                      style: GoogleFonts.poppins(
+                                                        fontSize: 12,
+                                                        color: const Color(0xFF1E293B),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00A884),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            context.read<NavigationProvider>().selectScreen(5);
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 18),
+                          label: Text(
+                            'Open Full Bingo AI Assistant',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      if (mounted) {
+        setState(() {
+          _isGeneratingBingoAi = false;
+        });
+      }
+    });
   }
 
   @override
@@ -608,14 +933,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: 'Ask Bingo',
             icon: Icons.auto_awesome_rounded,
             isHighlighted: true,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Ask Bingo AI Assistant clicked!'),
-                  duration: Duration(seconds: 1),
-                ),
-              );
-            },
+            onTap: _handleAskBingoTap,
           ),
         ],
       ),
@@ -625,11 +943,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildTimeFilterPill(int index, String label) {
     final bool isSelected = _selectedTimeFilter == index;
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedTimeFilter = index;
-        });
-      },
+      onTap: () => _onTimeFilterChanged(index),
       child: Container(
         margin: const EdgeInsets.only(right: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
