@@ -15,6 +15,7 @@ class ContactModel {
   final String? msp;
   final String? avatarUrl;
   final String? leadStatus;
+  final String? lifecycleStageId;
   final String? lifecycleStage;
   final String? createdAt;
   final List<Map<String, dynamic>>? associatedCompanies;
@@ -36,6 +37,7 @@ class ContactModel {
     this.msp,
     this.avatarUrl,
     this.leadStatus,
+    this.lifecycleStageId,
     this.lifecycleStage,
     this.createdAt,
     this.associatedCompanies,
@@ -44,6 +46,27 @@ class ContactModel {
   });
 
   factory ContactModel.fromJson(Map<String, dynamic> json) {
+    final rawStageId = (json['lifecycleStageId'] ??
+            json['lifecycle_stage_id'] ??
+            json['lifecycleStageID'] ??
+            json['stageId'] ??
+            json['stage_id'])
+        ?.toString();
+
+    final rawStage = json['lifecycleStage'] ?? json['lifecycle_stage'] ?? json['stage'];
+    String? stageId = rawStageId;
+    String? stageName;
+
+    if (rawStage is Map) {
+      stageId ??= (rawStage['id'] ?? rawStage['_id'])?.toString();
+      stageName = (rawStage['name'] ?? rawStage['label'] ?? rawStage['value'] ?? rawStage['stageName'])?.toString();
+    } else if (rawStage is String) {
+      stageName = rawStage;
+      if (stageId == null || stageId.isEmpty) {
+        stageId = rawStage;
+      }
+    }
+
     return ContactModel(
       id: json['id'] as String? ?? '',
       firstName: json['firstName'] as String? ?? json['first_name'] as String?,
@@ -59,7 +82,8 @@ class ContactModel {
       msp: json['msp'] as String?,
       avatarUrl: json['avatarUrl'] as String? ?? json['avatar_url'] as String?,
       leadStatus: json['leadStatus'] as String? ?? json['lead_status'] as String?,
-      lifecycleStage: json['lifecycleStage'] as String? ?? json['lifecycle_stage'] as String?,
+      lifecycleStageId: stageId,
+      lifecycleStage: stageName,
       createdAt: json['createdAt'] as String? ?? json['created_at'] as String?,
       associatedCompanies: (json['associatedCompanies'] as List?)
           ?.map((e) => Map<String, dynamic>.from(e as Map))
@@ -109,6 +133,7 @@ class ContactModel {
       if (ownerName != null) 'ownerName': ownerName,
       if (avatarUrl != null) 'avatarUrl': avatarUrl,
       if (leadStatus != null) 'leadStatus': leadStatus,
+      if (lifecycleStageId != null) 'lifecycleStageId': lifecycleStageId,
       if (lifecycleStage != null) 'lifecycleStage': lifecycleStage,
       if (createdAt != null) 'createdAt': createdAt,
     };
@@ -128,6 +153,7 @@ class ContactModel {
     String? ownerName,
     String? avatarUrl,
     String? leadStatus,
+    String? lifecycleStageId,
     String? lifecycleStage,
     String? createdAt,
   }) {
@@ -145,6 +171,7 @@ class ContactModel {
       ownerName: ownerName ?? this.ownerName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       leadStatus: leadStatus ?? this.leadStatus,
+      lifecycleStageId: lifecycleStageId ?? this.lifecycleStageId,
       lifecycleStage: lifecycleStage ?? this.lifecycleStage,
       createdAt: createdAt ?? this.createdAt,
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../../../../core/network/api_constants.dart';
 import '../../../../../core/network/api_service.dart';
+import '../../../../../core/utils/filter_query_utils.dart';
 import '../../models/contact_model.dart';
 
 class PaginatedContactsResponse {
@@ -25,6 +26,11 @@ abstract class ContactRemoteDataSource {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   });
 
   Future<ContactModel> getContactById(String id);
@@ -50,20 +56,58 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   }) async {
+    // Only non-empty values are added. An empty `page=` fails Zod validation
+    // with a 400, and an empty filter value would read as a real filter
+    // server-side — after Clear, the key has to be gone, not blank.
     final queryParameters = <String, dynamic>{};
-    if (page != null) queryParameters['page'] = page;
-    if (limit != null) queryParameters['limit'] = limit;
+    if (page != null && page.isNotEmpty) queryParameters['page'] = page;
+    if (limit != null && limit.isNotEmpty) queryParameters['limit'] = limit;
     if (search != null && search.isNotEmpty) queryParameters['search'] = search;
+    if (sort != null && sort.isNotEmpty) queryParameters['sort'] = sort;
+    if (order != null && order.isNotEmpty) queryParameters['order'] = order;
     if (ownerId != null && ownerId.isNotEmpty) {
+      // The documented name is `ownerId`; `owner_id` is kept alongside it
+      // because that is the spelling this client has always sent.
+      queryParameters['ownerId'] = ownerId;
       queryParameters['owner_id'] = ownerId;
+    }
+    if (lifecycleStage != null && lifecycleStage.isNotEmpty) {
+      queryParameters['lifecycleStage'] = lifecycleStage;
+      queryParameters['lifecycle_stage'] = lifecycleStage;
+      final slug = FilterValue.slugify(lifecycleStage);
+      if (slug.isNotEmpty && slug != lifecycleStage) {
+        queryParameters['lifecycleStageSlug'] = slug;
+        queryParameters['lifecycle_stage_slug'] = slug;
+      }
+    }
+    if (leadStatus != null && leadStatus.isNotEmpty) {
+      queryParameters['leadStatus'] = leadStatus;
+      queryParameters['lead_status'] = leadStatus;
+      final slug = FilterValue.slugify(leadStatus);
+      if (slug.isNotEmpty && slug != leadStatus) {
+        queryParameters['leadStatusSlug'] = slug;
+        queryParameters['lead_status_slug'] = slug;
+      }
+    }
+    if (createdDateRange != null && createdDateRange.isNotEmpty) {
+      queryParameters['createdDateRange'] = createdDateRange;
+      queryParameters['created_date_range'] = createdDateRange;
     }
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
     }
     if (ignorePermissions == true) {
       queryParameters['ignore_permissions'] = 'true';
+      queryParameters['ignorePermissions'] = 'true';
     }
+
+    debugPrint('[GET ${ApiConstants.contacts}] query: $queryParameters');
 
     final response = await _apiService.get(
       ApiConstants.contacts,

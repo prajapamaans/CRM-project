@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../../app/theme/app_theme.dart';
+import '../../../../core/navigation/route_names.dart';
+import '../../../../core/navigation/route_paths.dart';
 import '../../../../core/widgets/action_pill_button.dart';
 import '../../../../core/widgets/stat_card.dart';
 import '../../../../core/widgets/work_summary_card.dart';
@@ -9,6 +12,7 @@ import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../contacts/data/models/contact_model.dart';
+import '../../../contacts/data/models/contact_lifecycle_count_model.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../deals/data/models/deal_model.dart';
@@ -19,6 +23,8 @@ import '../../../../core/network/api_service.dart';
 import '../../../../core/models/bingo_summary_model.dart';
 import '../../data/models/activity_stats_model.dart';
 import '../providers/dashboard_provider.dart';
+import '../widgets/activity_leaderboard_card.dart';
+import '../widgets/contact_count_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -33,6 +39,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _lastDepartmentId;
   Future<List<Map<String, dynamic>>>? _meetingsBookedFuture;
   bool _isGeneratingBingoAi = false;
+  DateTime _customSelectedDate = DateTime.now().subtract(const Duration(days: 5));
+
+  String _formatDateSubtitle(DateTime date) {
+    final months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final weekdays = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+    ];
+    final weekdayStr = weekdays[date.weekday - 1];
+    final monthStr = months[date.month - 1];
+    return '$weekdayStr, $monthStr ${date.day}, ${date.year}';
+  }
+
+  Future<void> _onCustomDateSearchTap() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _customSelectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF00A884),
+              onPrimary: Colors.white,
+              onSurface: Color(0xFF1E293B),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _customSelectedDate = picked;
+      });
+    }
+  }
+
+  void _onTaskTap(Map<String, dynamic> act) async {
+    final taskId = (act['id'] ?? act['_id'])?.toString();
+    if (taskId == null || taskId.isEmpty) return;
+
+    String? compId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null))?.toString();
+    String? contactId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
+    String? dealId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null))?.toString();
+
+    if (compId != null && compId.isNotEmpty) {
+      await context.pushNamed(
+        RouteNames.companyDetails,
+        pathParameters: {RoutePaths.idParam: compId},
+        queryParameters: RoutePaths.recordActivityQuery(taskId),
+      );
+    } else if (contactId != null && contactId.isNotEmpty) {
+      await context.pushNamed(
+        RouteNames.contactDetails,
+        pathParameters: {RoutePaths.idParam: contactId},
+        queryParameters: RoutePaths.recordActivityQuery(taskId),
+      );
+    } else if (dealId != null && dealId.isNotEmpty) {
+      await context.pushNamed(
+        RouteNames.dealDetails,
+        pathParameters: {RoutePaths.idParam: dealId},
+        queryParameters: RoutePaths.recordActivityQuery(taskId),
+      );
+    } else {
+      await context.pushNamed<bool>(
+        RouteNames.taskDetails,
+        pathParameters: {RoutePaths.idParam: taskId},
+      );
+    }
+
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    final ownerId = _selectedPillIndex == 1 ? auth.currentUser?.id : null;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    context.read<DashboardProvider>().fetchDashboardTasks(ownerId: ownerId, departmentId: deptId);
+  }
 
   Map<String, String?> _getDashboardTimeFilterRange() {
     final now = DateTime.now();
@@ -79,25 +165,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = context.read<AuthProvider>();
+      final master = context.read<MasterDataProvider>();
       final currentUserId = auth.currentUser?.id;
       final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
       final range = _getDashboardTimeFilterRange();
       
-      context.read<DashboardProvider>().loadDashboardData(
-        ownerId: _selectedPillIndex == 1 ? currentUserId : null,
-        departmentId: deptId,
-        startDate: range['startDate'],
-        endDate: range['endDate'],
-      );
-      context.read<ContactProvider>().fetchContacts(departmentId: deptId);
-      context.read<DealProvider>().fetchDeals(departmentId: deptId);
-      context.read<MasterDataProvider>().fetchAllMasterData(
+      final teamMembers = await auth.fetchTeamMembers();
+      await master.fetchAllMasterData(
         currentUserId: currentUserId,
         departmentId: deptId,
       );
-      auth.fetchTeamMembers();
+      final reportUsers = master.reportsUsers;
+
+      if (mounted) {
+        context.read<DashboardProvider>().loadDashboardData(
+          ownerId: _selectedPillIndex == 1 ? currentUserId : null,
+          departmentId: deptId,
+          startDate: range['startDate'],
+          endDate: range['endDate'],
+          subtitleLabel: _performanceSubtitleLabel,
+          teamMembers: teamMembers,
+          reportUsers: reportUsers,
+        );
+        context.read<ContactProvider>().fetchContacts(departmentId: deptId);
+        context.read<DealProvider>().fetchDeals(departmentId: deptId);
+      }
     });
   }
 
@@ -106,6 +200,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _selectedPillIndex = index;
     });
     final auth = context.read<AuthProvider>();
+    final master = context.read<MasterDataProvider>();
     final ownerId = index == 1 ? auth.currentUser?.id : null;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
     final range = _getDashboardTimeFilterRange();
@@ -115,7 +210,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
       departmentId: deptId,
       startDate: range['startDate'],
       endDate: range['endDate'],
+      subtitleLabel: _performanceSubtitleLabel,
+      teamMembers: auth.teamMembers,
+      reportUsers: master.reportsUsers,
     );
+  }
+
+  DateTime? get _performanceCutoffDate {
+    final now = DateTime.now();
+    switch (_selectedTimeFilter) {
+      case 0:
+        return DateTime(now.year, now.month, now.day).subtract(const Duration(days: 7));
+      case 1:
+        return DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
+      case 2:
+        return DateTime(now.year, now.month, now.day).subtract(const Duration(days: 90));
+      case 3:
+      default:
+        return null;
+    }
+  }
+
+  String get _performanceSubtitleLabel {
+    switch (_selectedTimeFilter) {
+      case 0:
+        return 'LAST 7 DAYS';
+      case 1:
+        return 'LAST 30 DAYS';
+      case 2:
+        return 'LAST 90 DAYS';
+      case 3:
+      default:
+        return 'ALL TIME';
+    }
+  }
+
+  void _navTo(String routeName, int tabIndex) {
+    context.read<NavigationProvider>().selectScreen(tabIndex);
+    context.goNamed(routeName);
   }
 
   void _onTimeFilterChanged(int index) {
@@ -123,6 +255,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _selectedTimeFilter = index;
     });
     final auth = context.read<AuthProvider>();
+    final master = context.read<MasterDataProvider>();
     final ownerId = _selectedPillIndex == 1 ? auth.currentUser?.id : null;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
     final range = _getDashboardTimeFilterRange();
@@ -132,7 +265,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       departmentId: deptId,
       startDate: range['startDate'],
       endDate: range['endDate'],
+      subtitleLabel: _performanceSubtitleLabel,
+      teamMembers: auth.teamMembers,
+      reportUsers: master.reportsUsers,
     );
+    context.read<ContactProvider>().fetchContacts(departmentId: deptId);
+    context.read<DealProvider>().fetchDeals(departmentId: deptId);
   }
 
   Future<void> _handleAskBingoTap() async {
@@ -510,9 +648,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.domain_rounded,
                               iconBgColor: const Color(0xFFE0F2FE),
                               iconColor: const Color(0xFF0284C7),
-                              onTap: () {
-                                context.read<NavigationProvider>().selectScreen(2); // Companies Screen
-                              },
+                              onTap: () => _navTo(RouteNames.companies, 2),
                             ),
                           ),
                           const SizedBox(width: AppSpacing.md),
@@ -523,9 +659,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.people_alt_rounded,
                               iconBgColor: const Color(0xFFE6F4F1),
                               iconColor: const Color(0xFF00A884),
-                              onTap: () {
-                                context.read<NavigationProvider>().selectScreen(1); // Contacts Screen
-                              },
+                              onTap: () => _navTo(RouteNames.contacts, 1),
                             ),
                           ),
                         ],
@@ -540,9 +674,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.monetization_on_rounded,
                               iconBgColor: const Color(0xFFFEF3C7),
                               iconColor: const Color(0xFFD97706),
-                              onTap: () {
-                                context.read<NavigationProvider>().selectScreen(3); // Deals Screen
-                              },
+                              onTap: () => _navTo(RouteNames.deals, 3),
                             ),
                           ),
                           const SizedBox(width: AppSpacing.md),
@@ -553,9 +685,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.task_alt_rounded,
                               iconBgColor: const Color(0xFFF3E8FF),
                               iconColor: const Color(0xFF7C3AED),
-                              onTap: () {
-                                context.read<NavigationProvider>().selectScreen(12); // Tasks Screen
-                              },
+                              onTap: () => _navTo(RouteNames.tasks, 12),
                             ),
                           ),
                         ],
@@ -566,65 +696,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: AppSpacing.lg),
 
                   // 3. Work Summary Cards (Today's Work, Yesterday's Work, Custom Date Search)
-                  if (isDesktop)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: WorkSummaryCard(
-                            title: "Today's Work",
-                            dateString: "Today",
-                            pendingCount: stats?.pendingTasks ?? 0,
-                            completedCount: stats?.completed ?? 0,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: WorkSummaryCard(
-                            title: "Yesterday's Work",
-                            dateString: "Yesterday",
-                            pendingCount: 0,
-                            completedCount: 0,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: WorkSummaryCard(
-                            title: "Custom Date Search",
-                            dateString: "Filter Range",
-                            pendingCount: 0,
-                            completedCount: 0,
-                            showFilterButton: true,
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    Column(
-                      children: [
-                        WorkSummaryCard(
-                          title: "Today's Work",
-                          dateString: "Today",
-                          pendingCount: stats?.pendingTasks ?? 0,
-                          completedCount: stats?.completed ?? 0,
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        WorkSummaryCard(
-                          title: "Yesterday's Work",
-                          dateString: "Yesterday",
-                          pendingCount: 0,
-                          completedCount: 0,
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        WorkSummaryCard(
-                          title: "Custom Date Search",
-                          dateString: "Filter Range",
-                          pendingCount: 0,
-                          completedCount: 0,
-                          showFilterButton: true,
-                        ),
-                      ],
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final today = DateTime.now();
+                      final yesterday = today.subtract(const Duration(days: 1));
+
+                      final todayGroup = dashboardProvider.getTasksForDate(today);
+                      final yesterdayGroup = dashboardProvider.getTasksForDate(yesterday);
+                      final customGroup = dashboardProvider.getTasksForDate(_customSelectedDate);
+
+                      void navigateToTasks() {
+                        _navTo(RouteNames.tasks, 12);
+                      }
+
+                      final todayCard = WorkSummaryCard(
+                        title: "Today's Work",
+                        dateString: _formatDateSubtitle(today),
+                        taskGroup: todayGroup,
+                        onViewAllTap: navigateToTasks,
+                        onToggleTaskStatus: (taskId, newStatus) {
+                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
+                        },
+                        onTaskTap: _onTaskTap,
+                      );
+
+                      final yesterdayCard = WorkSummaryCard(
+                        title: "Yesterday's Work",
+                        dateString: _formatDateSubtitle(yesterday),
+                        taskGroup: yesterdayGroup,
+                        onViewAllTap: navigateToTasks,
+                        onToggleTaskStatus: (taskId, newStatus) {
+                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
+                        },
+                        onTaskTap: _onTaskTap,
+                      );
+
+                      final customCard = WorkSummaryCard(
+                        title: "Custom Date Search",
+                        dateString: _formatDateSubtitle(_customSelectedDate),
+                        taskGroup: customGroup,
+                        showFilterButton: true,
+                        onFilterTap: _onCustomDateSearchTap,
+                        onViewAllTap: navigateToTasks,
+                        onToggleTaskStatus: (taskId, newStatus) {
+                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
+                        },
+                        onTaskTap: _onTaskTap,
+                      );
+
+                      if (isDesktop) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: todayCard),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: yesterdayCard),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: customCard),
+                          ],
+                        );
+                      } else {
+                        return Column(
+                          children: [
+                            todayCard,
+                            const SizedBox(height: AppSpacing.lg),
+                            yesterdayCard,
+                            const SizedBox(height: AppSpacing.lg),
+                            customCard,
+                          ],
+                        );
+                      }
+                    },
+                  ),
                 ],
 
                 // ==========================================
@@ -768,8 +911,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 1: Contact lifecycle stage funnel -> Contacts Screen
                   _buildDashboardCard(
                     title: 'Contact lifecycle stage funnel',
-                    subtitle: 'LAST 90 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(1),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.contacts, 1),
                     child: _buildLifecycleFunnelTable(contactsList),
                   ),
 
@@ -778,8 +921,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 2: Team activity totals -> Reports Screen
                   _buildDashboardCard(
                     title: 'Team activity totals',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(4),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.reports, 4),
                     child: _buildTeamActivityTotalsGrid(stats),
                   ),
 
@@ -788,8 +931,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 3: Deal stage overview -> Deals Screen
                   _buildDashboardCard(
                     title: 'Deal stage overview',
-                    subtitle: 'ALL TIME',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(3),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.deals, 3),
                     child: _buildDealsByStageContent(dealsList),
                   ),
 
@@ -798,8 +941,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 4: Deals in sales pipeline stages by owner -> Deals Screen
                   _buildDashboardCard(
                     title: 'Deals in sales pipeline stages by ...',
-                    subtitle: 'ALL TIME',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(3),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.deals, 3),
                     child: _buildDealsByOwnerContent(dealsList),
                   ),
 
@@ -808,8 +951,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 5: Contact created totals by first conversion -> Contacts Screen
                   _buildDashboardCard(
                     title: 'Contact created totals by first co...',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(1),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.contacts, 1),
                     child: _buildFirstConversionContent(contactsList),
                   ),
 
@@ -818,8 +961,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 6: Call and meeting totals by rep -> Calls Screen
                   _buildDashboardCard(
                     title: 'Call and meeting totals by rep',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(9),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.calls, 9),
                     child: _buildCallAndMeetingTotalsByRepContent(),
                   ),
 
@@ -828,8 +971,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 7: Email sent, opened, and click totals -> Emails Screen
                   _buildDashboardCard(
                     title: 'Email sent, opened, and click tot...',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(10),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.emails, 10),
                     child: _buildEmailTotalsGrid(stats),
                   ),
 
@@ -838,8 +981,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 8: Meetings booked with reps by owner -> Meetings Screen
                   _buildDashboardCard(
                     title: 'Meetings booked with reps by ow...',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(7),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.meetings, 7),
                     child: _buildMeetingsBookedTable(),
                   ),
 
@@ -848,8 +991,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 9: Activity of recently created contacts -> Contacts Screen
                   _buildDashboardCard(
                     title: 'Activity of recently created cont...',
-                    subtitle: 'LAST 30 DAYS',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(1),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.contacts, 1),
                     child: _buildRecentlyCreatedContactsTable(contactsList),
                   ),
 
@@ -858,9 +1001,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Card 10: Deals by last modified date -> Deals Screen
                   _buildDashboardCard(
                     title: 'Deals by last modified date',
-                    subtitle: 'ALL TIME',
-                    onTap: () => context.read<NavigationProvider>().selectScreen(3),
+                    subtitle: _performanceSubtitleLabel,
+                    onTap: () => _navTo(RouteNames.deals, 3),
                     child: _buildDealsByLastModifiedTable(dealsList),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Card 11: Activity Leaderboard by Rep
+                  ActivityLeaderboardCard(
+                    items: dashboardProvider.activityLeaderboard,
+                    isLoading: dashboardProvider.isLoadingLeaderboard,
+                    subtitleLabel: dashboardProvider.leaderboardSubtitleLabel,
+                    onRefresh: () async {
+                      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+                      final reportUsers = context.read<MasterDataProvider>().reportsUsers;
+                      final teamMembers = await context.read<AuthProvider>().fetchTeamMembers();
+                      final range = _getDashboardTimeFilterRange();
+                      if (!mounted) return;
+                      dashboardProvider.fetchActivityLeaderboard(
+                        startDate: range['startDate'],
+                        endDate: range['endDate'],
+                        subtitleLabel: _performanceSubtitleLabel,
+                        departmentId: deptId,
+                        teamMembers: teamMembers,
+                        reportUsers: reportUsers,
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Card 12: (Count) Contacts by Owner (LAST 30 DAYS)
+                  ContactCountCard(
+                    items: dashboardProvider.contactOwnerCounts,
+                    isLoading: dashboardProvider.isLoadingContactCounts,
+                    onRefresh: () async {
+                      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+                      final teamMembers = await context.read<AuthProvider>().fetchTeamMembers();
+                      dashboardProvider.fetchContactOwnerCounts(
+                        departmentId: deptId,
+                        teamMembers: teamMembers,
+                      );
+                    },
                   ),
                 ],
 
@@ -1309,29 +1492,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildLifecycleFunnelTable(List<ContactModel> contacts) {
-    final defaultStages = [
-      'All created contacts',
-      'Added',
-      'Subscriber',
-      'Lead',
-      'Marketing Qualified Lead',
-      'Sales Qualified Lead',
-      'Opportunity',
-      'Customer',
-      'Evangelist',
-      'Other',
+    final cutoff = _performanceCutoffDate;
+    final filteredContacts = cutoff == null
+        ? contacts
+        : contacts.where((c) {
+            if (c.createdAt == null || c.createdAt!.trim().isEmpty) return true;
+            final dt = DateTime.tryParse(c.createdAt!.trim());
+            if (dt == null) return true;
+            return dt.isAfter(cutoff);
+          }).toList();
+
+    final masterStages = context.watch<MasterDataProvider>().contactLifecycleStages;
+    final summary = ContactLifecycleAnalyzer.analyze(
+      contacts: filteredContacts,
+      masterStages: masterStages,
+    );
+
+    final List<Map<String, dynamic>> funnelRows = [
+      {
+        'name': 'All created contacts',
+        'count': summary.totalContacts,
+      },
+      ...summary.stageCounts.map((sc) => {
+            'name': sc.stageName,
+            'count': sc.count,
+          }),
     ];
-
-    final Map<String, int> countsByStage = {};
-    for (final s in defaultStages) {
-      countsByStage[s] = 0;
-    }
-    countsByStage['All created contacts'] = contacts.length;
-
-    for (final c in contacts) {
-      final stage = c.lifecycleStage ?? 'Added';
-      countsByStage[stage] = (countsByStage[stage] ?? 0) + 1;
-    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -1350,9 +1536,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           const Divider(height: 1, color: Color(0xFFE2E8F0)),
-          ...countsByStage.entries.map((entry) {
-            final count = entry.value;
+          ...List.generate(funnelRows.length, (index) {
+            final row = funnelRows[index];
+            final name = row['name'] as String;
+            final count = row['count'] as int;
             final isZero = count == 0;
+
+            String fromPrevStr = '-';
+            if (index == 0) {
+              fromPrevStr = filteredContacts.isNotEmpty ? '100%' : '-';
+            } else {
+              final prevCount = funnelRows[index - 1]['count'] as int;
+              if (prevCount > 0 && count > 0) {
+                final pct = ((count / prevCount) * 100).round();
+                fromPrevStr = '$pct%';
+              } else if (count > 0) {
+                fromPrevStr = '100%';
+              }
+            }
+
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               decoration: const BoxDecoration(
@@ -1360,7 +1562,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               child: Row(
                 children: [
-                  SizedBox(width: 145, child: Text(entry.key, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500, color: const Color(0xFF334155)))),
+                  SizedBox(width: 145, child: Text(name, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500, color: const Color(0xFF334155)))),
                   SizedBox(
                     width: 75,
                     child: Row(
@@ -1381,8 +1583,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   SizedBox(
                     width: 90,
                     child: Text(
-                      isZero ? '-' : '100%',
-                      style: GoogleFonts.poppins(fontSize: 11, color: isZero ? const Color(0xFF94A3B8) : const Color(0xFF00BDA5)),
+                      fromPrevStr,
+                      style: GoogleFonts.poppins(fontSize: 11, color: isZero || fromPrevStr == '-' ? const Color(0xFF94A3B8) : const Color(0xFF00BDA5)),
                     ),
                   ),
                 ],
@@ -1556,11 +1758,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                     FractionallySizedBox(
-                      widthFactor: count > 0 ? 1.0 : 0.05,
+                      widthFactor: count > 0 ? (count / (count > 20 ? count : 20)).clamp(0.05, 1.0) : 0.05,
                       child: Container(
                         height: 14,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF59E0B),
+                          color: count > 10
+                              ? const Color(0xFF00A884)
+                              : count > 0
+                                  ? const Color(0xFFF59E0B)
+                                  : const Color(0xFFCBD5E1),
                           borderRadius: BorderRadius.circular(3),
                         ),
                       ),
@@ -1581,20 +1787,128 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCallAndMeetingTotalsByRepContent() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-      child: Column(
-        children: [
-          const Icon(Icons.highlight_off_rounded, size: 36, color: Color(0xFFCBD5E1)),
-          const SizedBox(height: 8),
-          Text(
-            'No data in this time frame. Try a wider date range or a different department.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 11.5, color: const Color(0xFF64748B)),
+    final dashboardProvider = context.watch<DashboardProvider>();
+    final items = dashboardProvider.callAndMeetingTotals;
+    final stats = dashboardProvider.stats;
+
+    if (dashboardProvider.isLoadingCallAndMeeting) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00A884)),
           ),
+        ),
+      );
+    }
+
+    if (items.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            color: const Color(0xFFF8FAFC),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    'REPRESENTATIVE',
+                    style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF475569), letterSpacing: 0.5),
+                  ),
+                ),
+                SizedBox(
+                  width: 60,
+                  child: Text(
+                    'CALLS',
+                    textAlign: TextAlign.end,
+                    style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF475569), letterSpacing: 0.5),
+                  ),
+                ),
+                SizedBox(
+                  width: 75,
+                  child: Text(
+                    'MEETINGS',
+                    textAlign: TextAlign.end,
+                    style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF475569), letterSpacing: 0.5),
+                  ),
+                ),
+                SizedBox(
+                  width: 60,
+                  child: Text(
+                    'TOTAL',
+                    textAlign: TextAlign.end,
+                    style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF475569), letterSpacing: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          ...items.map((item) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.repName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontSize: 11.5, fontWeight: FontWeight.w500, color: const Color(0xFF334155)),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 60,
+                    child: Text(
+                      '${item.callCount}',
+                      textAlign: TextAlign.end,
+                      style: GoogleFonts.poppins(fontSize: 11.5, color: const Color(0xFF475569)),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 75,
+                    child: Text(
+                      '${item.meetingCount}',
+                      textAlign: TextAlign.end,
+                      style: GoogleFonts.poppins(fontSize: 11.5, color: const Color(0xFF475569)),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 60,
+                    child: Text(
+                      '${item.totalCount}',
+                      textAlign: TextAlign.end,
+                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF0F766E)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
-      ),
-    );
+      );
+    }
+
+    // Fallback using real activity stats if available
+    if (stats != null && ((stats.calls > 0) || (stats.meetings > 0))) {
+      return Row(
+        children: [
+          Expanded(child: _buildMetricTile('CALLS', '${stats.calls}', '', const Color(0xFF0F766E))),
+          const SizedBox(width: 12),
+          Expanded(child: _buildMetricTile('MEETINGS', '${stats.meetings}', '', const Color(0xFF7C3AED))),
+        ],
+      );
+    }
+
+    return _buildEmptyState('No call or meeting data in this time frame');
   }
 
   Widget _buildEmailTotalsGrid(ActivityStatsModel? stats) {

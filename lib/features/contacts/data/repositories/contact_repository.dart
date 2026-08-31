@@ -12,6 +12,11 @@ abstract class ContactRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   });
 
   Future<ContactModel> getContactById(String id);
@@ -37,6 +42,11 @@ class ContactRepositoryImpl implements ContactRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   }) async {
     try {
       return await _remoteDataSource.getContacts(
@@ -46,6 +56,11 @@ class ContactRepositoryImpl implements ContactRepository {
         ownerId: ownerId,
         departmentId: departmentId,
         ignorePermissions: ignorePermissions,
+        lifecycleStage: lifecycleStage,
+        leadStatus: leadStatus,
+        createdDateRange: createdDateRange,
+        sort: sort,
+        order: order,
       );
     } catch (e) {
       debugPrint('[GET /api/contacts ERROR]: $e');

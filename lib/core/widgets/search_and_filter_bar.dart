@@ -13,6 +13,7 @@ class SearchAndFilterBar extends StatefulWidget {
   final ContactSortOption? currentSort;
   final ValueChanged<ContactSortOption>? onSortChanged;
   final VoidCallback? onFilterTap;
+  final VoidCallback? onClearTap;
   final VoidCallback? onRefreshTap;
   final VoidCallback? onImportTap;
   final VoidCallback? onExportTap;
@@ -35,6 +36,7 @@ class SearchAndFilterBar extends StatefulWidget {
     this.currentSort,
     this.onSortChanged,
     this.onFilterTap,
+    this.onClearTap,
     this.onRefreshTap,
     this.onImportTap,
     this.onExportTap,
@@ -55,176 +57,28 @@ class SearchAndFilterBar extends StatefulWidget {
 class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
   int _selectedSegment = 0; // 0 for All, 1 for Mine
 
-  void _showSortMenu(BuildContext context, TapDownDetails details) async {
-    final position = RelativeRect.fromLTRB(
-      details.globalPosition.dx - 100,
-      details.globalPosition.dy,
-      details.globalPosition.dx,
-      details.globalPosition.dy + 100,
-    );
+  /// The field was uncontrolled, so Clear dropped the search term from state
+  /// while the typed text stayed on screen — the bar then showed a filter that
+  /// was no longer being applied.
+  final TextEditingController _searchController = TextEditingController();
 
-    final selected = await showMenu<ContactSortOption>(
-      context: context,
-      position: position,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 6,
-      items: [
-        PopupMenuItem<ContactSortOption>(
-          enabled: false,
-          height: 32,
-          child: Text(
-            'SORT BY',
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF94A3B8),
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.aToZ,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'A to Z',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: widget.currentSort == ContactSortOption.aToZ
-                      ? FontWeight.w600
-                      : FontWeight.w400,
-                  color: const Color(0xFF1E293B),
-                ),
-              ),
-              if (widget.currentSort == ContactSortOption.aToZ)
-                const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.zToA,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Z to A',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: widget.currentSort == ContactSortOption.zToA
-                      ? FontWeight.w600
-                      : FontWeight.w400,
-                  color: const Color(0xFF1E293B),
-                ),
-              ),
-              if (widget.currentSort == ContactSortOption.zToA)
-                const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.mostRecent,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Most recent',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: widget.currentSort == ContactSortOption.mostRecent
-                      ? FontWeight.w600
-                      : FontWeight.w400,
-                  color: const Color(0xFF1E293B),
-                ),
-              ),
-              if (widget.currentSort == ContactSortOption.mostRecent)
-                const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    if (selected != null && widget.onSortChanged != null) {
-      widget.onSortChanged!(selected);
-    }
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  void _showThreeDotMenu(BuildContext context, TapDownDetails details) async {
-    final position = RelativeRect.fromLTRB(
-      details.globalPosition.dx - 140,
-      details.globalPosition.dy,
-      details.globalPosition.dx,
-      details.globalPosition.dy + 100,
-    );
-
-    final selectedAction = await showMenu<String>(
-      context: context,
-      position: position,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 6,
-      items: [
-        PopupMenuItem<String>(
-          value: 'sort',
-          child: Row(
-            children: [
-              const Icon(Icons.sort_rounded, color: Color(0xFF64748B), size: 18),
-              const SizedBox(width: 10),
-              Text(
-                'Sort',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF1E293B),
-                ),
-              ),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'filter',
-          child: Row(
-            children: [
-              Icon(
-                Icons.tune_rounded,
-                color: widget.isFilterActive ? const Color(0xFF00A884) : const Color(0xFF64748B),
-                size: 18,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                'Filter',
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: widget.isFilterActive || widget.isFilterExpanded
-                      ? FontWeight.w700
-                      : FontWeight.w500,
-                  color: widget.isFilterActive || widget.isFilterExpanded
-                      ? const Color(0xFF00A884)
-                      : const Color(0xFF1E293B),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    if (!context.mounted) return;
-
-    if (selectedAction == 'sort') {
-      _showSortMenu(context, details);
-    } else if (selectedAction == 'filter') {
-      if (widget.onToggleFilterExpanded != null) {
-        widget.onToggleFilterExpanded!();
-      } else if (widget.onFilterTap != null) {
-        widget.onFilterTap!();
-      }
-    } else if (selectedAction == 'import') {
-      if (widget.onImportTap != null) widget.onImportTap!();
-    } else if (selectedAction == 'export') {
-      if (widget.onExportTap != null) widget.onExportTap!();
+  /// Every screen's Clear drops its search term along with its filters, so the
+  /// visible text is cleared here to match. The search callback fires with an
+  /// empty string first, so a screen that reloads on search change is not left
+  /// holding the old term.
+  void _handleClear() {
+    if (_searchController.text.isNotEmpty) {
+      _searchController.clear();
+      widget.onSearchChanged?.call('');
     }
+    final clear = widget.onClearTap ?? widget.onFilterTap ?? widget.onToggleFilterExpanded;
+    clear?.call();
   }
 
   @override
@@ -242,6 +96,7 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
             border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
           ),
           child: TextField(
+            controller: _searchController,
             onChanged: widget.onSearchChanged,
             style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
             decoration: InputDecoration(
@@ -263,7 +118,7 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
 
         const SizedBox(height: 12),
 
-        // 2. Segmented Pill & 3-Dot Button Row
+        // 2. Segmented Pill & Filter Icon Button Row
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -297,7 +152,7 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
               children: [
                 if (active || widget.isFilterActive || widget.isFilterExpanded) ...[
                   InkWell(
-                    onTap: widget.onFilterTap ?? widget.onToggleFilterExpanded,
+                    onTap: _handleClear,
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -318,9 +173,15 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
                   ),
                   const SizedBox(width: 6),
                 ],
-                // 3-Dot Menu Icon Button
+                // Direct Filter Icon Button (Opens existing Filter UI)
                 GestureDetector(
-                  onTapDown: (details) => _showThreeDotMenu(context, details),
+                  onTap: () {
+                    if (widget.onToggleFilterExpanded != null) {
+                      widget.onToggleFilterExpanded!();
+                    } else if (widget.onFilterTap != null) {
+                      widget.onFilterTap!();
+                    }
+                  },
                   child: Container(
                     width: 36,
                     height: 36,
@@ -333,7 +194,7 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
                       ),
                     ),
                     child: Icon(
-                      Icons.more_vert_rounded,
+                      Icons.tune_rounded,
                       size: 20,
                       color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
                     ),

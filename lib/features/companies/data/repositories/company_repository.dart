@@ -12,6 +12,11 @@ abstract class CompanyRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   });
 
   Future<CompanyModel> getCompanyById(String id);
@@ -37,6 +42,11 @@ class CompanyRepositoryImpl implements CompanyRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   }) async {
     try {
       return await _remoteDataSource.getCompanies(
@@ -46,6 +56,11 @@ class CompanyRepositoryImpl implements CompanyRepository {
         ownerId: ownerId,
         departmentId: departmentId,
         ignorePermissions: ignorePermissions,
+        lifecycleStage: lifecycleStage,
+        leadStatus: leadStatus,
+        createdDateRange: createdDateRange,
+        sort: sort,
+        order: order,
       );
     } catch (e) {
       debugPrint('[GET /api/companies ERROR]: $e');

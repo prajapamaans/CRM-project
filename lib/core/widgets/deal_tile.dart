@@ -188,9 +188,13 @@ class DealTile extends StatelessWidget {
                           value: deal.progress,
                           minHeight: 5,
                           backgroundColor: const Color(0xFFF1F5F9),
-                          color: deal.dotColor == const Color(0xFFF97316)
-                              ? const Color(0xFFF97316)
-                              : const Color(0xFF00A884),
+                          color: progressPercent == 100
+                              ? const Color(0xFF00A884)
+                              : progressPercent >= 50
+                                  ? const Color(0xFF0F766E)
+                                  : deal.dotColor == const Color(0xFFF97316)
+                                      ? const Color(0xFFF97316)
+                                      : const Color(0xFF3B82F6),
                         ),
                       ),
                     ),

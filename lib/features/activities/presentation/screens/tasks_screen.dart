@@ -11,6 +11,7 @@ import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/models/master_dropdown_model.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/filter_query_utils.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/create_task_modal.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
@@ -197,6 +198,83 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Pill label → record id
+  //
+  // The Company / Contact / Deal pills list display names, drawn from both the
+  // provider caches and this screen's own lookups. `/api/activities` filters by
+  // id, so the chosen name is resolved back to one; both sources are searched
+  // because either may be where the name came from.
+  // ---------------------------------------------------------------------------
+
+  String? _resolveCompanyId() {
+    if (_selectedCompanyFilter == 'Company') return null;
+    final wanted = _selectedCompanyFilter.trim().toLowerCase();
+
+    for (final c in context.read<CompanyProvider>().companies) {
+      if (c.name.trim().toLowerCase() == wanted) return c.id;
+    }
+    for (final c in _companies) {
+      final name = (c['name'] ?? c['companyName'] ?? c['company_name'] ?? c['title'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (name.isNotEmpty && name == wanted) {
+        final id = (c['id'] ?? c['_id'])?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+
+    debugPrint('[TasksScreen] company filter "$_selectedCompanyFilter" has no id — not sent');
+    return null;
+  }
+
+  String? _resolveContactId() {
+    if (_selectedContactFilter == 'Contact') return null;
+    final wanted = _selectedContactFilter.trim().toLowerCase();
+
+    for (final c in context.read<ContactProvider>().contacts) {
+      final name = '${c.firstName ?? ''} ${c.lastName ?? ''}'.trim().toLowerCase();
+      if (name.isNotEmpty && name == wanted) return c.id;
+    }
+    for (final c in _contacts) {
+      final fn = (c['firstName'] ?? c['first_name'] ?? '').toString().trim();
+      final ln = (c['lastName'] ?? c['last_name'] ?? '').toString().trim();
+      final name = '$fn $ln'.trim().isNotEmpty
+          ? '$fn $ln'.trim().toLowerCase()
+          : (c['name'] ?? c['fullName'] ?? c['email'] ?? '').toString().trim().toLowerCase();
+      if (name.isNotEmpty && name == wanted) {
+        final id = (c['id'] ?? c['_id'])?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+
+    debugPrint('[TasksScreen] contact filter "$_selectedContactFilter" has no id — not sent');
+    return null;
+  }
+
+  String? _resolveDealId() {
+    if (_selectedDealFilter == 'Deal') return null;
+    final wanted = _selectedDealFilter.trim().toLowerCase();
+
+    for (final d in context.read<DealProvider>().deals) {
+      if (d.title.trim().toLowerCase() == wanted) return d.id;
+    }
+    for (final d in _deals) {
+      final title = (d['title'] ?? d['name'] ?? d['dealName'] ?? d['deal_name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (title.isNotEmpty && title == wanted) {
+        final id = (d['id'] ?? d['_id'])?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+
+    debugPrint('[TasksScreen] deal filter "$_selectedDealFilter" has no id — not sent');
+    return null;
+  }
+
   Future<void> _fetchTasks({int? page, bool resetPage = false}) async {
     if (!mounted) return;
     if (_isLoadingTasks) return;
@@ -248,6 +326,26 @@ class _TasksScreenState extends State<TasksScreen> {
         queryParams['ownerId'] = matchedUser['id'] ?? matchedUser['_id'];
       }
     }
+
+    // The Create date pill used to be recorded and then never used — it now
+    // becomes the documented `createdDateRange` value.
+    final createdDateRange = FilterDateRange.toQueryValue(_selectedCreateDate);
+    if (createdDateRange != null) {
+      queryParams['createdDateRange'] = createdDateRange;
+    }
+
+    // Company / Contact / Deal pills hold the record's display name; the API
+    // filters by id, so the name is resolved back to one here.
+    final companyId = _resolveCompanyId();
+    if (companyId != null) queryParams['companyId'] = companyId;
+
+    final contactId = _resolveContactId();
+    if (contactId != null) queryParams['contactId'] = contactId;
+
+    final dealId = _resolveDealId();
+    if (dealId != null) queryParams['dealId'] = dealId;
+
+    debugPrint('[TasksScreen] GET /activities query: $queryParams');
 
     try {
       final response = await apiService.get(
@@ -443,20 +541,6 @@ class _TasksScreenState extends State<TasksScreen> {
                       });
                       _fetchTasks(resetPage: true);
                     },
-                    currentSort: _currentSortOption,
-                    onSortChanged: (ContactSortOption option) {
-                      setState(() {
-                        _currentSortOption = option;
-                        if (option == ContactSortOption.aToZ) {
-                          _selectedSortOption = 'A to Z';
-                        } else if (option == ContactSortOption.zToA) {
-                          _selectedSortOption = 'Z to A';
-                        } else {
-                          _selectedSortOption = 'Most Recent';
-                        }
-                      });
-                      _fetchTasks(resetPage: true);
-                    },
                     isFilterActive: _selectedCreateDate != 'Create date' ||
                         _selectedStatusFilter != 'Status' ||
                         _selectedPriorityFilter != 'Priority' ||
@@ -469,6 +553,19 @@ class _TasksScreenState extends State<TasksScreen> {
                       setState(() {
                         _showFiltersRow = !_showFiltersRow;
                       });
+                    },
+                    onClearTap: () {
+                      setState(() {
+                        _selectedCreateDate = 'Create date';
+                        _selectedStatusFilter = 'Status';
+                        _selectedPriorityFilter = 'Priority';
+                        _selectedCompanyFilter = 'Company';
+                        _selectedContactFilter = 'Contact';
+                        _selectedDealFilter = 'Deal';
+                        _selectedOwnerFilter = 'Owner';
+                        _searchQuery = '';
+                      });
+                      _fetchTasks(resetPage: true);
                     },
                   ),
 

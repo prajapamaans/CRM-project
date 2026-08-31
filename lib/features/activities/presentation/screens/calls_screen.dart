@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/filter_query_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
@@ -97,6 +98,16 @@ class _CallsScreenState extends State<CallsScreen> {
     );
   }
 
+  /// The Owner pill's value as an `ownerId` query value.
+  String? get _ownerQuery => FilterValue.orNull(_selectedOwnerId);
+
+  /// The Status pill's value as a `status` query value. The pill also offers
+  /// outcomes (`Scheduled`, `Logged`) which the endpoint has no parameter for;
+  /// those return null here and stay an in-memory match.
+  String? get _statusQuery => FilterValue.activityStatus(_selectedStatusFilter);
+
+  String? get _createdDateRangeQuery => FilterDateRange.toQueryValue(_selectedCreateDate);
+
   Future<void> _loadCalls() async {
     if (!mounted) return;
     setState(() {
@@ -105,7 +116,21 @@ class _CallsScreenState extends State<CallsScreen> {
     try {
       final repository = MasterDataRepositoryImpl();
       final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
-      final activities = await repository.getActivities(type: 'call', page: 1, limit: 25, departmentId: deptId);
+      debugPrint('[CallsScreen] filters → owner=${_ownerQuery ?? '-'} '
+          'status=${_statusQuery ?? '-'} '
+          'createdDateRange=${_createdDateRangeQuery ?? '-'} '
+          'outcome=${_selectedOutcomeFilter ?? '-'} search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
+      final activities = await repository.getActivities(
+        type: 'call',
+        page: 1,
+        limit: 25,
+        departmentId: deptId,
+        ownerId: _ownerQuery,
+        status: _statusQuery,
+        createdDateRange: _createdDateRangeQuery,
+        sort: 'created_at',
+        order: 'desc',
+      );
       final loadedCalls = activities.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Call';
         
@@ -222,7 +247,7 @@ class _CallsScreenState extends State<CallsScreen> {
       final auth = context.watch<AuthProvider>();
       final currentUserName = auth.currentUser?.fullName ?? 'Admin User';
 
-      final filteredCalls = _calls.where((c) {
+      var filteredCalls = _calls.where((c) {
         final act = c.rawMap ?? {};
 
         // 1. My Calls tab filter
@@ -237,47 +262,51 @@ class _CallsScreenState extends State<CallsScreen> {
           }
         }
 
-        // 3. Status filter
-        if (_selectedStatusFilter != null && _selectedStatusFilter != 'All statuses') {
-          final status = (c.outcome + ' ' + (act['status'] ?? '')).toLowerCase();
-          if (!status.contains(_selectedStatusFilter!.toLowerCase())) {
-            return false;
-          }
-        }
-
-        // 4. Create Date filter
-        if (_selectedCreateDate != null && _selectedCreateDate != 'All time') {
-          final timeStr = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['createdAt'] ?? c.startTime).toString();
-          if (timeStr.isNotEmpty) {
-            try {
-              final itemDt = DateTime.parse(timeStr).toLocal();
-              final now = DateTime.now();
-              if (_selectedCreateDate == 'Today') {
-                if (itemDt.year != now.year || itemDt.month != now.month || itemDt.day != now.day) return false;
-              } else if (_selectedCreateDate == 'Yesterday') {
-                final yest = now.subtract(const Duration(days: 1));
-                if (itemDt.year != yest.year || itemDt.month != yest.month || itemDt.day != yest.day) return false;
-              } else if (_selectedCreateDate == 'This week') {
-                final weekStart = now.subtract(Duration(days: now.weekday - 1));
-                if (itemDt.isBefore(DateTime(weekStart.year, weekStart.month, weekStart.day))) return false;
-              } else if (_selectedCreateDate == 'This month') {
-                if (itemDt.year != now.year || itemDt.month != now.month) return false;
-              } else if (_selectedCreateDate == 'This year') {
-                if (itemDt.year != now.year) return false;
-              }
-            } catch (_) {}
-          }
-        }
-
-        // 5. Outcome filter
-        if (_selectedOutcomeFilter != null && _selectedOutcomeFilter!.isNotEmpty) {
-          if (!c.outcome.toLowerCase().contains(_selectedOutcomeFilter!.toLowerCase())) return false;
-        }
-
-        // 6. Search query
+        // 3. Search query
         if (_searchQuery.isEmpty) return true;
         return c.title.toLowerCase().contains(_searchQuery.toLowerCase());
       }).toList();
+
+      // Status, create date and outcome are re-checked here as well as being
+      // sent to the API. They go through narrowInMemory so a value the app and
+      // the API spell differently cannot empty the screen — the rows are shown
+      // and the mismatch is logged instead.
+      String? createdOf(CallModel c) =>
+          (c.rawMap?['createdAt'] ?? c.rawMap?['created_at'] ?? c.rawMap?['scheduledAt'] ?? c.rawMap?['scheduled_at'] ?? c.startTime)
+              ?.toString();
+
+      if (FilterValue.orNull(_selectedStatusFilter) != null) {
+        filteredCalls = narrowInMemory(
+          rows: filteredCalls,
+          filter: 'Status',
+          selection: _selectedStatusFilter,
+          // The pill lists both statuses and outcomes, so both are tried.
+          test: (c) =>
+              FilterValue.matchesSlug(_selectedStatusFilter, c.rawMap?['status']?.toString()) ||
+              FilterValue.matchesSlug(_selectedStatusFilter, c.outcome),
+          storedValue: (c) => c.rawMap?['status']?.toString() ?? c.outcome,
+        );
+      }
+
+      if (!FilterDateRange.isUnset(_selectedCreateDate)) {
+        filteredCalls = narrowInMemory(
+          rows: filteredCalls,
+          filter: 'Create date',
+          selection: _selectedCreateDate,
+          test: (c) => FilterDateRange.matches(_selectedCreateDate, createdOf(c)),
+          storedValue: createdOf,
+        );
+      }
+
+      if (_selectedOutcomeFilter != null && _selectedOutcomeFilter!.isNotEmpty) {
+        filteredCalls = narrowInMemory(
+          rows: filteredCalls,
+          filter: 'Outcome',
+          selection: _selectedOutcomeFilter,
+          test: (c) => c.outcome.toLowerCase().contains(_selectedOutcomeFilter!.toLowerCase()),
+          storedValue: (c) => c.outcome,
+        );
+      }
 
       if (_currentSort == ContactSortOption.aToZ) {
         filteredCalls.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
@@ -359,15 +388,10 @@ class _CallsScreenState extends State<CallsScreen> {
                           _searchQuery = val.trim();
                         });
                       },
+                      onRefreshTap: _loadCalls,
                       onSegmentChanged: (index) {
                         setState(() {
                           _selectedTab = index;
-                        });
-                      },
-                      currentSort: _currentSort,
-                      onSortChanged: (ContactSortOption option) {
-                        setState(() {
-                          _currentSort = option;
                         });
                       },
                       isFilterActive: (_selectedOwnerId != null && _selectedOwnerId != 'all') ||
@@ -380,6 +404,16 @@ class _CallsScreenState extends State<CallsScreen> {
                           _isFilterExpanded = !_isFilterExpanded;
                         });
                       },
+                      onClearTap: () {
+                        setState(() {
+                          _selectedOwnerId = null;
+                          _selectedCreateDate = null;
+                          _selectedStatusFilter = null;
+                          _selectedOutcomeFilter = null;
+                          _searchQuery = '';
+                        });
+                        _loadCalls();
+                      },
                     ),
 
                     if (_isFilterExpanded)
@@ -387,20 +421,25 @@ class _CallsScreenState extends State<CallsScreen> {
                         selectedOwnerId: _selectedOwnerId,
                         selectedCreateDate: _selectedCreateDate,
                         selectedStatus: _selectedStatusFilter,
+                        // Each change replaces just that filter and reissues
+                        // the request, so the others stay applied.
                         onOwnerChanged: (val) {
                           setState(() {
                             _selectedOwnerId = val;
                           });
+                          _loadCalls();
                         },
                         onCreateDateChanged: (val) {
                           setState(() {
                             _selectedCreateDate = val;
                           });
+                          _loadCalls();
                         },
                         onStatusChanged: (val) {
                           setState(() {
                             _selectedStatusFilter = val;
                           });
+                          _loadCalls();
                         },
                       ),
                   ],

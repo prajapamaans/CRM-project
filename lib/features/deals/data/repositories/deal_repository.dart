@@ -15,6 +15,10 @@ abstract class DealRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? createdDateRange,
+    String? staleDays,
+    String? sort,
+    String? order,
   });
   Future<DealModel> createDeal(Map<String, dynamic> dealData);
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData);
@@ -50,6 +54,10 @@ class DealRepositoryImpl implements DealRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? createdDateRange,
+    String? staleDays,
+    String? sort,
+    String? order,
   }) async {
     try {
       return await _remoteDataSource.getDeals(
@@ -58,6 +66,10 @@ class DealRepositoryImpl implements DealRepository {
         search: search,
         stage: stage,
         ownerId: ownerId,
+        createdDateRange: createdDateRange,
+        staleDays: staleDays,
+        sort: sort,
+        order: order,
         departmentId: departmentId,
         ignorePermissions: ignorePermissions,
       );

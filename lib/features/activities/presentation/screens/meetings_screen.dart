@@ -9,6 +9,7 @@ import '../../../../core/network/api_service.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/filter_query_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/utils/meeting_booking_source.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
@@ -42,6 +43,10 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   final GlobalKey _selectedTileKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
 
+  /// Backs the search box so Clear can wipe the typed text as well as the
+  /// query it produced.
+  final TextEditingController _searchController = TextEditingController();
+
   /// Activity requested by another screen, applied once the list has loaded.
   String? _pendingFocusId;
   String? _appliedFocusId;
@@ -52,6 +57,10 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   String _selectedSort = 'created_newest';
   String _selectedOwner = 'All owners';
   String _selectedDateRange = 'All time';
+
+  /// The dates behind a custom range. The label alone drops the year, so it
+  /// cannot be parsed back into a range the API would accept.
+  DateTimeRange? _customDateRange;
   String _selectedStatus = 'All statuses';
   List<Map<String, dynamic>> _apiUsers = [];
 
@@ -79,6 +88,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -149,6 +159,41 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   String get _expectedBookingSource =>
       _currentHeaderMode == 'create' ? BookingSource.directBooking : BookingSource.manual;
 
+  /// The Owner pill's value as an `ownerId` query value. The pill lists owner
+  /// names, so a name is resolved back to the id the endpoint filters by.
+  String? get _ownerQuery {
+    final selected = FilterValue.orNull(_selectedOwner);
+    if (selected == null) return null;
+
+    final auth = context.read<AuthProvider>();
+    if (auth.currentUser != null && auth.currentUser!.fullName.trim() == selected) {
+      return auth.currentUser!.id;
+    }
+    for (final u in _apiUsers) {
+      final fn = (u['firstName'] ?? u['first_name'] ?? '').toString().trim();
+      final ln = (u['lastName'] ?? u['last_name'] ?? '').toString().trim();
+      final name = '$fn $ln'.trim().isNotEmpty
+          ? '$fn $ln'.trim()
+          : (u['name'] ?? '').toString().trim();
+      if (name.isNotEmpty && name.toLowerCase() == selected.toLowerCase()) {
+        final id = (u['id'] ?? u['_id'])?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+
+    // No id for this name (e.g. the placeholder "Admin User"): the owner pill
+    // stays an in-memory match on the row's assignee.
+    return null;
+  }
+
+  /// The Status pill's value as a `status` query value, when the chosen label
+  /// is one of the four the endpoint accepts. `Scheduled` is an outcome, not a
+  /// status, so it returns null and stays an in-memory match.
+  String? get _statusQuery => FilterValue.activityStatus(_selectedStatus);
+
+  String? get _createdDateRangeQuery =>
+      FilterDateRange.toQueryValue(_selectedDateRange, customRange: _customDateRange);
+
   /// Renders a stored outcome (or, for a meeting that has not happened yet,
   /// its status) as the label the status filter matches on.
   String _outcomeLabel(Map<String, dynamic> item) {
@@ -192,10 +237,19 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     final isCreateMode = expectedSource == BookingSource.directBooking;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
+    // Read before the awaits below, while the context is still safe to use.
+    final ownerQuery = _ownerQuery;
+    final statusQuery = _statusQuery;
+    final createdDateRangeQuery = _createdDateRangeQuery;
+
     List<MeetingModel>? loadedMeetings;
     try {
       await MeetingBookingSourceStore.ensureLoaded();
       final repository = MasterDataRepositoryImpl();
+      debugPrint('[MeetingsScreen] filters → owner=${_selectedOwner} (id=${ownerQuery ?? '-'}) '
+          'status=${statusQuery ?? '-'} createdDateRange=${createdDateRangeQuery ?? '-'} '
+          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
+
       final activities = await repository.getActivities(
         type: 'meeting',
         bookingSource: expectedSource,
@@ -206,6 +260,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         sort: isCreateMode ? 'createdAt' : null,
         order: isCreateMode ? 'desc' : 'asc',
         departmentId: deptId,
+        ownerId: ownerQuery,
+        status: statusQuery,
+        createdDateRange: createdDateRangeQuery,
       );
 
       // The `bookingSource` query parameter is only honoured by backends that
@@ -434,6 +491,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
     if (selected != null) {
       setState(() => _selectedOwner = selected);
+      _loadMeetings();
     }
   }
 
@@ -513,10 +571,16 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       if (range != null) {
         setState(() {
           _selectedDateRange = '${range.start.month}/${range.start.day} - ${range.end.month}/${range.end.day}';
+          _customDateRange = range;
         });
+        _loadMeetings();
       }
     } else if (selected != null) {
-      setState(() => _selectedDateRange = selected);
+      setState(() {
+        _selectedDateRange = selected;
+        _customDateRange = null;
+      });
+      _loadMeetings();
     }
   }
 
@@ -579,6 +643,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
     if (selected != null) {
       setState(() => _selectedStatus = selected);
+      _loadMeetings();
     }
   }
 
@@ -674,46 +739,46 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       }
     }
 
-    // 2. Status Filter
-    if (_selectedStatus != 'All statuses') {
-      if (m.outcome.toLowerCase() != _selectedStatus.toLowerCase()) {
-        return false;
-      }
-    }
-
-    // 3. Date Range Filter
-    if (_selectedDateRange != 'All time') {
-      final meetingDt = _parseMeetingDate(m.startTime);
-      if (meetingDt != null) {
-        final now = DateTime.now();
-        final today = DateTime(now.year, now.month, now.day);
-        if (_selectedDateRange == 'Today') {
-          if (meetingDt.isBefore(today) || meetingDt.isAfter(today.add(const Duration(days: 1)))) return false;
-        } else if (_selectedDateRange == 'Yesterday') {
-          final yest = today.subtract(const Duration(days: 1));
-          if (meetingDt.isBefore(yest) || meetingDt.isAfter(today)) return false;
-        } else if (_selectedDateRange == 'This week') {
-          final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
-          if (meetingDt.isBefore(startOfWeek)) return false;
-        } else if (_selectedDateRange == 'Last week') {
-          final startOfLastWeek = today.subtract(Duration(days: today.weekday - 1 + 7));
-          final endOfLastWeek = startOfLastWeek.add(const Duration(days: 7));
-          if (meetingDt.isBefore(startOfLastWeek) || meetingDt.isAfter(endOfLastWeek)) return false;
-        } else if (_selectedDateRange == 'This month') {
-          final startOfMonth = DateTime(now.year, now.month, 1);
-          if (meetingDt.isBefore(startOfMonth)) return false;
-        } else if (_selectedDateRange == 'Last month') {
-          final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-          final endOfLastMonth = DateTime(now.year, now.month, 1);
-          if (meetingDt.isBefore(startOfLastMonth) || meetingDt.isAfter(endOfLastMonth)) return false;
-        } else if (_selectedDateRange == 'This year') {
-          final startOfYear = DateTime(now.year, 1, 1);
-          if (meetingDt.isBefore(startOfYear)) return false;
-        }
-      }
-    }
-
     return true;
+  }
+
+  /// Status and date are re-checked here as well as being sent to the API.
+  /// They go through [narrowInMemory] so a value the app and the API spell
+  /// differently cannot empty the screen — the rows are shown and the mismatch
+  /// is logged instead.
+  List<MeetingModel> _applyRiskyFilters(List<MeetingModel> rows) {
+    var result = rows;
+
+    if (FilterValue.orNull(_selectedStatus) != null) {
+      result = narrowInMemory(
+        rows: result,
+        filter: 'Status',
+        selection: _selectedStatus,
+        // The pill lists both statuses and outcomes, so both are tried.
+        test: (m) =>
+            FilterValue.matchesSlug(_selectedStatus, m.outcome) ||
+            FilterValue.matchesSlug(_selectedStatus, m.rawMap?['status']?.toString()),
+        storedValue: (m) => m.rawMap?['status']?.toString() ?? m.outcome,
+      );
+    }
+
+    if (!FilterDateRange.isUnset(_selectedDateRange)) {
+      Object? createdOf(MeetingModel m) =>
+          m.rawMap?['createdAt'] ?? m.rawMap?['created_at'] ?? _parseMeetingDate(m.startTime);
+      result = narrowInMemory(
+        rows: result,
+        filter: 'Create date',
+        selection: _selectedDateRange,
+        test: (m) => FilterDateRange.matches(
+          _selectedDateRange,
+          createdOf(m),
+          customRange: _customDateRange,
+        ),
+        storedValue: (m) => createdOf(m)?.toString(),
+      );
+    }
+
+    return result;
   }
 
   /// Reloads the list a meeting was just saved into and brings that meeting
@@ -727,8 +792,10 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       setState(() {
         _selectedTab = 0;
         _searchQuery = '';
+        _searchController.clear();
         _selectedOwner = 'All owners';
         _selectedDateRange = 'All time';
+        _customDateRange = null;
         _selectedStatus = 'All statuses';
       });
     }
@@ -753,8 +820,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       final currentUserName = auth.currentUser?.fullName ?? 'Admin User';
       final myMeetingsCount = _meetings.where((m) => (m.assignedTo ?? 'Admin User') == currentUserName).length;
 
-      final filteredMeetings =
-          _meetings.where((m) => _passesFilters(m, currentUserName)).toList();
+      final filteredMeetings = _applyRiskyFilters(
+        _meetings.where((m) => _passesFilters(m, currentUserName)).toList(),
+      );
 
       // Apply Sorting:
       if (_selectedSort == 'title_asc') {
@@ -928,66 +996,30 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     ),
                   ),
 
-                  // 3 Dots Menu containing Filters, Sort, Import, Export
-                  PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'filters') {
-                        setState(() {
-                          _showFilterBar = !_showFilterBar;
-                        });
-                      } else if (value == 'sort') {
-                        final RenderBox? button = context.findRenderObject() as RenderBox?;
-                        final offset = button != null ? button.localToGlobal(Offset.zero) : const Offset(200, 200);
-                        _showSortMenu(context, offset);
-                      } else {
-                        debugPrint('[MeetingsScreen Action]: Selected $value');
-                      }
+                  // Direct Filter Icon Button (Toggles filter section)
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _showFilterBar = !_showFilterBar;
+                      });
                     },
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    icon: Container(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: _showFilterBar ? const Color(0xFFE6F4F1) : Colors.white,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        border: Border.all(
+                          color: _showFilterBar ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                          width: _showFilterBar ? 1.5 : 1,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.more_horiz_rounded,
+                      child: Icon(
+                        Icons.tune_rounded,
                         size: 18,
-                        color: Color(0xFF64748B),
+                        color: _showFilterBar ? const Color(0xFF00A884) : const Color(0xFF64748B),
                       ),
                     ),
-                    itemBuilder: (BuildContext context) => [
-                      PopupMenuItem<String>(
-                        value: 'filters',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.tune_rounded, size: 18, color: Color(0xFF64748B)),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Filters',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'sort',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.swap_vert_rounded, size: 18, color: Color(0xFF64748B)),
-                            const SizedBox(width: 10),
-                             Text(
-                              'Sort',
-                              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -1019,6 +1051,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                             border: Border.all(color: const Color(0xFFE2E8F0)),
                           ),
                           child: TextField(
+                            controller: _searchController,
                             textAlignVertical: TextAlignVertical.center,
                             onChanged: (val) {
                               setState(() {
@@ -1122,11 +1155,21 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                                   const SizedBox(width: 16),
                                   InkWell(
                                     onTap: () {
+                                      debugPrint('[MeetingsScreen] CLEAR — before: '
+                                          'owner=$_selectedOwner date=$_selectedDateRange '
+                                          'status=$_selectedStatus '
+                                          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
                                       setState(() {
                                         _selectedOwner = 'All owners';
                                         _selectedDateRange = 'All time';
+                                        _customDateRange = null;
                                         _selectedStatus = 'All statuses';
+                                        _searchQuery = '';
+                                        _searchController.clear();
                                       });
+                                      // Every filter parameter is now absent
+                                      // from the request, so this reloads the
+                                      // full unfiltered first page.
                                       _loadMeetings();
                                     },
                                     child: Container(

@@ -214,6 +214,13 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
     );
   }
 
+  /// A filter pill.
+  ///
+  /// [value] comes from the provider on every build and is the only source of
+  /// what the pill shows. It used to be a `FormField` seeded with
+  /// `initialValue`, which Flutter reads once: after the provider was cleared
+  /// the field kept its own last selection, so Clear reset the data but left
+  /// every pill still displaying the filter it had just removed.
   Widget _buildFilterPill<T>({
     required String title,
     required T value,
@@ -222,12 +229,10 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
   }) {
     return SizedBox(
       height: 32,
-      child: FormField<T>(
-        initialValue: value,
-        builder: (state) {
-          final context = state.context;
+      child: Builder(
+        builder: (context) {
           final selectedItem = items.cast<DropdownSearchItem<T>?>().firstWhere(
-                (item) => item?.value == state.value,
+                (item) => item?.value == value,
                 orElse: () => null,
               );
 
@@ -254,13 +259,12 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
                   child: _InlineDealDropdownSearchModal<T>(
                     title: title,
                     items: items,
-                    selectedValue: state.value,
+                    selectedValue: value,
                   ),
                 ),
               );
 
               if (result != null) {
-                state.didChange(result);
                 onChanged(result);
               }
             },

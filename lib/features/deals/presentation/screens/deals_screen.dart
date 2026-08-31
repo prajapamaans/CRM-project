@@ -5,13 +5,13 @@ import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
-import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
-import '../../../../core/providers/master_data_provider.dart';
-import '../../../../core/widgets/deal_tile.dart';
+import '../../../../core/widgets/list_error_state.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
+import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
+import '../../../../core/widgets/deal_tile.dart';
+import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
-import 'package:crmproject/features/contacts/presentation/providers/contact_provider.dart';
 import '../providers/deal_provider.dart';
 import '../widgets/create_deal_modal.dart';
 import '../widgets/deal_inline_filter_section.dart';
@@ -48,15 +48,18 @@ class _DealsScreenState extends State<DealsScreen> {
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
+    // setSegmentScope is the one path allowed to clear the owner scope back to
+    // null; fetchDeals keeps whatever scope is set so that a refresh or a
+    // filter change does not drop the user out of the Mine segment.
     if (segmentIndex == 1) {
-      context.read<DealProvider>().fetchDeals(
+      context.read<DealProvider>().setSegmentScope(
             search: _searchQuery,
             ownerId: currentUserId,
             departmentId: deptId,
             ignorePermissions: false,
           );
     } else {
-      context.read<DealProvider>().fetchDeals(
+      context.read<DealProvider>().setSegmentScope(
             search: _searchQuery,
             ownerId: null,
             departmentId: deptId,
@@ -156,10 +159,6 @@ class _DealsScreenState extends State<DealsScreen> {
                     mineLabel: 'Mine Deals',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
-                    currentSort: dealProvider.sortOption,
-                    onSortChanged: (ContactSortOption option) {
-                      context.read<DealProvider>().setSortOption(option);
-                    },
                     isFilterActive: dealProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
                     onToggleFilterExpanded: () {
@@ -167,8 +166,13 @@ class _DealsScreenState extends State<DealsScreen> {
                         _isFilterExpanded = !_isFilterExpanded;
                       });
                     },
+                    onClearTap: () {
+                      context.read<DealProvider>().clearAllFilters();
+                    },
                     onRefreshTap: () {
-                      context.read<DealProvider>().fetchDeals();
+                      // Re-issues the current segment so a refresh keeps the
+                      // All/Mine scope instead of silently falling back to All.
+                      _loadDealsForSegment(_selectedSegment);
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -286,7 +290,16 @@ class _DealsScreenState extends State<DealsScreen> {
                     ? const Center(
                         child: CircularProgressIndicator(color: Color(0xFF00A884)),
                       )
-                    : deals.isEmpty
+                    // A failed request is reported as a failure. It used to
+                    // fall through to "No deals found", so a filter whose
+                    // request the API rejected looked like one that matched
+                    // nothing.
+                    : (dealProvider.error != null && deals.isEmpty)
+                        ? ListErrorState(
+                            message: dealProvider.error!,
+                            onRetry: () => _loadDealsForSegment(_selectedSegment),
+                          )
+                        : deals.isEmpty
                         ? ListView(
                             physics: const AlwaysScrollableScrollPhysics(
                                 parent: BouncingScrollPhysics()),

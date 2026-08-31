@@ -28,6 +28,8 @@ abstract class MasterDataRepository {
     String? order,
     String? search,
     String? bookingSource,
+    String? createdDateRange,
+    String? priority,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -144,6 +146,8 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     String? order,
     String? search,
     String? bookingSource,
+    String? createdDateRange,
+    String? priority,
   }) async {
     try {
       return await _remoteDataSource.getActivities(
@@ -160,6 +164,8 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
         order: order,
         search: search,
         bookingSource: bookingSource,
+        createdDateRange: createdDateRange,
+        priority: priority,
       );
     } catch (e) {
       debugPrint('[GET /api/activities ERROR]: $e');

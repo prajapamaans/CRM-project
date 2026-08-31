@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/contact_tile.dart';
+import '../../../../core/widgets/list_error_state.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
@@ -46,21 +47,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
-    if (segmentIndex == 1) {
-      context.read<ContactProvider>().fetchContacts(
-            search: _searchQuery,
-            ownerId: currentUserId,
-            departmentId: deptId,
-            ignorePermissions: false,
-          );
-    } else {
-      context.read<ContactProvider>().fetchContacts(
-            search: _searchQuery,
-            ownerId: null,
-            departmentId: deptId,
-            ignorePermissions: true,
-          );
-    }
+    // setSegmentScope is the one path allowed to clear the owner scope back to
+    // null; fetchContacts keeps whatever scope is set so that a refresh or a
+    // filter change does not drop the user out of the Mine segment.
+    context.read<ContactProvider>().setSegmentScope(
+          search: _searchQuery,
+          ownerId: segmentIndex == 1 ? currentUserId : null,
+          departmentId: deptId,
+          ignorePermissions: segmentIndex != 1,
+        );
   }
 
   Future<void> _confirmDeleteSelectedContacts() async {
@@ -161,10 +156,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     mineLabel: 'Mine Contacts',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
-                    currentSort: contactProvider.sortOption,
-                    onSortChanged: (ContactSortOption option) {
-                      context.read<ContactProvider>().setSortOption(option);
-                    },
                     isFilterActive: contactProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
                     onToggleFilterExpanded: () {
@@ -172,8 +163,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         _isFilterExpanded = !_isFilterExpanded;
                       });
                     },
+                    onClearTap: () {
+                      context.read<ContactProvider>().clearAllFilters();
+                    },
                     onRefreshTap: () {
-                      context.read<ContactProvider>().fetchContacts();
+                      // Re-issues the current segment so a refresh keeps the
+                      // All/Mine scope instead of silently falling back to All.
+                      _loadContactsForSegment(_selectedSegment);
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -290,7 +286,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     ? const Center(
                         child: CircularProgressIndicator(color: Color(0xFF00A884)),
                       )
-                    : contacts.isEmpty
+                    // A failed request is reported as a failure. It used to
+                    // fall through to "No contacts found", so a filter whose
+                    // request the API rejected looked like one that matched
+                    // nothing.
+                    : (contactProvider.error != null && contacts.isEmpty)
+                        ? ListErrorState(
+                            message: contactProvider.error!,
+                            onRetry: () => _loadContactsForSegment(_selectedSegment),
+                          )
+                        : contacts.isEmpty
                         ? ListView(
                             physics: const AlwaysScrollableScrollPhysics(
                                 parent: BouncingScrollPhysics()),

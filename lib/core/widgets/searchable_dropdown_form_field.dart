@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+const double _kRowHeight = 44.0;
+const double _kMinMenuWidth = 240.0;
+const double _kMenuVerticalPadding = 6.0;
+const Color _kMenuBackground = Color(0xFFEEF3F0);
+
 class DropdownSearchItem<T> {
   final T value;
   final String label;
@@ -77,35 +82,59 @@ class SearchableDropdownFormField<T> extends FormField<T> {
                   builder: (dialogCtx) {
                     final mediaQuery = MediaQuery.of(dialogCtx);
                     final screenHeight = mediaQuery.size.height;
-                    final dropdownHeight = items.length > 5 ? 260.0 : (items.length * 48.0 + 60.0).clamp(120.0, 260.0);
-                    final spaceBelow = screenHeight - offset.dy - size.height;
-                    final showAbove = spaceBelow < dropdownHeight && offset.dy > dropdownHeight;
-                    final topPos = showAbove
-                        ? (offset.dy - dropdownHeight - 4).clamp(10.0, screenHeight - 100.0)
-                        : (offset.dy + size.height + 4).clamp(10.0, screenHeight - dropdownHeight - 10.0);
+                    final screenWidth = mediaQuery.size.width;
+
+                    const double edgeGap = 12.0;
+                    final topLimit = mediaQuery.padding.top + edgeGap;
+                    final bottomLimit = screenHeight - mediaQuery.padding.bottom - edgeGap;
+
+                    final menuWidth = size.width
+                        .clamp(_kMinMenuWidth, screenWidth - edgeGap * 2)
+                        .toDouble();
+
+                    final hasSearch = items.length > 5;
+                    final headerHeight = hasSearch ? 48.0 : 0.0;
+                    final wantedHeight = items.length * _kRowHeight + _kMenuVerticalPadding * 2 + headerHeight;
+                    final maxMenuHeight = (bottomLimit - topLimit).clamp(160.0, double.infinity);
+                    final menuHeight = wantedHeight.clamp(100.0, maxMenuHeight).toDouble();
+
+                    final spaceBelow = bottomLimit - (offset.dy + size.height + 4);
+                    final spaceAbove = (offset.dy - 4) - topLimit;
+                    final openUpwards = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+                    final idealTop = openUpwards
+                        ? (offset.dy - menuHeight - 4)
+                        : (offset.dy + size.height + 4);
+
+                    final top = idealTop.clamp(topLimit, (bottomLimit - menuHeight).clamp(topLimit, double.infinity)).toDouble();
 
                     return Stack(
                       children: [
                         Positioned(
-                          left: offset.dx.clamp(8.0, mediaQuery.size.width - size.width - 8.0),
-                          top: topPos,
-                          width: size.width,
+                          left: offset.dx
+                              .clamp(edgeGap, (screenWidth - menuWidth - edgeGap).clamp(edgeGap, double.infinity))
+                              .toDouble(),
+                          top: top,
+                          width: menuWidth,
                           child: Material(
-                            elevation: 8,
+                            elevation: 6,
                             borderRadius: BorderRadius.circular(10),
-                            color: Colors.white,
+                            color: _kMenuBackground,
                             shadowColor: Colors.black26,
                             child: Container(
-                              height: dropdownHeight,
+                              height: menuHeight,
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: _kMenuBackground,
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+                                border: Border.all(color: const Color(0xFFD3E0D8), width: 1),
                               ),
-                              child: _SearchableDropdownModal<T>(
-                                title: hintText,
-                                items: items,
-                                selectedValue: state.value,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: _DropdownMenuPanel<T>(
+                                  title: hintText,
+                                  items: items,
+                                  selectedValue: state.value,
+                                ),
                               ),
                             ),
                           ),
@@ -178,23 +207,22 @@ class SearchableDropdownFormField<T> extends FormField<T> {
         );
 }
 
-class _SearchableDropdownModal<T> extends StatefulWidget {
+class _DropdownMenuPanel<T> extends StatefulWidget {
   final String title;
   final List<DropdownSearchItem<T>> items;
   final T? selectedValue;
 
-  const _SearchableDropdownModal({
+  const _DropdownMenuPanel({
     required this.title,
     required this.items,
     this.selectedValue,
   });
 
   @override
-  State<_SearchableDropdownModal<T>> createState() =>
-      _SearchableDropdownModalState<T>();
+  State<_DropdownMenuPanel<T>> createState() => _DropdownMenuPanelState<T>();
 }
 
-class _SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T>> {
+class _DropdownMenuPanelState<T> extends State<_DropdownMenuPanel<T>> {
   String _searchQuery = '';
 
   @override
@@ -207,136 +235,138 @@ class _SearchableDropdownModalState<T> extends State<_SearchableDropdownModal<T>
       return labelMatch || subMatch;
     }).toList();
 
-    return Column(
-      children: [
-        if (widget.items.length > 3)
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Container(
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: TextField(
-                onChanged: (val) {
-                  setState(() {
-                    _searchQuery = val.trim();
-                  });
-                },
-                style: GoogleFonts.poppins(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF1E293B),
+    return Container(
+      color: _kMenuBackground,
+      child: Column(
+        children: [
+          if (widget.items.length > 5) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFD3E0D8)),
                 ),
-                decoration: InputDecoration(
-                  hintText: 'Search ${widget.title}...',
-                  hintStyle: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: const Color(0xFF94A3B8),
+                child: TextField(
+                  onChanged: (val) {
+                    setState(() {
+                      _searchQuery = val.trim();
+                    });
+                  },
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF1E293B),
                   ),
-                  prefixIcon: const Icon(
-                    Icons.search_rounded,
-                    color: Color(0xFF94A3B8),
-                    size: 16,
+                  decoration: InputDecoration(
+                    hintText: 'Search ${widget.title}...',
+                    hintStyle: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: const Color(0xFF94A3B8),
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: Color(0xFF94A3B8),
+                      size: 16,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 ),
               ),
             ),
-          ),
-        const Divider(height: 1, color: Color(0xFFE2E8F0)),
-
-        // Items list
-        Expanded(
-          child: filteredItems.isEmpty
-              ? Center(
-                  child: Text(
-                    'No options found',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: const Color(0xFF64748B),
+            const Divider(height: 1, color: Color(0xFFDDE7E1)),
+          ],
+          Expanded(
+            child: filteredItems.isEmpty
+                ? Center(
+                    child: Text(
+                      'No options found',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF64748B),
+                      ),
                     ),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: filteredItems.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, color: Color(0xFFF1F5F9)),
-                  itemBuilder: (context, index) {
-                    final item = filteredItems[index];
-                    final isSelected = item.value == widget.selectedValue;
+                  )
+                : Scrollbar(
+                    thumbVisibility: true,
+                    child: ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(vertical: _kMenuVerticalPadding),
+                      itemCount: filteredItems.length,
+                      itemBuilder: (context, index) {
+                        final item = filteredItems[index];
+                        final isSelected = item.value == widget.selectedValue;
+                        final hasSubtext = item.subtext != null && item.subtext!.isNotEmpty;
 
-                    return InkWell(
-                      onTap: () {
-                        Navigator.of(context).pop(item.value);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        color: isSelected ? const Color(0xFFF0FDF4) : Colors.transparent,
-                        child: Row(
-                          children: [
-                            if (item.dotColor != null) ...[
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: item.dotColor,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.label,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12.5,
-                                      fontWeight: isSelected
-                                          ? FontWeight.w600
-                                          : FontWeight.w500,
-                                      color: isSelected
-                                          ? const Color(0xFF00A884)
-                                          : const Color(0xFF1E293B),
+                        return InkWell(
+                          onTap: () => Navigator.of(context).pop(item.value),
+                          child: Container(
+                            constraints: const BoxConstraints(minHeight: _kRowHeight),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            color: isSelected ? const Color(0xFFDDEAE3) : Colors.transparent,
+                            child: Row(
+                              children: [
+                                if (item.dotColor != null) ...[
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: item.dotColor,
+                                      shape: BoxShape.circle,
                                     ),
                                   ),
-                                  if (item.subtext != null &&
-                                      item.subtext!.isNotEmpty)
-                                    Text(
-                                      item.subtext!,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                        color: const Color(0xFF64748B),
-                                      ),
-                                    ),
+                                  const SizedBox(width: 10),
                                 ],
-                              ),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.label,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 14,
+                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                          color: isSelected
+                                              ? const Color(0xFF00A884)
+                                              : const Color(0xFF1E293B),
+                                        ),
+                                      ),
+                                      if (hasSubtext)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 2),
+                                          child: Text(
+                                            item.subtext!,
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w400,
+                                              color: const Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_rounded,
+                                    color: Color(0xFF00A884),
+                                    size: 18,
+                                  ),
+                              ],
                             ),
-                            if (isSelected)
-                              const Icon(
-                                Icons.check_rounded,
-                                color: Color(0xFF00A884),
-                                size: 16,
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

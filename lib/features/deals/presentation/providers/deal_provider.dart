@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/utils/filter_query_utils.dart';
 import '../../data/models/deal_model.dart';
 import '../../data/models/deal_stats_model.dart';
 import '../../data/repositories/deal_repository.dart';
@@ -21,6 +22,9 @@ class DealProvider extends ChangeNotifier {
   String? _currentOwnerId;
   bool? _currentIgnorePermissions;
 
+  /// Increments on every request so a superseded one cannot write its result.
+  int _requestSeq = 0;
+
   // Filter properties
   String? _selectedOwnerId;
   String? _selectedStage;
@@ -34,85 +38,133 @@ class DealProvider extends ChangeNotifier {
 
   DealStatsModel? get stats => _stats;
 
+  /// Every filter is sent to the API *and* re-applied here.
+  ///
+  /// The request carries `ownerId`, `stage`, `createdDateRange` and
+  /// `staleDays`, which narrows the whole dataset rather than one page. But a
+  /// deployment that does not implement one of those parameters ignores it and
+  /// returns everything, and relying on the server alone meant the filter then
+  /// did nothing at all. So the same conditions are checked again on what
+  /// comes back: when the server did filter this pass drops nothing, and when
+  /// it did not the user still sees a filtered list.
+  ///
+  /// Priority and MSP are only ever applied here — `GET /api/deals` has no
+  /// parameter for either.
   List<DealModel> get deals {
     List<DealModel> filtered = List.from(_deals);
 
-    // Apply Owner filter
-    if (_selectedOwnerId != null && _selectedOwnerId!.isNotEmpty && _selectedOwnerId != 'all') {
-      filtered = filtered.where((d) => d.ownerId == _selectedOwnerId).toList();
+    final ownerPill = FilterValue.orNull(_selectedOwnerId);
+    if (ownerPill != null) {
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'Deal owner',
+        selection: ownerPill,
+        test: (d) => d.ownerId == ownerPill,
+        storedValue: (d) => d.ownerId,
+      );
     }
 
-    // Apply Deal Stage filter
-    if (_selectedStage != null &&
-        _selectedStage!.isNotEmpty &&
-        _selectedStage != 'all stages' &&
-        _selectedStage != 'Select a stage') {
-      filtered = filtered.where((d) {
-        final s = d.stage.toLowerCase();
-        final sel = _selectedStage!.toLowerCase();
-        if (sel == 'won') return s.contains('won');
-        if (sel == 'lost') return s.contains('lost');
-        if (sel == 'rfp/rfq') return s.contains('rfp') || s.contains('rfq');
-        return s == sel;
-      }).toList();
+    final stagePill = _stageQuery;
+    if (stagePill != null) {
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'Deal stage',
+        selection: stagePill,
+        test: (d) {
+          final s = d.stage.toLowerCase();
+          final sel = stagePill.toLowerCase();
+          // Won / Lost / RFP-RFQ are family names rather than exact stages.
+          if (sel == 'won') return s.contains('won');
+          if (sel == 'lost') return s.contains('lost');
+          if (sel == 'rfp/rfq') return s.contains('rfp') || s.contains('rfq');
+          return FilterValue.matchesSlug(stagePill, d.stage);
+        },
+        storedValue: (d) => d.stage,
+      );
     }
 
-    // Apply Stale Days filter
-    if (_selectedStaleDays != null &&
-        _selectedStaleDays!.isNotEmpty &&
-        _selectedStaleDays != 'All deals' &&
-        _selectedStaleDays != 'all') {
-      final days = int.tryParse(_selectedStaleDays!.replaceAll(RegExp(r'[^\d]'), ''));
-      if (days != null) {
-        final now = DateTime.now();
-        filtered = filtered.where((d) {
-          final dt = DateTime.tryParse(d.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return now.difference(dt).inDays >= days;
-        }).toList();
-      }
+    final staleDays = int.tryParse(_staleDaysQuery ?? '');
+    if (staleDays != null) {
+      final now = DateTime.now();
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'Stale days',
+        selection: _selectedStaleDays,
+        test: (d) {
+          final dt = DateTime.tryParse(d.createdAt ?? '');
+          return dt != null && now.difference(dt).inDays >= staleDays;
+        },
+        storedValue: (d) => d.createdAt,
+      );
     }
 
-    // Apply Priority filter
-    if (_selectedPriority != null &&
-        _selectedPriority!.isNotEmpty &&
-        _selectedPriority != 'Select a priority' &&
-        _selectedPriority != 'all') {
-      filtered = filtered.where((d) {
-        final prio = (d.priority ?? '').toLowerCase();
-        return prio == _selectedPriority!.toLowerCase();
-      }).toList();
+    if (!FilterDateRange.isUnset(_selectedCreateDate)) {
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'Create date',
+        selection: _selectedCreateDate,
+        test: (d) => FilterDateRange.matches(_selectedCreateDate, d.createdAt),
+        storedValue: (d) => d.createdAt,
+      );
     }
 
-    // Apply MSP filter
-    if (_selectedMsp != null &&
-        _selectedMsp!.isNotEmpty &&
-        _selectedMsp != 'All MSPs' &&
-        _selectedMsp != 'all') {
-      filtered = filtered.where((d) {
-        final msp = (d.msp ?? '').toLowerCase();
-        return msp.contains(_selectedMsp!.toLowerCase());
-      }).toList();
+    if (_priorityFilterValue != null) {
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'Priority',
+        selection: _priorityFilterValue,
+        test: (d) => FilterValue.matchesSlug(_priorityFilterValue, d.priority),
+        storedValue: (d) => d.priority,
+      );
     }
 
-    // Apply Sorting
-    switch (_sortOption) {
-      case ContactSortOption.aToZ:
-        filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-        break;
-      case ContactSortOption.zToA:
-        filtered.sort((a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()));
-        break;
-      case ContactSortOption.mostRecent:
-        filtered.sort((a, b) {
-          final dateA = DateTime.tryParse(a.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final dateB = DateTime.tryParse(b.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return dateB.compareTo(dateA);
-        });
-        break;
+    if (_mspFilterValue != null) {
+      filtered = narrowInMemory(
+        rows: filtered,
+        filter: 'MSP',
+        selection: _mspFilterValue,
+        test: (d) => (d.msp ?? '').toLowerCase().contains(_mspFilterValue!.toLowerCase()),
+        storedValue: (d) => d.msp,
+      );
     }
+
+    // Apply Default Most Recent Sorting (newest first)
+    filtered.sort((a, b) {
+      final dateA = DateTime.tryParse(a.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dateB = DateTime.tryParse(b.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dateB.compareTo(dateA);
+    });
 
     return filtered;
   }
+
+  // ---------------------------------------------------------------------------
+  // Filter → query parameters
+  // ---------------------------------------------------------------------------
+
+  /// The owner the request is scoped to: the Deal owner pill when one is
+  /// chosen, otherwise the All/Mine segment. Both map to `ownerId`, so the
+  /// explicit pill wins.
+  String? get _ownerQuery => FilterValue.orNull(_selectedOwnerId) ?? _currentOwnerId;
+
+  /// The stage pill's value, passed through as `stage`. `Won`/`Lost`/`RFP/RFQ`
+  /// were matched by substring in memory; the API compares the stage itself,
+  /// so the label is sent as-is.
+  String? get _stageQuery => FilterValue.orNull(_selectedStage);
+
+  String? get _createdDateRangeQuery => FilterDateRange.toQueryValue(_selectedCreateDate);
+
+  /// `staleDays` — the number pulled out of labels like `30+ days`.
+  String? get _staleDaysQuery {
+    final label = FilterValue.orNull(_selectedStaleDays);
+    if (label == null || label.toLowerCase() == 'all deals') return null;
+    final digits = label.replaceAll(RegExp(r'[^\d]'), '');
+    return digits.isEmpty ? null : digits;
+  }
+
+  /// Null unless a real value is picked. Neither has an API parameter.
+  String? get _priorityFilterValue => FilterValue.orNull(_selectedPriority);
+  String? get _mspFilterValue => FilterValue.orNull(_selectedMsp);
 
   String? get selectedStage => _selectedStage;
   String? get selectedOwnerId => _selectedOwnerId;
@@ -123,26 +175,23 @@ class DealProvider extends ChangeNotifier {
   ContactSortOption get sortOption => _sortOption;
 
   bool get isFilterActive =>
-      (_selectedOwnerId != null && _selectedOwnerId!.isNotEmpty && _selectedOwnerId != 'all') ||
-      (_selectedStage != null &&
-          _selectedStage!.isNotEmpty &&
-          _selectedStage != 'all stages' &&
-          _selectedStage != 'Select a stage') ||
-      (_selectedStaleDays != null &&
-          _selectedStaleDays!.isNotEmpty &&
-          _selectedStaleDays != 'All deals' &&
-          _selectedStaleDays != 'all') ||
-      (_selectedPriority != null &&
-          _selectedPriority!.isNotEmpty &&
-          _selectedPriority != 'Select a priority' &&
-          _selectedPriority != 'all') ||
-      (_selectedMsp != null &&
-          _selectedMsp!.isNotEmpty &&
-          _selectedMsp != 'All MSPs' &&
-          _selectedMsp != 'all') ||
-      (_selectedCreateDate != null && _selectedCreateDate!.isNotEmpty);
+      FilterValue.orNull(_selectedOwnerId) != null ||
+      _stageQuery != null ||
+      _staleDaysQuery != null ||
+      _priorityFilterValue != null ||
+      _mspFilterValue != null ||
+      !FilterDateRange.isUnset(_selectedCreateDate);
 
-  int get totalCount => isFilterActive ? deals.length : _totalCount;
+  /// The server's total for the current query.
+  ///
+  /// If nothing was dropped after the response, the API honoured the filters
+  /// and its total is authoritative. If rows *were* dropped, the API did not
+  /// filter, so its total counts records the user cannot see — the visible
+  /// count is the truthful one.
+  int get totalCount {
+    final visible = deals;
+    return visible.length < _deals.length ? visible.length : _totalCount;
+  }
   int get currentPage => _currentPage;
   int get limit => _limit;
   int get totalPages {
@@ -157,44 +206,80 @@ class DealProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Changing any filter replaces just that one, resets to page 1 and asks the
+  /// API again — the other filters ride along in the same request.
   void setOwnerFilter(String? ownerId) {
     _selectedOwnerId = ownerId;
-    notifyListeners();
+    _applyFilterChange('owner');
   }
 
   void setStageFilter(String? stage) {
     _selectedStage = stage;
-    notifyListeners();
-  }
-
-  void setMspFilter(String? msp) {
-    _selectedMsp = msp;
-    notifyListeners();
+    _applyFilterChange('stage');
   }
 
   void setStaleDaysFilter(String? days) {
     _selectedStaleDays = days;
+    _applyFilterChange('staleDays');
+  }
+
+  void setCreateDateFilter(String? date) {
+    _selectedCreateDate = date;
+    _applyFilterChange('createDate');
+  }
+
+  /// Priority and MSP narrow the loaded rows rather than the query — the deals
+  /// endpoint has no parameter for either — so they need no refetch.
+  void setMspFilter(String? msp) {
+    _selectedMsp = msp;
+    _currentPage = 1;
     notifyListeners();
   }
 
   void setPriorityFilter(String? priority) {
     _selectedPriority = priority;
+    _currentPage = 1;
     notifyListeners();
   }
 
-  void setCreateDateFilter(String? date) {
-    _selectedCreateDate = date;
+  void _applyFilterChange(String changed) {
+    _currentPage = 1;
     notifyListeners();
+    debugPrint('[DealProvider] filter changed: $changed → ${describeFilters()}');
+    fetchDeals(refresh: true);
   }
 
+  /// The active filter state, for logging.
+  String describeFilters() => 'owner=${FilterValue.orNull(_selectedOwnerId) ?? '-'} '
+      'stage=${_stageQuery ?? '-'} '
+      'staleDays=${_staleDaysQuery ?? '-'} '
+      'createdDateRange=${_createdDateRangeQuery ?? '-'} '
+      'priority=${_priorityFilterValue ?? '-'} '
+      'msp=${_mspFilterValue ?? '-'} '
+      'search=${_currentSearch ?? '-'}';
+
+  /// Removes every filter and reloads the full, unfiltered first page.
+  ///
+  /// The segment scope (`_currentOwnerId`), the department and the permission
+  /// scope are deliberately untouched: they are not filter pills, and dropping
+  /// them would silently change which records the user is allowed to see.
   void clearAllFilters() {
+    debugPrint('[DealProvider] CLEAR — before: ${describeFilters()}');
+
     _selectedOwnerId = null;
     _selectedStage = null;
     _selectedPriority = null;
     _selectedCreateDate = null;
     _selectedStaleDays = null;
+    _selectedMsp = null;
+    _currentSearch = null;
+    _currentPage = 1;
+    _error = null;
     _sortOption = ContactSortOption.mostRecent;
+
+    debugPrint('[DealProvider] CLEAR — after: ${describeFilters()}');
     notifyListeners();
+    fetchDeals(refresh: true);
   }
 
   String? _currentDepartmentId;
@@ -210,6 +295,26 @@ class DealProvider extends ChangeNotifier {
     }
   }
 
+  /// Sets the All/Mine segment scope and reloads.
+  ///
+  /// This is the only path that may set the scope to null, which is why it is
+  /// separate from [fetchDeals] — there, an omitted `ownerId` has to mean
+  /// "leave the scope alone" so that a refresh or a filter change does not
+  /// silently drop the user out of the Mine segment.
+  Future<void> setSegmentScope({
+    String? ownerId,
+    bool? ignorePermissions,
+    String? departmentId,
+    String? search,
+  }) {
+    _currentOwnerId = ownerId;
+    _currentIgnorePermissions = ignorePermissions;
+    if (departmentId != null) _currentDepartmentId = departmentId;
+    _currentSearch = (search != null && search.isEmpty) ? null : search ?? _currentSearch;
+    _currentPage = 1;
+    return fetchDeals(refresh: true);
+  }
+
   Future<void> fetchDeals({
     String? search,
     String? ownerId,
@@ -223,14 +328,20 @@ class DealProvider extends ChangeNotifier {
     }
 
     final requestedDeptId = _currentDepartmentId;
+    // Changing two filters quickly leaves two requests in flight. Each one
+    // claims a sequence number and only the newest is allowed to write its
+    // result, so a slower earlier response cannot overwrite the current query.
+    final requestSeq = ++_requestSeq;
 
     if (refresh) {
       _currentPage = 1;
       _isLoading = true;
       _error = null;
       if (search != null) _currentSearch = search;
-      _currentOwnerId = ownerId;
-      _currentIgnorePermissions = ignorePermissions;
+      // Only a caller that names the segment scope changes it; a bare
+      // fetchDeals() is a refresh and must keep the scope it was on.
+      if (ownerId != null) _currentOwnerId = ownerId;
+      if (ignorePermissions != null) _currentIgnorePermissions = ignorePermissions;
       notifyListeners();
     }
 
@@ -239,14 +350,23 @@ class DealProvider extends ChangeNotifier {
         page: _currentPage,
         limit: limit ?? _limit,
         search: _currentSearch,
-        ownerId: _currentOwnerId,
+        ownerId: _ownerQuery,
         departmentId: _currentDepartmentId,
         ignorePermissions: _currentIgnorePermissions,
+        stage: _stageQuery,
+        createdDateRange: _createdDateRangeQuery,
+        staleDays: _staleDaysQuery,
+        sort: 'created_at',
+        order: 'desc',
       );
 
       // Race condition guard: ignore stale response if department changed while waiting
       if (requestedDeptId != _currentDepartmentId) {
         debugPrint('[DealProvider] Ignoring stale response for department: $requestedDeptId (active: $_currentDepartmentId)');
+        return;
+      }
+      if (requestSeq != _requestSeq) {
+        debugPrint('[DealProvider] Ignoring superseded response #$requestSeq (latest: $_requestSeq)');
         return;
       }
 

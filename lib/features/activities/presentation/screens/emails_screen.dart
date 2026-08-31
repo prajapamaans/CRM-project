@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/filter_query_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
@@ -149,6 +150,16 @@ class _EmailsScreenState extends State<EmailsScreen> {
     }
   }
 
+  /// The Owner pill's value as an `ownerId` query value.
+  String? get _ownerQuery => FilterValue.orNull(_selectedOwnerId);
+
+  /// The Status pill's value as a `status` query value, when the chosen label
+  /// is one of the four the endpoint accepts. Anything else stays an
+  /// in-memory match against the record's own status field.
+  String? get _statusQuery => FilterValue.activityStatus(_selectedStatusFilter);
+
+  String? get _createdDateRangeQuery => FilterDateRange.toQueryValue(_selectedCreateDate);
+
   Future<void> _fetchEmails({bool reset = false}) async {
     if (!mounted) return;
 
@@ -183,6 +194,11 @@ class _EmailsScreenState extends State<EmailsScreen> {
       final repository = MasterDataRepositoryImpl();
       final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
+      debugPrint('[EmailsScreen] filters → owner=${_ownerQuery ?? '-'} '
+          'status=${_statusQuery ?? '-'} '
+          'createdDateRange=${_createdDateRangeQuery ?? '-'} '
+          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
+
       final items = await repository.getActivities(
         type: 'email',
         page: pageToFetch,
@@ -191,6 +207,9 @@ class _EmailsScreenState extends State<EmailsScreen> {
         order: _sortApiOrder,
         search: _searchQuery.isNotEmpty ? _searchQuery : null,
         departmentId: deptId,
+        ownerId: _ownerQuery,
+        status: _statusQuery,
+        createdDateRange: _createdDateRangeQuery,
       );
 
       debugPrint('[Emails Received]: ${items.length}');
@@ -290,40 +309,37 @@ class _EmailsScreenState extends State<EmailsScreen> {
         if (ownerId != _selectedOwnerId) return false;
       }
 
-      // 3. Status filter
-      if (_selectedStatusFilter != null && _selectedStatusFilter != 'All statuses') {
-        final status = (e['status'] ?? e['state'] ?? '').toString().toUpperCase();
-        if (!status.contains(_selectedStatusFilter!.toUpperCase())) {
-          return false;
-        }
-      }
-
-      // 4. Create Date filter
-      if (_selectedCreateDate != null && _selectedCreateDate != 'All time') {
-        final startTimeStr = (e['scheduledAt'] ?? e['scheduled_at'] ?? e['createdAt'] ?? '').toString();
-        if (startTimeStr.isNotEmpty) {
-          try {
-            final itemDt = DateTime.parse(startTimeStr).toLocal();
-            final now = DateTime.now();
-            if (_selectedCreateDate == 'Today') {
-              if (itemDt.year != now.year || itemDt.month != now.month || itemDt.day != now.day) return false;
-            } else if (_selectedCreateDate == 'Yesterday') {
-              final yest = now.subtract(const Duration(days: 1));
-              if (itemDt.year != yest.year || itemDt.month != yest.month || itemDt.day != yest.day) return false;
-            } else if (_selectedCreateDate == 'This week') {
-              final weekStart = now.subtract(Duration(days: now.weekday - 1));
-              if (itemDt.isBefore(DateTime(weekStart.year, weekStart.month, weekStart.day))) return false;
-            } else if (_selectedCreateDate == 'This month') {
-              if (itemDt.year != now.year || itemDt.month != now.month) return false;
-            } else if (_selectedCreateDate == 'This year') {
-              if (itemDt.year != now.year) return false;
-            }
-          } catch (_) {}
-        }
-      }
-
       return true;
     }).toList();
+
+    // Status and create date are re-checked here as well as being sent to the
+    // API. They go through narrowInMemory so a value the app and the API spell
+    // differently cannot empty the screen — the rows are shown and the
+    // mismatch is logged instead.
+    String? createdOf(Map<String, dynamic> e) =>
+        (e['createdAt'] ?? e['created_at'] ?? e['scheduledAt'] ?? e['scheduled_at'])?.toString();
+
+    if (FilterValue.orNull(_selectedStatusFilter) != null) {
+      filteredEmails = narrowInMemory(
+        rows: filteredEmails,
+        filter: 'Status',
+        selection: _selectedStatusFilter,
+        test: (e) =>
+            FilterValue.matchesSlug(_selectedStatusFilter, e['status']?.toString()) ||
+            FilterValue.matchesSlug(_selectedStatusFilter, e['state']?.toString()),
+        storedValue: (e) => (e['status'] ?? e['state'])?.toString(),
+      );
+    }
+
+    if (!FilterDateRange.isUnset(_selectedCreateDate)) {
+      filteredEmails = narrowInMemory(
+        rows: filteredEmails,
+        filter: 'Create date',
+        selection: _selectedCreateDate,
+        test: (e) => FilterDateRange.matches(_selectedCreateDate, createdOf(e)),
+        storedValue: createdOf,
+      );
+    }
 
     // Client-side sort fallback
     if (_currentSort == ContactSortOption.aToZ) {
@@ -384,19 +400,21 @@ class _EmailsScreenState extends State<EmailsScreen> {
                         _selectedTab = index;
                       });
                     },
-                    currentSort: _currentSort,
-                    onSortChanged: (ContactSortOption option) {
-                      setState(() {
-                        _currentSort = option;
-                      });
-                      _fetchEmails(reset: true);
-                    },
                     isFilterActive: isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
                     onToggleFilterExpanded: () {
                       setState(() {
                         _isFilterExpanded = !_isFilterExpanded;
                       });
+                    },
+                    onClearTap: () {
+                      setState(() {
+                        _selectedOwnerId = null;
+                        _selectedCreateDate = null;
+                        _selectedStatusFilter = null;
+                        _searchQuery = '';
+                      });
+                      _fetchEmails(reset: true);
                     },
                   ),
 
@@ -406,20 +424,25 @@ class _EmailsScreenState extends State<EmailsScreen> {
                       selectedOwnerId: _selectedOwnerId,
                       selectedCreateDate: _selectedCreateDate,
                       selectedStatus: _selectedStatusFilter,
+                      // Each change replaces just that filter and reissues the
+                      // request from page 1, so the others stay applied.
                       onOwnerChanged: (val) {
                         setState(() {
                           _selectedOwnerId = val;
                         });
+                        _fetchEmails(reset: true);
                       },
                       onCreateDateChanged: (val) {
                         setState(() {
                           _selectedCreateDate = val;
                         });
+                        _fetchEmails(reset: true);
                       },
                       onStatusChanged: (val) {
                         setState(() {
                           _selectedStatusFilter = val;
                         });
+                        _fetchEmails(reset: true);
                       },
                     ),
                 ],
@@ -603,43 +626,29 @@ class _EmailsScreenState extends State<EmailsScreen> {
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: const Icon(
-                  Icons.more_vert_rounded,
-                  color: Color(0xFF94A3B8),
-                  size: 20,
-                ),
-                onSelected: (action) {
-                  if (action == 'sort') {
-                    _showSortMenu(context);
-                  } else if (action == 'filter') {
-                    setState(() {
-                      _isFilterExpanded = !_isFilterExpanded;
-                    });
-                  }
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _isFilterExpanded = !_isFilterExpanded;
+                  });
                 },
-                itemBuilder: (context) => [
-                  PopupMenuItem<String>(
-                    value: 'sort',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.sort_rounded, size: 18, color: Color(0xFF64748B)),
-                        const SizedBox(width: 8),
-                        Text('Sort Options', style: GoogleFonts.poppins(fontSize: 13)),
-                      ],
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _isFilterExpanded ? const Color(0xFFE6F4F1) : Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _isFilterExpanded ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                      width: _isFilterExpanded ? 1.5 : 1,
                     ),
                   ),
-                  PopupMenuItem<String>(
-                    value: 'filter',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.tune_rounded, size: 18, color: Color(0xFF64748B)),
-                        const SizedBox(width: 8),
-                        Text('Filter Options', style: GoogleFonts.poppins(fontSize: 13)),
-                      ],
-                    ),
+                  child: Icon(
+                    Icons.tune_rounded,
+                    size: 18,
+                    color: _isFilterExpanded ? const Color(0xFF00A884) : const Color(0xFF64748B),
                   ),
-                ],
+                ),
               ),
             ],
           ),

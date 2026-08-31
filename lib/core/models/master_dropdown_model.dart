@@ -50,7 +50,7 @@ class LifecycleStageModel {
   final int position;
   final String entityType;
 
-  LifecycleStageModel({
+  const LifecycleStageModel({
     required this.id,
     required this.name,
     this.position = 0,

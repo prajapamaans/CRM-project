@@ -31,6 +31,8 @@ abstract class MasterDataRemoteDataSource {
     String? order,
     String? search,
     String? bookingSource,
+    String? createdDateRange,
+    String? priority,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -282,6 +284,8 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? order,
     String? search,
     String? bookingSource,
+    String? createdDateRange,
+    String? priority,
   }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
@@ -296,6 +300,11 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
       queryParameters['bookingSource'] = bookingSource;
       queryParameters['booking_source'] = bookingSource;
     }
+    if (createdDateRange != null && createdDateRange.isNotEmpty) {
+      queryParameters['createdDateRange'] = createdDateRange;
+      queryParameters['created_date_range'] = createdDateRange;
+    }
+    if (priority != null && priority.isNotEmpty) queryParameters['priority'] = priority;
     if (contactId != null && contactId.isNotEmpty) {
       queryParameters['contactId'] = contactId;
       queryParameters['contact_id'] = contactId;

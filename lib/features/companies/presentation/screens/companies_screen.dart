@@ -5,12 +5,12 @@ import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
-import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/widgets/company_tile.dart';
+import '../../../../core/widgets/list_error_state.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
+import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
-import 'package:crmproject/features/contacts/presentation/providers/contact_provider.dart';
 import '../providers/company_provider.dart';
 import '../widgets/company_inline_filter_section.dart';
 import '../widgets/create_company_modal.dart';
@@ -47,21 +47,15 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     final currentUserId = auth.currentUser?.id;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
-    if (segmentIndex == 1) {
-      context.read<CompanyProvider>().fetchCompanies(
-            search: _searchQuery,
-            ownerId: currentUserId,
-            departmentId: deptId,
-            ignorePermissions: false,
-          );
-    } else {
-      context.read<CompanyProvider>().fetchCompanies(
-            search: _searchQuery,
-            ownerId: null,
-            departmentId: deptId,
-            ignorePermissions: true,
-          );
-    }
+    // setSegmentScope is the one path allowed to clear the owner scope back to
+    // null; fetchCompanies keeps whatever scope is set so that a refresh or a
+    // filter change does not drop the user out of the Mine segment.
+    context.read<CompanyProvider>().setSegmentScope(
+          search: _searchQuery,
+          ownerId: segmentIndex == 1 ? currentUserId : null,
+          departmentId: deptId,
+          ignorePermissions: segmentIndex != 1,
+        );
   }
 
   Future<void> _confirmDeleteSelectedCompanies() async {
@@ -162,10 +156,6 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                     mineLabel: 'My Companies',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
-                    currentSort: companyProvider.sortOption,
-                    onSortChanged: (ContactSortOption option) {
-                      context.read<CompanyProvider>().setSortOption(option);
-                    },
                     isFilterActive: companyProvider.isFilterActive,
                     isFilterExpanded: _isFilterExpanded,
                     onToggleFilterExpanded: () {
@@ -173,8 +163,13 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                         _isFilterExpanded = !_isFilterExpanded;
                       });
                     },
+                    onClearTap: () {
+                      context.read<CompanyProvider>().clearAllFilters();
+                    },
                     onRefreshTap: () {
-                      context.read<CompanyProvider>().fetchCompanies();
+                      // Re-issues the current segment so a refresh keeps the
+                      // All/Mine scope instead of silently falling back to All.
+                      _loadCompaniesForSegment(_selectedSegment);
                     },
                     onImportTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -291,7 +286,16 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                     ? const Center(
                         child: CircularProgressIndicator(color: Color(0xFF00A884)),
                       )
-                    : companies.isEmpty
+                    // A failed request is reported as a failure. It used to
+                    // fall through to "No companies found", so a filter whose
+                    // request the API rejected looked like one that matched
+                    // nothing.
+                    : (companyProvider.error != null && companies.isEmpty)
+                        ? ListErrorState(
+                            message: companyProvider.error!,
+                            onRetry: () => _loadCompaniesForSegment(_selectedSegment),
+                          )
+                        : companies.isEmpty
                         ? ListView(
                             physics: const AlwaysScrollableScrollPhysics(
                                 parent: BouncingScrollPhysics()),

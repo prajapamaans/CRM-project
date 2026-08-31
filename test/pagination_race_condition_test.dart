@@ -15,6 +15,11 @@ class MockContactRepository implements ContactRepository {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? lifecycleStage,
+    String? leadStatus,
+    String? createdDateRange,
+    String? sort,
+    String? order,
   }) async {
     fetchCallCount++;
     // Simulate network delay

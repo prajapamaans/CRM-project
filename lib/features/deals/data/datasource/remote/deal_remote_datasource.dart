@@ -28,6 +28,10 @@ abstract class DealRemoteDataSource {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? createdDateRange,
+    String? staleDays,
+    String? sort,
+    String? order,
   });
   Future<DealModel> createDeal(Map<String, dynamic> dealData);
   Future<DealModel> updateDeal(String id, Map<String, dynamic> dealData);
@@ -73,19 +77,43 @@ class DealRemoteDataSourceImpl implements DealRemoteDataSource {
     String? ownerId,
     String? departmentId,
     bool? ignorePermissions,
+    String? createdDateRange,
+    String? staleDays,
+    String? sort,
+    String? order,
   }) async {
+    // Only non-empty values are added, so a cleared filter drops its key
+    // entirely instead of being sent blank and read as a real filter.
     final queryParameters = <String, dynamic>{};
     if (page != null) queryParameters['page'] = page;
     if (limit != null) queryParameters['limit'] = limit;
     if (search != null && search.isNotEmpty) queryParameters['search'] = search;
     if (stage != null && stage.isNotEmpty) queryParameters['stage'] = stage;
-    if (ownerId != null && ownerId.isNotEmpty) queryParameters['owner_id'] = ownerId;
+    if (sort != null && sort.isNotEmpty) queryParameters['sort'] = sort;
+    if (order != null && order.isNotEmpty) queryParameters['order'] = order;
+    if (ownerId != null && ownerId.isNotEmpty) {
+      // The documented name is `ownerId`; `owner_id` is kept alongside it
+      // because that is the spelling this client has always sent.
+      queryParameters['ownerId'] = ownerId;
+      queryParameters['owner_id'] = ownerId;
+    }
+    if (createdDateRange != null && createdDateRange.isNotEmpty) {
+      queryParameters['createdDateRange'] = createdDateRange;
+      queryParameters['created_date_range'] = createdDateRange;
+    }
+    if (staleDays != null && staleDays.isNotEmpty) {
+      queryParameters['staleDays'] = staleDays;
+      queryParameters['stale_days'] = staleDays;
+    }
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
     }
     if (ignorePermissions == true) {
       queryParameters['ignore_permissions'] = 'true';
+      queryParameters['ignorePermissions'] = 'true';
     }
+
+    debugPrint('[GET ${ApiConstants.deals}] query: $queryParameters');
 
     final response = await _apiService.get(
       ApiConstants.deals,
