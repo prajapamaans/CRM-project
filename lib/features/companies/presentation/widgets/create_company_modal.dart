@@ -44,7 +44,6 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
   String? _selectedOwnerId;
   String? _selectedIndustry;
   String? _selectedType;
-  String? _selectedTimeZone;
 
   bool _isSubmitting = false;
 
@@ -64,14 +63,6 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
     'Reseller',
     'Vendor',
     'Other',
-  ];
-
-  final List<String> _timeZoneOptions = const [
-    'UTC',
-    'EST',
-    'PST',
-    'IST',
-    'CST',
   ];
 
   @override
@@ -140,8 +131,6 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
         'numberOfEmployees': _numEmployeesController.text.trim(),
       if (_annualRevenueController.text.trim().isNotEmpty)
         'annualRevenue': _annualRevenueController.text.trim(),
-      if (_selectedTimeZone != null && _selectedTimeZone!.isNotEmpty)
-        'timeZone': _selectedTimeZone,
       if (_descriptionController.text.trim().isNotEmpty)
         'description': _descriptionController.text.trim(),
       if (_linkedinController.text.trim().isNotEmpty)
@@ -202,7 +191,6 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
       _selectedOwnerId = null;
       _selectedIndustry = null;
       _selectedType = null;
-      _selectedTimeZone = null;
     });
   }
 
@@ -375,16 +363,29 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
                             label: msp,
                           ),
                         ),
+                        DropdownSearchItem<String>(
+                          value: MspFieldUtils.addCustomMspValue,
+                          label: MspFieldUtils.addCustomMspLabel,
+                        ),
                       ];
 
                       return SearchableDropdownFormField<String>(
                         initialValue: _selectedMsp ?? '',
                         hintText: placeholder,
                         items: mspItems,
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedMsp = val;
-                          });
+                        onChanged: (val) async {
+                          if (val == MspFieldUtils.addCustomMspValue) {
+                            final newMsp = await MspFieldUtils.showAddCustomMspDialog(context);
+                            if (newMsp != null && mounted) {
+                              setState(() {
+                                _selectedMsp = newMsp;
+                              });
+                            }
+                          } else {
+                            setState(() {
+                              _selectedMsp = val;
+                            });
+                          }
                         },
                       );
                     },
@@ -625,30 +626,6 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
                   ),
                   const SizedBox(height: 12),
 
-                  // 14. Time zone
-                  _buildLabel('Time zone'),
-                  const SizedBox(height: 6),
-                  SearchableDropdownFormField<String>(
-                    initialValue: _selectedTimeZone ?? '',
-                    hintText: 'Select a time zone',
-                    items: [
-                      DropdownSearchItem<String>(
-                        value: '',
-                        label: 'Select a time zone',
-                      ),
-                      ..._timeZoneOptions.map(
-                        (tz) => DropdownSearchItem<String>(
-                          value: tz,
-                          label: tz,
-                        ),
-                      ),
-                    ],
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedTimeZone = val;
-                      });
-                    },
-                  ),
                   const SizedBox(height: 12),
 
                   // 15. description

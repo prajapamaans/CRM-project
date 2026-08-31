@@ -10,6 +10,7 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
+import '../../../../core/utils/meeting_booking_source.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
@@ -27,6 +28,7 @@ class MeetingsScreen extends StatefulWidget {
 
 class _MeetingsScreenState extends State<MeetingsScreen> {
   int _selectedTab = 0; // 0: All meetings, 1: My meetings
+  String _currentHeaderMode = 'log'; // 'log' or 'create'
   String _searchQuery = '';
   final List<MeetingModel> _meetings = [];
   bool _isLoadingMeetings = false;
@@ -143,28 +145,98 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     }
   }
 
-  Future<void> _loadMeetings() async {
+  /// The booking source the currently selected header mode lists.
+  String get _expectedBookingSource =>
+      _currentHeaderMode == 'create' ? BookingSource.directBooking : BookingSource.manual;
+
+  /// Renders a stored outcome (or, for a meeting that has not happened yet,
+  /// its status) as the label the status filter matches on.
+  String _outcomeLabel(Map<String, dynamic> item) {
+    final rawOutcome = (item['outcome'] ?? '').toString().trim();
+    final rawStatus = (item['status'] ?? '').toString().trim();
+    final raw = rawOutcome.isNotEmpty
+        ? rawOutcome
+        : (rawStatus.isNotEmpty ? rawStatus : 'Scheduled');
+
+    switch (raw.toLowerCase()) {
+      case 'scheduled':
+        return 'Scheduled';
+      case 'completed':
+        return 'Completed';
+      case 'rescheduled':
+        return 'Rescheduled';
+      case 'pending':
+        return 'Pending';
+      case 'no_show':
+        return 'No show';
+      case 'canceled':
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return raw[0].toUpperCase() + raw.substring(1);
+    }
+  }
+
+  /// Loads the meetings for the current header mode.
+  ///
+  /// [ensureVisible] is a meeting that was just saved: it is kept at the top of
+  /// the list when the reload has not picked it up yet (indexing lag, or a
+  /// backend that ignores the `bookingSource` filter and pages it out).
+  Future<void> _loadMeetings({MeetingModel? ensureVisible}) async {
     if (!mounted) return;
     setState(() {
       _isLoadingMeetings = true;
     });
+
+    final expectedSource = _expectedBookingSource;
+    final isCreateMode = expectedSource == BookingSource.directBooking;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+
+    List<MeetingModel>? loadedMeetings;
     try {
+      await MeetingBookingSourceStore.ensureLoaded();
       final repository = MasterDataRepositoryImpl();
-      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
-      final activities = await repository.getActivities(type: 'meeting', departmentId: deptId);
-      final loadedMeetings = activities.map((item) {
+      final activities = await repository.getActivities(
+        type: 'meeting',
+        bookingSource: expectedSource,
+        page: 1,
+        limit: 25,
+        // Booked meetings are read newest-first so one created a moment ago
+        // sits on the first page instead of behind 25 older rows.
+        sort: isCreateMode ? 'createdAt' : null,
+        order: isCreateMode ? 'desc' : 'asc',
+        departmentId: deptId,
+      );
+
+      // The `bookingSource` query parameter is only honoured by backends that
+      // know the field, so the split is enforced here as well — otherwise a
+      // booked meeting would show up in the Log Meeting list and vice versa.
+      //
+      // Meetings booked before the app started tagging them carry no
+      // bookingSource at all; those are recognised by their missing outcome,
+      // but only when this page proves outcomes are being returned.
+      final inferFromOutcome = canInferBookingSourceFromOutcome(activities);
+      final scoped = activities
+          .where((item) =>
+              resolveBookingSource(item, inferFromOutcome: inferFromOutcome) == expectedSource)
+          .toList();
+      debugPrint(
+        '[_loadMeetings]: mode=$_currentHeaderMode bookingSource=$expectedSource '
+        'returned=${activities.length} kept=${scoped.length} '
+        'inferFromOutcome=$inferFromOutcome',
+      );
+      if (!inferFromOutcome && activities.isNotEmpty) {
+        debugPrint(
+          '[_loadMeetings]: no meeting in this page carries an `outcome` field '
+          '— it looks absent from the list response, so untagged meetings are '
+          'left in the Log Meeting list.',
+        );
+      }
+
+      loadedMeetings = scoped.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Meeting';
-        
-        final rawOutcome = item['outcome'] as String? ?? 'Scheduled';
-        String outcomeLabel = rawOutcome;
-        if (rawOutcome.toLowerCase() == 'scheduled') outcomeLabel = 'Scheduled';
-        else if (rawOutcome.toLowerCase() == 'completed') outcomeLabel = 'Completed';
-        else if (rawOutcome.toLowerCase() == 'rescheduled') outcomeLabel = 'Rescheduled';
-        else if (rawOutcome.toLowerCase() == 'no_show') outcomeLabel = 'No show';
-        else if (rawOutcome.toLowerCase() == 'canceled') outcomeLabel = 'Canceled';
-        else if (rawOutcome.isNotEmpty) {
-          outcomeLabel = rawOutcome[0].toUpperCase() + rawOutcome.substring(1);
-        }
+
+        final outcomeLabel = _outcomeLabel(item);
 
         final id = item['id']?.toString() ?? item['_id']?.toString();
         // The API stores these as durationMinutes (int) and scheduledAt (ISO).
@@ -208,21 +280,32 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           contactId: parsedContactId,
           companyId: parsedCompanyId,
           dealId: parsedDealId,
+          bookingSource: expectedSource,
           rawMap: item,
         );
       }).toList();
-
-      if (mounted) {
-        setState(() {
-          _meetings.clear();
-          _meetings.addAll(loadedMeetings);
-        });
-      }
     } catch (e) {
       debugPrint('[_loadMeetings ERROR]: $e');
     } finally {
       if (mounted) {
         setState(() {
+          // The header mode may have been switched while this load was in
+          // flight; those results belong to the other list, so drop them.
+          if (loadedMeetings != null && expectedSource == _expectedBookingSource) {
+            _meetings
+              ..clear()
+              ..addAll(loadedMeetings);
+
+            if (ensureVisible != null &&
+                ensureVisible.bookingSource == expectedSource &&
+                !_meetings.any((m) => m.id != null && m.id == ensureVisible.id)) {
+              debugPrint(
+                '[_loadMeetings]: reload did not return the meeting just saved '
+                '(${ensureVisible.id}) — keeping it at the top of the list.',
+              );
+              _meetings.insert(0, ensureVisible);
+            }
+          }
           _isLoadingMeetings = false;
           _hasLoadedOnce = true;
         });
@@ -569,6 +652,100 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     }
   }
 
+  /// When a meeting was created, for the "Most recent" sort. Ids are UUIDs, so
+  /// ordering by id says nothing about age.
+  DateTime _createdAt(MeetingModel m) {
+    final raw = m.rawMap?['createdAt'] ?? m.rawMap?['created_at'];
+    return parseActivityDateTimeOrNull(raw) ??
+        parseActivityDateTimeOrNull(m.startTime) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// The tab, search and filter-bar selections. The booking-source split is not
+  /// checked here — [_loadMeetings] only ever puts one source into [_meetings].
+  bool _passesFilters(MeetingModel m, String currentUserName) {
+    if (_selectedTab == 1 && (m.assignedTo ?? 'Admin User') != currentUserName) return false;
+    if (_searchQuery.isNotEmpty && !m.title.toLowerCase().contains(_searchQuery.toLowerCase())) return false;
+
+    // 1. Owner Filter
+    if (_selectedOwner != 'All owners') {
+      if ((m.assignedTo ?? '').toLowerCase() != _selectedOwner.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 2. Status Filter
+    if (_selectedStatus != 'All statuses') {
+      if (m.outcome.toLowerCase() != _selectedStatus.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 3. Date Range Filter
+    if (_selectedDateRange != 'All time') {
+      final meetingDt = _parseMeetingDate(m.startTime);
+      if (meetingDt != null) {
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        if (_selectedDateRange == 'Today') {
+          if (meetingDt.isBefore(today) || meetingDt.isAfter(today.add(const Duration(days: 1)))) return false;
+        } else if (_selectedDateRange == 'Yesterday') {
+          final yest = today.subtract(const Duration(days: 1));
+          if (meetingDt.isBefore(yest) || meetingDt.isAfter(today)) return false;
+        } else if (_selectedDateRange == 'This week') {
+          final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
+          if (meetingDt.isBefore(startOfWeek)) return false;
+        } else if (_selectedDateRange == 'Last week') {
+          final startOfLastWeek = today.subtract(Duration(days: today.weekday - 1 + 7));
+          final endOfLastWeek = startOfLastWeek.add(const Duration(days: 7));
+          if (meetingDt.isBefore(startOfLastWeek) || meetingDt.isAfter(endOfLastWeek)) return false;
+        } else if (_selectedDateRange == 'This month') {
+          final startOfMonth = DateTime(now.year, now.month, 1);
+          if (meetingDt.isBefore(startOfMonth)) return false;
+        } else if (_selectedDateRange == 'Last month') {
+          final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
+          final endOfLastMonth = DateTime(now.year, now.month, 1);
+          if (meetingDt.isBefore(startOfLastMonth) || meetingDt.isAfter(endOfLastMonth)) return false;
+        } else if (_selectedDateRange == 'This year') {
+          final startOfYear = DateTime(now.year, 1, 1);
+          if (meetingDt.isBefore(startOfYear)) return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /// Reloads the list a meeting was just saved into and brings that meeting
+  /// into view. A filter left over from before the save (a status, an owner, a
+  /// search term) would hide a brand new row, so those are cleared when — and
+  /// only when — they would swallow it.
+  Future<void> _showSavedMeeting(MeetingModel saved) async {
+    if (!mounted) return;
+    final currentUserName = context.read<AuthProvider>().currentUser?.fullName ?? 'Admin User';
+    if (!_passesFilters(saved, currentUserName)) {
+      setState(() {
+        _selectedTab = 0;
+        _searchQuery = '';
+        _selectedOwner = 'All owners';
+        _selectedDateRange = 'All time';
+        _selectedStatus = 'All statuses';
+      });
+    }
+
+    setState(() {
+      _selectedMeetingId = saved.id;
+      // Shown straight away; the reload below replaces it with the stored row.
+      if (saved.bookingSource == _expectedBookingSource &&
+          !_meetings.any((m) => m.id != null && m.id == saved.id)) {
+        _meetings.insert(0, saved);
+      }
+    });
+
+    _pendingFocusId = saved.id;
+    await _loadMeetings(ensureVisible: saved);
+  }
+
   @override
   Widget build(BuildContext context) {
     try {
@@ -576,58 +753,8 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       final currentUserName = auth.currentUser?.fullName ?? 'Admin User';
       final myMeetingsCount = _meetings.where((m) => (m.assignedTo ?? 'Admin User') == currentUserName).length;
 
-      final filteredMeetings = _meetings.where((m) {
-        if (_selectedTab == 1 && (m.assignedTo ?? 'Admin User') != currentUserName) return false;
-        if (_searchQuery.isNotEmpty && !m.title.toLowerCase().contains(_searchQuery.toLowerCase())) return false;
-
-        // 1. Owner Filter
-        if (_selectedOwner != 'All owners') {
-          if ((m.assignedTo ?? '').toLowerCase() != _selectedOwner.toLowerCase()) {
-            return false;
-          }
-        }
-
-        // 2. Status Filter
-        if (_selectedStatus != 'All statuses') {
-          if (m.outcome.toLowerCase() != _selectedStatus.toLowerCase()) {
-            return false;
-          }
-        }
-
-        // 3. Date Range Filter
-        if (_selectedDateRange != 'All time') {
-          final meetingDt = _parseMeetingDate(m.startTime);
-          if (meetingDt != null) {
-            final now = DateTime.now();
-            final today = DateTime(now.year, now.month, now.day);
-            if (_selectedDateRange == 'Today') {
-              if (meetingDt.isBefore(today) || meetingDt.isAfter(today.add(const Duration(days: 1)))) return false;
-            } else if (_selectedDateRange == 'Yesterday') {
-              final yest = today.subtract(const Duration(days: 1));
-              if (meetingDt.isBefore(yest) || meetingDt.isAfter(today)) return false;
-            } else if (_selectedDateRange == 'This week') {
-              final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
-              if (meetingDt.isBefore(startOfWeek)) return false;
-            } else if (_selectedDateRange == 'Last week') {
-              final startOfLastWeek = today.subtract(Duration(days: today.weekday - 1 + 7));
-              final endOfLastWeek = startOfLastWeek.add(const Duration(days: 7));
-              if (meetingDt.isBefore(startOfLastWeek) || meetingDt.isAfter(endOfLastWeek)) return false;
-            } else if (_selectedDateRange == 'This month') {
-              final startOfMonth = DateTime(now.year, now.month, 1);
-              if (meetingDt.isBefore(startOfMonth)) return false;
-            } else if (_selectedDateRange == 'Last month') {
-              final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-              final endOfLastMonth = DateTime(now.year, now.month, 1);
-              if (meetingDt.isBefore(startOfLastMonth) || meetingDt.isAfter(endOfLastMonth)) return false;
-            } else if (_selectedDateRange == 'This year') {
-              final startOfYear = DateTime(now.year, 1, 1);
-              if (meetingDt.isBefore(startOfYear)) return false;
-            }
-          }
-        }
-
-        return true;
-      }).toList();
+      final filteredMeetings =
+          _meetings.where((m) => _passesFilters(m, currentUserName)).toList();
 
       // Apply Sorting:
       if (_selectedSort == 'title_asc') {
@@ -635,9 +762,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       } else if (_selectedSort == 'title_desc') {
         filteredMeetings.sort((a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()));
       } else if (_selectedSort == 'created_oldest') {
-        filteredMeetings.sort((a, b) => (a.id ?? '').compareTo(b.id ?? ''));
+        filteredMeetings.sort((a, b) => _createdAt(a).compareTo(_createdAt(b)));
       } else if (_selectedSort == 'created_newest') {
-        filteredMeetings.sort((a, b) => (b.id ?? '').compareTo(a.id ?? ''));
+        filteredMeetings.sort((a, b) => _createdAt(b).compareTo(_createdAt(a)));
       } else if (_selectedSort == 'time_newest') {
         filteredMeetings.sort((a, b) => b.startTime.compareTo(a.startTime));
       } else if (_selectedSort == 'time_oldest') {
@@ -661,29 +788,104 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     size: 24,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Meetings',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1E293B),
+
+                  // Title Dropdown Menu: "Log Meetings ▾" / "Create Meeting ▾"
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (_currentHeaderMode != value) {
+                            setState(() {
+                              _currentHeaderMode = value;
+                              // The other mode's rows must not linger while the
+                              // new list loads.
+                              _meetings.clear();
+                              _selectedMeetingId = null;
+                            });
+                            _loadMeetings();
+                          }
+                        },
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem<String>(
+                            value: 'log',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.history_rounded, size: 18, color: Color(0xFF0F766E)),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Log Meetings',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF1E293B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'create',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.add_circle_outline_rounded, size: 18, color: Color(0xFF0F766E)),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Create Meeting',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF1E293B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _currentHeaderMode == 'create' ? 'Create Meeting' : 'Log Meetings',
+                              style: GoogleFonts.poppins(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF1E293B),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Color(0xFF1E293B),
+                              size: 22,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  const Spacer(),
 
-                  // + Meeting Button
+                  const SizedBox(width: 8),
+
+                  // Right Action Button
                   ElevatedButton.icon(
                     onPressed: () async {
-                      final newMeeting = await LogMeetingModal.show(context);
+                      final isCreate = _currentHeaderMode == 'create';
+                      final newMeeting = await LogMeetingModal.show(
+                        context,
+                        isCreateMode: isCreate,
+                        titleOverride: isCreate ? 'Create Meeting' : 'Log Meeting',
+                      );
                       if (newMeeting != null) {
-                        _loadMeetings();
+                        await _showSavedMeeting(newMeeting);
                       }
                     },
-                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                    icon: const Icon(Icons.add, size: 16, color: Colors.white),
                     label: Text(
-                      'Meeting',
+                      _currentHeaderMode == 'create' ? 'Create' : 'Log Meeting',
                       style: GoogleFonts.poppins(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,
                       ),
@@ -692,7 +894,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                       backgroundColor: const Color(0xFF00A884),
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
+                        horizontal: 10,
                         vertical: 8,
                       ),
                       shape: RoundedRectangleBorder(
@@ -925,13 +1127,29 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                                         _selectedDateRange = 'All time';
                                         _selectedStatus = 'All statuses';
                                       });
+                                      _loadMeetings();
                                     },
-                                    child: Text(
-                                      'Reset filters',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.redAccent,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF2F2),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Clear',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: const Color(0xFFEF4444),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
@@ -968,7 +1186,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                                           child: Padding(
                                             padding: const EdgeInsets.all(24),
                                             child: Text(
-                                              'No meetings found. Click "Create meeting" to add one.',
+                                              _currentHeaderMode == 'create'
+                                                  ? 'No meetings created yet. Click "Create" to add one.'
+                                                  : 'No meetings found. Click "Log Meeting" to add one.',
                                               textAlign: TextAlign.center,
                                               style: GoogleFonts.poppins(
                                                 fontSize: 13.5,

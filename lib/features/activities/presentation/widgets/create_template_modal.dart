@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../../authentication/presentation/providers/auth_provider.dart';
 
 class EmailTemplateModel {
   final String? id;
@@ -290,6 +292,13 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
   }
 
   String _resolveVariables(String rawText) {
+    final auth = context.read<AuthProvider>();
+    final user = auth.currentUser;
+    final senderFullName = (user != null && user.fullName.isNotEmpty) ? user.fullName : _ownerName;
+    final senderFirstName = senderFullName.split(' ').first;
+    final senderEmail = (user != null && user.email != null && user.email!.isNotEmpty) ? user.email! : 'dev@apideltech.com';
+    final senderJobTitle = (user != null && user.departmentName != null && user.departmentName!.isNotEmpty) ? user.departmentName! : 'Account Executive';
+
     final contact = _selectedPreviewContact ?? _sampleContacts.first;
     final firstName = contact['first_name'] ?? 'Alex';
     final contactName = contact['name'] ?? 'Alex Rivera';
@@ -326,22 +335,22 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
         .replaceAll('deal.stage', 'Negotiation')
         .replaceAll('{{deal.amount}}', '\$12,000')
         .replaceAll('deal.amount', '\$12,000')
-        .replaceAll('{{sender.first_name}}', _ownerName.split(' ').first)
-        .replaceAll('sender.first_name', _ownerName.split(' ').first)
-        .replaceAll('{{sender.full_name}}', _ownerName)
-        .replaceAll('sender.full_name', _ownerName)
-        .replaceAll('{{sender.email}}', 'dev@apideltech.com')
-        .replaceAll('sender.email', 'dev@apideltech.com')
-        .replaceAll('{{sender.job_title}}', 'Account Executive')
-        .replaceAll('sender.job_title', 'Account Executive')
+        .replaceAll('{{sender.first_name}}', senderFirstName)
+        .replaceAll('sender.first_name', senderFirstName)
+        .replaceAll('{{sender.full_name}}', senderFullName)
+        .replaceAll('sender.full_name', senderFullName)
+        .replaceAll('{{sender.email}}', senderEmail)
+        .replaceAll('sender.email', senderEmail)
+        .replaceAll('{{sender.job_title}}', senderJobTitle)
+        .replaceAll('sender.job_title', senderJobTitle)
         .replaceAll('{{system.date}}', '1 Aug 2026')
         .replaceAll('system.date', '1 Aug 2026')
         .replaceAll('{{system.unsubscribe}}', 'Unsubscribe')
         .replaceAll('system.unsubscribe', 'Unsubscribe')
         .replaceAll('{{system.view_in_browser}}', 'View in browser')
         .replaceAll('system.view_in_browser', 'View in browser')
-        .replaceAll('{{owner.name}}', _ownerName)
-        .replaceAll('owner.name', _ownerName);
+        .replaceAll('{{owner.name}}', senderFullName)
+        .replaceAll('owner.name', senderFullName);
 
     return text;
   }

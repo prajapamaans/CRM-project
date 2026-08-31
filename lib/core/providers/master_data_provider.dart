@@ -72,6 +72,20 @@ class MasterDataProvider extends ChangeNotifier {
     }
   }
 
+  /// Adds a custom MSP option dynamically to master provider state.
+  void addCustomMspOption(String mspName) {
+    final trimmed = mspName.trim();
+    if (trimmed.isEmpty) return;
+    final exists = _mspOptions.any((e) => e.name.toLowerCase() == trimmed.toLowerCase());
+    if (!exists) {
+      _mspOptions.add(MspOptionModel(
+        id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+        name: trimmed,
+      ));
+      notifyListeners();
+    }
+  }
+
   Future<void> _loadMspOptions() async {
     _isMspLoading = true;
     _mspError = null;

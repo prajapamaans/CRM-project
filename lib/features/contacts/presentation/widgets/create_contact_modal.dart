@@ -495,16 +495,29 @@ class _CreateContactModalState extends State<CreateContactModal> {
                             label: msp,
                           ),
                         ),
+                        DropdownSearchItem<String>(
+                          value: MspFieldUtils.addCustomMspValue,
+                          label: MspFieldUtils.addCustomMspLabel,
+                        ),
                       ];
 
                       return SearchableDropdownFormField<String>(
                         initialValue: _selectedMsp ?? '',
                         hintText: placeholder,
                         items: mspItems,
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedMsp = val;
-                          });
+                        onChanged: (val) async {
+                          if (val == MspFieldUtils.addCustomMspValue) {
+                            final newMsp = await MspFieldUtils.showAddCustomMspDialog(context);
+                            if (newMsp != null && mounted) {
+                              setState(() {
+                                _selectedMsp = newMsp;
+                              });
+                            }
+                          } else {
+                            setState(() {
+                              _selectedMsp = val;
+                            });
+                          }
                         },
                       );
                     },

@@ -25,7 +25,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = true;
+  bool _isFilterExpanded = false;
   final Set<String> _selectedContactIds = {};
 
   @override
@@ -157,6 +157,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 children: [
                   SearchAndFilterBar(
                     searchHint: 'Search contacts...',
+                    allLabel: 'All Contacts',
+                    mineLabel: 'Mine Contacts',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
                     currentSort: contactProvider.sortOption,

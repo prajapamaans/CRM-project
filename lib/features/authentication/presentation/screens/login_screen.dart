@@ -309,30 +309,23 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  /// Renders the APIDEL brand logo image (with text shader fallback).
+  /// Renders the APIDEL brand logo text (App Icon image removed).
   Widget _buildLogo() {
     return Column(
       children: [
-        Image.asset(
-          'assets/images/apidel_logo.png',
-          height: 60,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return ShaderMask(
-              shaderCallback: (bounds) => const LinearGradient(
-                colors: [_tealLight, _tealDark],
-              ).createShader(bounds),
-              child: const Text(
-                'APIDEL',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: 1,
-                ),
-              ),
-            );
-          },
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [_tealLight, _tealDark],
+          ).createShader(bounds),
+          child: const Text(
+            'APIDEL CRM',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: 1.5,
+            ),
+          ),
         ),
       ],
     );

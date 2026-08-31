@@ -434,6 +434,8 @@ class _TasksScreenState extends State<TasksScreen> {
                 children: [
                   SearchAndFilterBar(
                     searchHint: 'Search tasks...',
+                    allLabel: 'All Tasks',
+                    mineLabel: 'Mine Tasks',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: (index) {
                       setState(() {

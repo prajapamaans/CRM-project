@@ -3,10 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/datasources/master_data_remote_datasource.dart';
+import '../../../../core/models/email_signature_model.dart';
 import '../../../../core/models/email_template_models.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
+import '../widgets/create_signature_modal.dart';
 import '../widgets/create_template_modal.dart';
+
+import '../../../../core/utils/signature_variable_resolver.dart';
 
 class TemplatesScreen extends StatefulWidget {
   const TemplatesScreen({super.key});
@@ -18,8 +22,14 @@ class TemplatesScreen extends StatefulWidget {
 class _TemplatesScreenState extends State<TemplatesScreen> {
   final MasterDataRepository _repository = MasterDataRepositoryImpl();
 
+  int _selectedSubTabIndex = 0; // 0 = Templates, 1 = Signatures
+
   List<EmailTemplateFolder> _allFolders = [];
   List<EmailTemplate> _allTemplates = [];
+
+  List<EmailSignatureModel> _allSignatures = [];
+  bool _isLoadingSignatures = false;
+  String _signatureSearchQuery = '';
 
   String? _selectedFolderId; // null = Root level
   String _selectedFolderName = 'Root';
@@ -33,11 +43,41 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
   void initState() {
     super.initState();
     _loadTemplatesFromApi();
+    _loadSignaturesFromApi();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<AuthProvider>().fetchTeamMembers();
       }
     });
+  }
+
+  Future<void> _loadSignaturesFromApi() async {
+    try {
+      setState(() {
+        _isLoadingSignatures = true;
+      });
+      final sigs = await _repository.getEmailSignatures();
+      if (mounted) {
+        setState(() {
+          _allSignatures = sigs;
+          _isLoadingSignatures = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[TemplatesScreen signatures load error]: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingSignatures = false;
+        });
+      }
+    }
+  }
+
+  void _createNewSignature() async {
+    final result = await CreateSignatureModal.show(context);
+    if (result == true) {
+      _loadSignaturesFromApi();
+    }
   }
 
   Future<void> _loadTemplatesFromApi() async {
@@ -320,83 +360,141 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
             padding: const EdgeInsets.all(16),
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
-              // 1. Title Header & New Button
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Message templates',
-                        style: GoogleFonts.poppins(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF1E293B),
+              // 1. Sub-Navigation Tabs: Templates | Signatures (matching screenshot 1)
+              Container(
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
+                ),
+                child: Row(
+                  children: [
+                    InkWell(
+                      onTap: () => setState(() => _selectedSubTabIndex = 0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: _selectedSubTabIndex == 0 ? const Color(0xFF00A884) : Colors.transparent,
+                              width: 2.5,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.email_outlined,
+                              size: 18,
+                              color: _selectedSubTabIndex == 0 ? const Color(0xFF00A884) : const Color(0xFF64748B),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Templates',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: _selectedSubTabIndex == 0 ? FontWeight.bold : FontWeight.w500,
+                                color: _selectedSubTabIndex == 0 ? const Color(0xFF00A884) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${currentTemplates.length} template${currentTemplates.length == 1 ? '' : 's'} in this folder',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          color: const Color(0xFF64748B),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () {
+                        setState(() => _selectedSubTabIndex = 1);
+                        _loadSignaturesFromApi();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: _selectedSubTabIndex == 1 ? const Color(0xFF00A884) : Colors.transparent,
+                              width: 2.5,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.edit_outlined,
+                              size: 18,
+                              color: _selectedSubTabIndex == 1 ? const Color(0xFF00A884) : const Color(0xFF64748B),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Signatures',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: _selectedSubTabIndex == 1 ? FontWeight.bold : FontWeight.w500,
+                                color: _selectedSubTabIndex == 1 ? const Color(0xFF00A884) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _createNewTemplate,
-                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
-                    label: Text(
-                      'New',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7A59),
-                      elevation: 0,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-
-              // 2. Action Buttons Row: New folder button
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _showNewFolderDialog,
-                    icon: const Icon(Icons.create_new_folder_outlined,
-                        size: 16, color: Color(0xFF334155)),
-                    label: Text(
-                      'New folder',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF334155),
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      side: const BorderSide(color: Color(0xFFCBD5E1)),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6)),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
+
+              if (_selectedSubTabIndex == 1) ...[
+                // SIGNATURES TAB CONTENT
+                _buildSignaturesView(context),
+              ] else ...[
+                // TEMPLATES TAB CONTENT
+                // 2. Title Header & New Button
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Message templates',
+                          style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF1E293B),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${currentTemplates.length} template${currentTemplates.length == 1 ? '' : 's'} in this folder',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _createNewTemplate,
+                      icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                      label: Text(
+                        'New',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7A59),
+                        elevation: 0,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
 
               // 3. Dynamic Breadcrumb Card (Root > Folder > Subfolder)
               Container(
@@ -829,10 +927,323 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                     ],
                   ),
                 ),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSignaturesView(BuildContext context) {
+    final filteredSignatures = _allSignatures.where((s) {
+      final q = _signatureSearchQuery.toLowerCase();
+      return q.isEmpty || s.name.toLowerCase().contains(q) || s.body.toLowerCase().contains(q);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Title Header & New Signature Button
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Email signatures',
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Signatures are yours alone - nobody else can see or send with them.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: _createNewSignature,
+              icon: const Icon(Icons.add, size: 18, color: Colors.white),
+              label: Text(
+                'New',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF7A59),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Search Bar
+        Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: TextField(
+            onChanged: (val) => setState(() => _signatureSearchQuery = val),
+            style: GoogleFonts.poppins(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Search signatures',
+              hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
+              prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF94A3B8)),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        if (_isLoadingSignatures)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(color: Color(0xFFFF7A59)),
+            ),
+          )
+        else if (filteredSignatures.isEmpty) ...[
+          // Empty State Matching Screenshot 1
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF1F5F9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.edit_outlined,
+                    size: 32,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No email signatures yet',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1E293B),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Build a sign-off with your name, job title, phone number, a photo or a logo, then pick it when you write an email. You can keep as many as you like.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    color: const Color(0xFF64748B),
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _createNewSignature,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7A59),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    'Create your first signature',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // Signature List Cards
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: filteredSignatures.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final sig = filteredSignatures[index];
+              final currentUser = context.watch<AuthProvider>().currentUser;
+              final cleanText = SignatureVariableResolver.cleanPreviewText(sig.body, currentUser);
+
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: sig.isDefault ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
+                    width: sig.isDefault ? 1.5 : 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              sig.name,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF1E293B),
+                              ),
+                            ),
+                            if (sig.isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE6F4F1),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFF00A884).withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star_rounded, size: 12, color: Color(0xFF00A884)),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      'Default',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF00A884),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!sig.isDefault)
+                              IconButton(
+                                icon: const Icon(Icons.star_outline_rounded, color: Color(0xFF94A3B8), size: 20),
+                                tooltip: 'Make default',
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                padding: EdgeInsets.zero,
+                                onPressed: () async {
+                                  await _repository.createEmailSignature({
+                                    'id': sig.id,
+                                    'name': sig.name,
+                                    'body': sig.body,
+                                    'isDefault': true,
+                                  });
+                                  _loadSignaturesFromApi();
+                                },
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: Color(0xFF94A3B8), size: 20),
+                              tooltip: 'Edit signature',
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                              onPressed: () async {
+                                final result = await CreateSignatureModal.show(context, signatureToEdit: sig);
+                                if (result == true) {
+                                  _loadSignaturesFromApi();
+                                }
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFF94A3B8), size: 20),
+                              tooltip: 'Delete signature',
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Delete Signature'),
+                                    content: Text('Are you sure you want to delete signature "${sig.name}"?'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                      ElevatedButton(
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                        child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (confirm == true) {
+                                  await _repository.deleteEmailSignature(sig.id);
+                                  _loadSignaturesFromApi();
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Updated 2 hours ago',
+                      style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFF94A3B8)),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      cleanText.isNotEmpty ? cleanText : '(No signature content)',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: const Color(0xFF334155),
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ],
     );
   }
 }

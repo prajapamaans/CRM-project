@@ -26,7 +26,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = true;
+  bool _isFilterExpanded = false;
   final Set<String> _selectedCompanyIds = {};
 
   @override
@@ -158,6 +158,8 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                 children: [
                   SearchAndFilterBar(
                     searchHint: 'Search companies...',
+                    allLabel: 'All Companies',
+                    mineLabel: 'My Companies',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
                     currentSort: companyProvider.sortOption,

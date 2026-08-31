@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../network/api_constants.dart';
 import '../network/api_service.dart';
 import '../models/master_dropdown_model.dart';
+import '../models/email_signature_model.dart';
 import '../models/email_template_models.dart';
 
 abstract class MasterDataRemoteDataSource {
@@ -29,6 +30,7 @@ abstract class MasterDataRemoteDataSource {
     String? sort,
     String? order,
     String? search,
+    String? bookingSource,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -42,6 +44,9 @@ abstract class MasterDataRemoteDataSource {
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
   Future<Map<String, dynamic>> createEmailTemplateFolder(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
+  Future<List<EmailSignatureModel>> getEmailSignatures();
+  Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data);
+  Future<bool> deleteEmailSignature(String id);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
   Future<Map<String, dynamic>> getSequences({int page = 1, int limit = 20});
   Future<Map<String, dynamic>> getSequenceById(String id);
@@ -276,6 +281,7 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? sort,
     String? order,
     String? search,
+    String? bookingSource,
   }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
@@ -286,6 +292,10 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     if (sort != null && sort.isNotEmpty) queryParameters['sort'] = sort;
     if (order != null && order.isNotEmpty) queryParameters['order'] = order;
     if (search != null && search.isNotEmpty) queryParameters['search'] = search;
+    if (bookingSource != null && bookingSource.isNotEmpty) {
+      queryParameters['bookingSource'] = bookingSource;
+      queryParameters['booking_source'] = bookingSource;
+    }
     if (contactId != null && contactId.isNotEmpty) {
       queryParameters['contactId'] = contactId;
       queryParameters['contact_id'] = contactId;
@@ -540,6 +550,87 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
         return rawData;
       }
       return {};
+    }
+  }
+
+  @override
+  Future<List<EmailSignatureModel>> getEmailSignatures() async {
+    final response = await _apiService.get(ApiConstants.emailSignatures);
+    debugPrint('[GET ${ApiConstants.emailSignatures} SUCCESS]: ${response.data}');
+
+    final dynamic rawData = response.data;
+    List<dynamic> list = [];
+
+    if (rawData is List) {
+      list = rawData;
+    } else if (rawData is Map<String, dynamic>) {
+      if (rawData['signatures'] is List) {
+        list = rawData['signatures'] as List;
+      } else if (rawData['data'] is List) {
+        list = rawData['data'] as List;
+      } else if (rawData['items'] is List) {
+        list = rawData['items'] as List;
+      }
+    }
+
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((e) => EmailSignatureModel.fromJson(e))
+        .toList();
+  }
+
+  @override
+  Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data) async {
+    final String? id = data['id']?.toString();
+    final bool isUpdate = id != null && id.isNotEmpty;
+
+    dynamic response;
+    if (isUpdate) {
+      try {
+        response = await _apiService.put(
+          '${ApiConstants.emailSignatures}/$id',
+          data: data,
+        );
+        debugPrint('[PUT ${ApiConstants.emailSignatures}/$id SUCCESS]: ${response.data}');
+      } catch (e) {
+        debugPrint('[PUT ${ApiConstants.emailSignatures}/$id failed, fallback to POST]: $e');
+        response = await _apiService.post(
+          ApiConstants.emailSignatures,
+          data: data,
+        );
+      }
+    } else {
+      response = await _apiService.post(
+        ApiConstants.emailSignatures,
+        data: data,
+      );
+      debugPrint('[POST ${ApiConstants.emailSignatures} SUCCESS]: ${response.data}');
+    }
+
+    final dynamic rawData = response.data;
+    Map<String, dynamic> itemMap = {};
+
+    if (rawData is Map<String, dynamic>) {
+      if (rawData['signature'] is Map<String, dynamic>) {
+        itemMap = rawData['signature'] as Map<String, dynamic>;
+      } else if (rawData['data'] is Map<String, dynamic>) {
+        itemMap = rawData['data'] as Map<String, dynamic>;
+      } else {
+        itemMap = rawData;
+      }
+    }
+
+    return EmailSignatureModel.fromJson(itemMap);
+  }
+
+  @override
+  Future<bool> deleteEmailSignature(String id) async {
+    try {
+      await _apiService.delete('${ApiConstants.emailSignatures}/$id');
+      return true;
+    } catch (e) {
+      debugPrint('[DELETE ${ApiConstants.emailSignatures}/$id Error]: $e');
+      return false;
     }
   }
 

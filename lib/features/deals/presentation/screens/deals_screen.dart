@@ -26,7 +26,7 @@ class DealsScreen extends StatefulWidget {
 class _DealsScreenState extends State<DealsScreen> {
   String _searchQuery = '';
   int _selectedSegment = 0; // 0 for All, 1 for Mine
-  bool _isFilterExpanded = true;
+  bool _isFilterExpanded = false;
   final Set<String> _selectedDealIds = {};
 
   @override
@@ -152,6 +152,8 @@ class _DealsScreenState extends State<DealsScreen> {
                 children: [
                   SearchAndFilterBar(
                     searchHint: 'Search deals...',
+                    allLabel: 'All Deals',
+                    mineLabel: 'Mine Deals',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: _onSegmentChanged,
                     currentSort: dealProvider.sortOption,

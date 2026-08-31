@@ -376,6 +376,8 @@ class _EmailsScreenState extends State<EmailsScreen> {
                 children: [
                   SearchAndFilterBar(
                     searchHint: 'Search emails...',
+                    allLabel: 'All Emails',
+                    mineLabel: 'Mine Emails',
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: (index) {
                       setState(() {

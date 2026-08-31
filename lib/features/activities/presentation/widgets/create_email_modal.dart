@@ -10,6 +10,12 @@ import '../../../../core/widgets/record_association_sheet.dart';
 import '../../../../core/utils/activity_utils.dart';
 import 'create_template_modal.dart';
 import 'follow_up_task_section.dart';
+import 'create_signature_modal.dart';
+import '../../../../core/models/email_signature_model.dart';
+import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/signature_variable_resolver.dart';
+import '../../../authentication/presentation/providers/auth_provider.dart';
+import 'package:provider/provider.dart';
 
 class CreateEmailModal extends StatefulWidget {
   final Map<String, dynamic>? emailToEdit;
@@ -60,6 +66,7 @@ class CreateEmailModal extends StatefulWidget {
 class _CreateEmailModalState extends State<CreateEmailModal> {
   final TextEditingController _subjectController = TextEditingController();
   final TextEditingController _bodyController = TextEditingController();
+  final TextEditingController _toEmailController = TextEditingController();
 
   // Cc / Bcc each get their own row under To, opened from the Cc and Bcc links.
   final TextEditingController _ccController = TextEditingController();
@@ -68,6 +75,13 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
   final FocusNode _bccFocusNode = FocusNode();
   bool _showCc = false;
   bool _showBcc = false;
+
+  // Signatures State
+  List<EmailSignatureModel> _signatures = [];
+  EmailSignatureModel? _selectedSignature;
+  bool _showSignaturePreview = false;
+  bool _isLoadingSignatures = false;
+  final MasterDataRepositoryImpl _masterDataRepository = MasterDataRepositoryImpl();
 
   bool _createFollowUpTask = false;
   bool _isSubmitting = false;
@@ -141,11 +155,42 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
-                hintText: 'name@company.com, another@company.com',
+                hintText: 'Type email...',
                 hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: () async {
+              final result = await RecordAssociationSheet.show(
+                context,
+                initialAssociations: _associations,
+              );
+              if (result != null) {
+                setState(() {
+                  _associations = result;
+                  final contactNames = _associations['Contacts']?.map((e) => e['name']).whereType<String>().join(', ');
+                  if (contactNames != null && contactNames.isNotEmpty) {
+                    if (controller.text.isNotEmpty) {
+                      controller.text = '${controller.text}, $contactNames';
+                    } else {
+                      controller.text = contactNames;
+                    }
+                  }
+                });
+              }
+            },
+            child: Text(
+              '+ Add contact',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF00A884),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           InkWell(
             onTap: onRemove,
             child: const Padding(
@@ -326,6 +371,30 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
 
     _undoHistory.add(_bodyController.text);
     _bodyController.addListener(_onContentChanged);
+    _fetchSignatures();
+  }
+
+
+
+  Future<void> _fetchSignatures() async {
+    setState(() => _isLoadingSignatures = true);
+    try {
+      final list = await _masterDataRepository.getEmailSignatures();
+      if (mounted) {
+        setState(() {
+          _signatures = list;
+          _isLoadingSignatures = false;
+          if (_signatures.isNotEmpty) {
+            _selectedSignature = _signatures.firstWhere(
+              (s) => s.isDefault,
+              orElse: () => _signatures.first,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingSignatures = false);
+    }
   }
 
   void _onContentChanged() {
@@ -391,6 +460,7 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
     _bodyController.removeListener(_onContentChanged);
     _subjectController.dispose();
     _bodyController.dispose();
+    _toEmailController.dispose();
     _ccController.dispose();
     _bccController.dispose();
     _ccFocusNode.dispose();
@@ -896,35 +966,58 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
                               ),
                             ),
-                            Flexible(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: const Color(0xFFCBD5E1)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        _displayToName,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: const Color(0xFF334155),
+                            if (_displayToName.isNotEmpty) ...[
+                              Flexible(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          _displayToName,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                            color: const Color(0xFF334155),
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    const Icon(Icons.close, size: 14, color: Color(0xFF64748B)),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      InkWell(
+                                        onTap: () {
+                                          setState(() {
+                                            _associations['Contacts']?.clear();
+                                          });
+                                        },
+                                        child: const Icon(Icons.close, size: 14, color: Color(0xFF64748B)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Expanded(
+                              child: TextField(
+                                controller: _toEmailController,
+                                keyboardType: TextInputType.emailAddress,
+                                style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF1E293B)),
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                  hintText: 'Type email...',
+                                  hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             InkWell(
                               onTap: () async {
                                 final result = await RecordAssociationSheet.show(
@@ -975,7 +1068,7 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 60,
+                              width: 62,
                               child: Text(
                                 'Subject',
                                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
@@ -1101,6 +1194,11 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                           ),
                         ),
                       ),
+                      const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+                      // 7b. Signature Row (Matching Design Screenshot)
+                      _buildSignatureSection(),
+                      const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
                       // 8. Dynamic Associated Record Link Row
                       Container(
@@ -1168,32 +1266,28 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                                   style: GoogleFonts.poppins(fontSize: 12.5, color: const Color(0xFF64748B)),
                                 ),
                                 const SizedBox(width: 8),
-                                Flexible(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF8FAFC),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFFCBD5E1)),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            'CRM Sales Mode (Individual)',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                              color: const Color(0xFF334155),
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'CRM Sales Mode (Individual)',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: const Color(0xFF334155),
                                         ),
-                                        const SizedBox(width: 4),
-                                        const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Color(0xFF64748B)),
-                                      ],
-                                    ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Color(0xFF64748B)),
+                                    ],
                                   ),
                                 ),
                               ],
@@ -1204,42 +1298,42 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                                 color: const Color(0xFF00A884),
                                 borderRadius: BorderRadius.circular(6),
                               ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      InkWell(
-                                        onTap: _isSubmitting ? null : _submitEmail,
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                                          child: _isSubmitting
-                                              ? const SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                                )
-                                              : Text(
-                                                  'Send',
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 14.5,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                        ),
-                                      ),
-                                      const SizedBox(
-                                        height: 22,
-                                        child: VerticalDivider(color: Colors.white54, width: 1),
-                                      ),
-                                      const Padding(
-                                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                                        child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 20),
-                                      ),
-                                    ],
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  InkWell(
+                                    onTap: _isSubmitting ? null : _submitEmail,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                                      child: _isSubmitting
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                            )
+                                          : Text(
+                                              'Send',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 14.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(
+                                    height: 22,
+                                    child: VerticalDivider(color: Colors.white54, width: 1),
+                                  ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                    child: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 20),
+                                  ),
+                                ],
+                              ),
                             ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 160),
                     ],
@@ -1269,6 +1363,139 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
             color: isActive ? const Color(0xFF00A884) : const Color(0xFF64748B),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSignatureSection() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF64748B)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Signature',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF475569),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (_isLoadingSignatures)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00A884)),
+                    )
+                  else if (_signatures.isEmpty)
+                    Text(
+                      'No signature',
+                      style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF94A3B8)),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF00A884)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<EmailSignatureModel>(
+                          value: _selectedSignature,
+                          isDense: true,
+                          style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155), fontWeight: FontWeight.w500),
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Color(0xFF334155)),
+                          items: _signatures.map((sig) {
+                            return DropdownMenuItem<EmailSignatureModel>(
+                              value: sig,
+                              child: Text('${sig.name}${sig.isDefault ? ' (default)' : ''}'),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedSignature = val;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  if (_selectedSignature != null)
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _showSignaturePreview = !_showSignaturePreview;
+                        });
+                      },
+                      child: Text(
+                        _showSignaturePreview ? 'Hide' : 'Preview',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF00A884),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              InkWell(
+                onTap: () async {
+                  final created = await CreateSignatureModal.show(context);
+                  if (created == true) {
+                    _fetchSignatures();
+                  }
+                },
+                child: Text(
+                  'Manage signatures',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_showSignaturePreview && _selectedSignature != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+              ),
+              child: Text(
+                _selectedSignature!.body.isEmpty
+                    ? '(Empty signature body)'
+                    : SignatureVariableResolver.cleanPreviewText(
+                        _selectedSignature!.body,
+                        context.watch<AuthProvider>().currentUser,
+                      ),
+                style: GoogleFonts.poppins(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: const Color(0xFF1E293B),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

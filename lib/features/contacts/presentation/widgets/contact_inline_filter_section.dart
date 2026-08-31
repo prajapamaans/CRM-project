@@ -216,14 +216,25 @@ class _ContactInlineFilterSectionState extends State<ContactInlineFilterSection>
                       label: msp,
                     ),
                   ),
+                  DropdownSearchItem<String>(
+                    value: MspFieldUtils.addCustomMspValue,
+                    label: MspFieldUtils.addCustomMspLabel,
+                  ),
                 ];
 
                 return _buildFilterPill<String>(
                   title: 'MSP',
                   value: contactProvider.selectedMsp ?? 'All MSPs',
                   items: mspItems,
-                  onChanged: (val) {
-                    context.read<ContactProvider>().setMspFilter(val);
+                  onChanged: (val) async {
+                    if (val == MspFieldUtils.addCustomMspValue) {
+                      final newMsp = await MspFieldUtils.showAddCustomMspDialog(context);
+                      if (newMsp != null && context.mounted) {
+                        context.read<ContactProvider>().setMspFilter(newMsp);
+                      }
+                    } else {
+                      context.read<ContactProvider>().setMspFilter(val);
+                    }
                   },
                 );
               },

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../datasources/master_data_remote_datasource.dart';
+import '../models/email_signature_model.dart';
 import '../models/email_template_models.dart';
 import '../models/master_dropdown_model.dart';
 
@@ -26,6 +27,7 @@ abstract class MasterDataRepository {
     String? sort,
     String? order,
     String? search,
+    String? bookingSource,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -38,6 +40,9 @@ abstract class MasterDataRepository {
   Future<EmailTemplatesResponse> getEmailTemplatesFull();
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
+  Future<List<EmailSignatureModel>> getEmailSignatures();
+  Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data);
+  Future<bool> deleteEmailSignature(String id);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
   Future<Map<String, dynamic>> getSequences({int page = 1, int limit = 20});
   Future<Map<String, dynamic>> getSequenceById(String id);
@@ -138,6 +143,7 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     String? sort,
     String? order,
     String? search,
+    String? bookingSource,
   }) async {
     try {
       return await _remoteDataSource.getActivities(
@@ -153,6 +159,7 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
         sort: sort,
         order: order,
         search: search,
+        bookingSource: bookingSource,
       );
     } catch (e) {
       debugPrint('[GET /api/activities ERROR]: $e');
@@ -225,6 +232,26 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
       debugPrint('[PUT /api/email-templates/list/$id ERROR]: $e');
       return {};
     }
+  }
+
+  @override
+  Future<List<EmailSignatureModel>> getEmailSignatures() async {
+    try {
+      return await _remoteDataSource.getEmailSignatures();
+    } catch (e) {
+      debugPrint('[GET /api/email-signatures ERROR]: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data) async {
+    return await _remoteDataSource.createEmailSignature(data);
+  }
+
+  @override
+  Future<bool> deleteEmailSignature(String id) async {
+    return await _remoteDataSource.deleteEmailSignature(id);
   }
 
   @override

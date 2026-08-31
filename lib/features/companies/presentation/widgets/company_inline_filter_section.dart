@@ -168,14 +168,25 @@ class _CompanyInlineFilterSectionState extends State<CompanyInlineFilterSection>
                       label: msp,
                     ),
                   ),
+                  DropdownSearchItem<String>(
+                    value: MspFieldUtils.addCustomMspValue,
+                    label: MspFieldUtils.addCustomMspLabel,
+                  ),
                 ];
 
                 return _buildFilterPill<String>(
                   title: 'MSP',
                   value: companyProvider.selectedMsp ?? 'All MSPs',
                   items: mspItems,
-                  onChanged: (val) {
-                    context.read<CompanyProvider>().setMspFilter(val);
+                  onChanged: (val) async {
+                    if (val == MspFieldUtils.addCustomMspValue) {
+                      final newMsp = await MspFieldUtils.showAddCustomMspDialog(context);
+                      if (newMsp != null && context.mounted) {
+                        context.read<CompanyProvider>().setMspFilter(newMsp);
+                      }
+                    } else {
+                      context.read<CompanyProvider>().setMspFilter(val);
+                    }
                   },
                 );
               },

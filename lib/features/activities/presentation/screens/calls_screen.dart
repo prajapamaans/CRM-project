@@ -352,6 +352,8 @@ class _CallsScreenState extends State<CallsScreen> {
                   children: [
                     SearchAndFilterBar(
                       searchHint: 'Search calls...',
+                      allLabel: 'All Calls',
+                      mineLabel: 'Mine Calls',
                       onSearchChanged: (val) {
                         setState(() {
                           _searchQuery = val.trim();

@@ -24,6 +24,8 @@ class SearchAndFilterBar extends StatefulWidget {
   final List<String>? filterOptions;
   final String? selectedStage;
   final ValueChanged<String>? onStageSelected;
+  final String? allLabel;
+  final String? mineLabel;
 
   const SearchAndFilterBar({
     super.key,
@@ -42,6 +44,8 @@ class SearchAndFilterBar extends StatefulWidget {
     this.filterOptions,
     this.selectedStage,
     this.onStageSelected,
+    this.allLabel,
+    this.mineLabel,
   });
 
   @override
@@ -264,42 +268,78 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             // Segment Switch (All / Mine) inside a pill box
-            Container(
-              height: 36,
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
-              ),
-              child: Row(
-                children: [
-                  _buildSegmentItem(index: 0, label: 'All'),
-                  _buildSegmentItem(index: 1, label: 'Mine'),
-                ],
+            Flexible(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Container(
+                  height: 36,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildSegmentItem(index: 0, label: widget.allLabel ?? 'All'),
+                      _buildSegmentItem(index: 1, label: widget.mineLabel ?? 'Mine'),
+                    ],
+                  ),
+                ),
               ),
             ),
 
-            // 3-Dot Menu Icon Button
-            GestureDetector(
-              onTapDown: (details) => _showThreeDotMenu(context, details),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: active ? const Color(0xFFE6F4F1) : Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: active ? const Color(0xFF00A884) : const Color(0xFFD1D5DB),
-                    width: active ? 1.5 : 1,
+            const SizedBox(width: 8),
+
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (active || widget.isFilterActive || widget.isFilterExpanded) ...[
+                  InkWell(
+                    onTap: widget.onFilterTap ?? widget.onToggleFilterExpanded,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF1F0),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFFFCCC7)),
+                      ),
+                      child: Text(
+                        'Clear',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFFFF4D4F),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                // 3-Dot Menu Icon Button
+                GestureDetector(
+                  onTapDown: (details) => _showThreeDotMenu(context, details),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: active ? const Color(0xFFE6F4F1) : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: active ? const Color(0xFF00A884) : const Color(0xFFD1D5DB),
+                        width: active ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.more_vert_rounded,
+                      size: 20,
+                      color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
+                    ),
                   ),
                 ),
-                child: Icon(
-                  Icons.more_vert_rounded,
-                  size: 20,
-                  color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
-                ),
-              ),
+              ],
             ),
           ],
         ),

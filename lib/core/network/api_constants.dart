@@ -37,6 +37,7 @@ class ApiConstants {
   static const String mspOptions = '/msp-options';
   static const String emailTemplates = '/email-templates';
   static const String emailTemplatesList = '/email-templates/list';
+  static const String emailSignatures = '/email-signatures';
   static const String meetingSchedulers = '/meeting-schedulers';
   static const String sequences = '/sequences';
   static String sequenceById(String id) => '/sequences/$id';

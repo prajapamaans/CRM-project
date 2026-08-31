@@ -87,6 +87,7 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
   void _addCustomOption() {
     final text = _customMspController.text.trim();
     if (text.isNotEmpty) {
+      context.read<MasterDataProvider>().addCustomMspOption(text);
       setState(() {
         final apiMsps = context.read<MasterDataProvider>().mspNames;
         if (!apiMsps.contains(text) && !_extraOptions.contains(text)) {

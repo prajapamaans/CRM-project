@@ -160,12 +160,20 @@ class _InitialDataLoaderScreenState extends State<InitialDataLoaderScreen> {
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // APIDEL Brand Logo Image
-                      Image.asset(
-                        'assets/images/apidel_logo.png',
-                        width: 240,
-                        height: 65,
-                        fit: BoxFit.contain,
+                      // APIDEL Brand Title Text (App Icon removed)
+                      ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          colors: [AppColors.primaryTeal, Color(0xFF005B47)],
+                        ).createShader(bounds),
+                        child: const Text(
+                          'APIDEL CRM',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 28),
                       const SizedBox(
