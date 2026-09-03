@@ -117,6 +117,8 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
         'contactId': _selectedContactId,
       if (_selectedOwnerId != null && _selectedOwnerId!.isNotEmpty)
         'ownerId': _selectedOwnerId,
+      if (_selectedOwnerId != null && _selectedOwnerId!.isNotEmpty)
+        'owner_id': _selectedOwnerId,
       if (_selectedIndustry != null && _selectedIndustry!.isNotEmpty)
         'industry': _selectedIndustry,
       if (_selectedType != null && _selectedType!.isNotEmpty)
@@ -197,9 +199,7 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
   @override
   Widget build(BuildContext context) {
     final contactProvider = context.watch<ContactProvider>();
-    final authProvider = context.watch<AuthProvider>();
     final contacts = contactProvider.contacts;
-    final teamMembers = authProvider.teamMembers;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.9,
@@ -439,32 +439,29 @@ class _CreateCompanyModalState extends State<CreateCompanyModal> {
                   const SizedBox(height: 6),
                   Builder(
                     builder: (context) {
-                      final ownerItems = <DropdownSearchItem<String>>[
-                        DropdownSearchItem(
-                          value: '',
-                          label: 'No owner',
-                        ),
-                        if (authProvider.currentUser != null)
-                          DropdownSearchItem(
-                            value: authProvider.currentUser!.id,
-                            label: authProvider.currentUser!.fullName.isNotEmpty
-                                ? authProvider.currentUser!.fullName
-                                : 'Admin User',
-                            subtext: authProvider.currentUser!.email,
-                          ),
-                        ...teamMembers.map(
-                          (m) => DropdownSearchItem(
-                            value: m.id,
-                            label: m.fullName,
-                            subtext: m.email,
-                          ),
-                        ),
-                      ];
+                      final authProvider = context.watch<AuthProvider>();
+                      final teamMembers = authProvider.teamMembers;
+
+                      final Map<String, DropdownSearchItem<String>> ownerItemMap = {};
+                      ownerItemMap[''] = DropdownSearchItem(
+                        value: '',
+                        label: 'No owner',
+                      );
+                      for (final m in teamMembers) {
+                        ownerItemMap[m.id] = DropdownSearchItem(
+                          value: m.id,
+                          label: m.fullName,
+                          subtext: m.email,
+                        );
+                      }
+
+                      final ownerItems = ownerItemMap.values.toList();
+                      final isLoading = authProvider.isLoading && teamMembers.isEmpty;
+                      final hintText = isLoading ? 'Loading team members...' : 'Select an owner';
 
                       return SearchableDropdownFormField<String>(
-                        initialValue: _selectedOwnerId ??
-                            (authProvider.currentUser?.id ?? ''),
-                        hintText: 'Select an owner',
+                        initialValue: _selectedOwnerId ?? '',
+                        hintText: hintText,
                         items: ownerItems,
                         onChanged: (val) {
                           setState(() {

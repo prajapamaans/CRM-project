@@ -880,7 +880,7 @@ class _AddUserModalState extends State<_AddUserModal> {
                 items: depts.map((d) {
                   return DropdownMenuItem<String>(
                     value: d.id,
-                    child: Text(d.name, style: GoogleFonts.poppins(fontSize: 13)),
+                    child: Text(d.dropdownName, style: GoogleFonts.poppins(fontSize: 13)),
                   );
                 }).toList(),
                 onChanged: (val) {

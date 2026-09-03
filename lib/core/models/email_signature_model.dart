@@ -18,7 +18,7 @@ class EmailSignatureModel {
 
   factory EmailSignatureModel.fromJson(Map<String, dynamic> json) {
     return EmailSignatureModel(
-      id: json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       body: json['body']?.toString() ?? '',
       isDefault: json['isDefault'] == true || json['is_default'] == true,

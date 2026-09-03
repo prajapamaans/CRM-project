@@ -123,4 +123,16 @@ class NotificationProvider extends ChangeNotifier {
     _notifications.removeWhere((n) => n.id == notificationId);
     notifyListeners();
   }
+
+  /// Drops everything held for the previous department.
+  ///
+  /// Notifications are department-scoped, so they must not survive a switch —
+  /// including the unread badge, which is counted from this list.
+  void clearData() {
+    _notifications = [];
+    _state = NotificationState.initial;
+    _isLoading = false;
+    _error = null;
+    notifyListeners();
+  }
 }

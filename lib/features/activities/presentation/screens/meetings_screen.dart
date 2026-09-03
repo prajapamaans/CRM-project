@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/activity_utils.dart';
@@ -27,13 +28,12 @@ class MeetingsScreen extends StatefulWidget {
   State<MeetingsScreen> createState() => _MeetingsScreenState();
 }
 
-class _MeetingsScreenState extends State<MeetingsScreen> {
+class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareState {
   int _selectedTab = 0; // 0: All meetings, 1: My meetings
   String _currentHeaderMode = 'log'; // 'log' or 'create'
   String _searchQuery = '';
   final List<MeetingModel> _meetings = [];
   bool _isLoadingMeetings = false;
-  String? _lastDepartmentId;
 
   /// Id of the meeting the user selected. Held by id so the highlight survives
   /// a reload of the list.
@@ -67,11 +67,17 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final currentDeptId = context.watch<DepartmentProvider>().selectedDepartmentId;
-    if (_lastDepartmentId != currentDeptId) {
-      _lastDepartmentId = currentDeptId;
+    // The previous department's meetings are wiped before the new request goes
+    // out, so they cannot stay on screen while it is in flight.
+    watchDepartmentChanges((_) {
+      setState(() {
+        _meetings.clear();
+        _selectedMeetingId = null;
+        _apiUsers = [];
+      });
+      _fetchUsers();
       _loadMeetings();
-    }
+    });
 
     // A meeting opened from elsewhere in the app (e.g. a notification).
     final requested = context.watch<NavigationProvider>().focusedActivityId;

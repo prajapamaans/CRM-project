@@ -21,10 +21,14 @@ import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../../core/network/api_service.dart';
 import '../../../../core/models/bingo_summary_model.dart';
+import '../../../../core/utils/department_scope.dart';
+import '../../../../core/utils/follow_up_task_request.dart';
+import '../../../../core/utils/task_activity_history.dart';
 import '../../data/models/activity_stats_model.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/activity_leaderboard_card.dart';
 import '../widgets/contact_count_card.dart';
+import '../widgets/follow_up_task_dialog.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -78,6 +82,185 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _customSelectedDate = picked;
       });
     }
+  }
+
+  /// The department the user is working in, whichever of them it is.
+  ///
+  /// Read from the picker when they have chosen, and otherwise from their own
+  /// account — never from a constant, so a follow-up completed in Australia is
+  /// never filed under APAC because nothing had been picked yet.
+  String _activeDepartmentId() {
+    final departments = context.read<DepartmentProvider>();
+    final user = context.read<AuthProvider>().currentUser;
+    return resolveActiveDepartmentId(
+      selected: departments.selectedDepartmentIdOrNull,
+      userDepartmentId: user?.departmentId,
+      assignedDepartmentId: departments.assignedDepartmentId,
+    );
+  }
+
+  /// Reloads the task lists behind the three work cards, for the department
+  /// and the owner filter that are selected right now.
+  Future<void> _refreshDashboardTasks() async {
+    if (!mounted) return;
+    final ownerId =
+        _selectedPillIndex == 1 ? context.read<AuthProvider>().currentUser?.id : null;
+    final departmentId = context.read<DepartmentProvider>().selectedDepartmentId;
+    await context.read<DashboardProvider>().fetchDashboardTasks(
+          ownerId: ownerId,
+          departmentId: departmentId,
+        );
+  }
+
+  void _showTaskMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+        backgroundColor: isError ? Colors.red : const Color(0xFF00A884),
+        duration: Duration(seconds: isError ? 4 : 2),
+      ),
+    );
+  }
+
+  /// The Dashboard's task checkbox.
+  ///
+  /// Completing a task offers a follow-up straight afterwards; this is the only
+  /// screen that does so, which is why the offer lives here and not in the card
+  /// or in the provider. Unticking a completed task is just an update — there
+  /// is nothing to follow up on — and a completion the server refused shows the
+  /// error and stops, leaving the checkbox as it was.
+  Future<void> _onToggleTaskStatus(
+    Map<String, dynamic> task,
+    String newStatus,
+  ) async {
+    final taskId = activityId(task);
+    if (taskId == null) return;
+
+    final dashboard = context.read<DashboardProvider>();
+    final departmentId = _activeDepartmentId();
+
+    late final Map<String, dynamic> completed;
+    try {
+      completed = await dashboard.setTaskStatus(
+        taskId,
+        newStatus,
+        departmentId: departmentId,
+      );
+    } catch (e) {
+      _showTaskMessage(
+        newStatus == 'completed'
+            ? 'The task could not be completed: ${_taskErrorText(e)}'
+            : 'The task could not be updated: ${_taskErrorText(e)}',
+        isError: true,
+      );
+      return;
+    }
+
+    if (newStatus != 'completed') {
+      await _refreshDashboardTasks();
+      return;
+    }
+    if (!mounted) return;
+
+    final choice = await FollowUpTaskDialog.show(
+      context,
+      taskTitle: taskTitle(completed) ?? taskTitle(task) ?? '',
+      completedAt: taskCompletedAt(completed) ?? DateTime.now(),
+    );
+
+    Map<String, dynamic>? followUpTask;
+    if (choice != null) {
+      try {
+        followUpTask = await dashboard.createFollowUpTask(
+          original: completed,
+          scheduledAt: choice.scheduledAt,
+          departmentId: departmentId,
+          selectedDepartmentId: _activeDepartmentId(),
+        );
+        _showTaskMessage('Follow-up task created.');
+      } catch (e) {
+        _showTaskMessage(
+          'The task was completed, but the follow-up could not be created: '
+          '${_taskErrorText(e)}',
+          isError: true,
+        );
+      }
+    } else {
+      _showTaskMessage('Task completed.');
+    }
+
+    String? resolveAssociatedId(String objectType) {
+      for (final item in [followUpTask, completed, task]) {
+        if (item == null) continue;
+        final direct = item['${objectType}Id'] ?? item['${objectType}_id'];
+        if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+        final obj = item[objectType];
+        if (obj is Map && obj['id'] != null) return obj['id'].toString();
+
+        final assoc = item['associations'];
+        if (assoc is List) {
+          for (final a in assoc) {
+            if (a is Map && a['objectType'] == objectType && a['objectId'] != null) {
+              return a['objectId'].toString();
+            }
+          }
+        } else if (assoc is Map) {
+          final listKey = objectType == 'company'
+              ? 'Companies'
+              : (objectType == 'contact' ? 'Contacts' : 'Deals');
+          if (assoc[listKey] is List && (assoc[listKey] as List).isNotEmpty) {
+            final first = (assoc[listKey] as List).first;
+            if (first is Map) {
+              return (first['id'] ?? first['_id'] ?? first['objectId'])?.toString();
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    final companyId = resolveAssociatedId('company');
+    final contactId = resolveAssociatedId('contact');
+    final dealId = resolveAssociatedId('deal');
+    final targetActId = (followUpTask?['id'] ?? followUpTask?['_id'] ?? completed['id'] ?? completed['_id'] ?? taskId)?.toString();
+
+    if (mounted) {
+      if (companyId != null && companyId.isNotEmpty) {
+        context.pushNamed(
+          RouteNames.companyDetails,
+          pathParameters: {RoutePaths.idParam: companyId},
+          queryParameters: RoutePaths.recordActivityQuery(targetActId),
+        );
+      } else if (contactId != null && contactId.isNotEmpty) {
+        context.pushNamed(
+          RouteNames.contactDetails,
+          pathParameters: {RoutePaths.idParam: contactId},
+          queryParameters: RoutePaths.recordActivityQuery(targetActId),
+        );
+      } else if (dealId != null && dealId.isNotEmpty) {
+        context.pushNamed(
+          RouteNames.dealDetails,
+          pathParameters: {RoutePaths.idParam: dealId},
+          queryParameters: RoutePaths.recordActivityQuery(targetActId),
+        );
+      } else if (targetActId != null && targetActId.isNotEmpty) {
+        context.pushNamed(
+          RouteNames.taskDetails,
+          pathParameters: {RoutePaths.idParam: targetActId},
+        );
+      }
+    }
+
+    await _refreshDashboardTasks();
+  }
+
+  static String _taskErrorText(Object error) {
+    if (error is StateError) return error.message;
+    return error.toString();
   }
 
   void _onTaskTap(Map<String, dynamic> act) async {
@@ -155,10 +338,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final deptId = context.watch<DepartmentProvider>().selectedDepartmentId;
-    if (_lastDepartmentId != deptId) {
-      _lastDepartmentId = deptId;
-      _meetingsBookedFuture = MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId);
+    final departments = context.watch<DepartmentProvider>();
+
+    // Mid-switch the selected id has already changed but the access token it
+    // depends on has not been swapped yet — and the API reads the department
+    // from that token. Fetching now would answer with the department being
+    // left. Wait for the switch to settle.
+    if (departments.isSwitchingDepartment) return;
+
+    final deptId = departments.selectedDepartmentId;
+    if (_lastDepartmentId == deptId) return;
+
+    final isFirstBuild = _lastDepartmentId == null;
+    final prevDeptId = _lastDepartmentId;
+    _lastDepartmentId = deptId;
+
+    debugPrint('==================================================');
+    debugPrint('[DASHBOARD SCREEN DEPARTMENT CHANGE DETECTED]');
+    debugPrint('Previous Department ID: ${prevDeptId ?? 'FIRST BUILD'}');
+    debugPrint('Selected Department Name: ${departments.selectedDepartmentName}');
+    debugPrint('Selected Department ID: $deptId');
+    debugPrint('==================================================');
+
+    _meetingsBookedFuture =
+        MasterDataRepositoryImpl().getActivities(type: 'meeting', departmentId: deptId);
+
+    // initState already loads the first department. Every change after that
+    // reloads here, so the Dashboard follows the department in both
+    // directions and however many times it is switched — and does so with the
+    // owner and time filters the user currently has selected, which the
+    // app-wide reload does not know about.
+    if (!isFirstBuild) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadDashboard();
+      });
     }
   }
 
@@ -180,40 +393,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final reportUsers = master.reportsUsers;
 
       if (mounted) {
+        final ownerId = _selectedPillIndex == 1 ? currentUserId : null;
+        context.read<ContactProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+        context.read<CompanyProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+        context.read<DealProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+
         context.read<DashboardProvider>().loadDashboardData(
-          ownerId: _selectedPillIndex == 1 ? currentUserId : null,
+          ownerId: ownerId,
           departmentId: deptId,
+          departmentName: context.read<DepartmentProvider>().selectedDepartmentName,
           startDate: range['startDate'],
           endDate: range['endDate'],
           subtitleLabel: _performanceSubtitleLabel,
           teamMembers: teamMembers,
           reportUsers: reportUsers,
         );
-        context.read<ContactProvider>().fetchContacts(departmentId: deptId);
-        context.read<DealProvider>().fetchDeals(departmentId: deptId);
       }
     });
+  }
+
+  /// Loads every Dashboard section for the department that is selected right
+  /// now, with the owner and time filters the user has on screen.
+  ///
+  /// The one place the Dashboard asks for its data, so the department can only
+  /// be read from one source and every section is asked for the same one.
+  Future<void> _loadDashboard() {
+    final auth = context.read<AuthProvider>();
+    final master = context.read<MasterDataProvider>();
+    final departments = context.read<DepartmentProvider>();
+    final range = _getDashboardTimeFilterRange();
+    final ownerId = _selectedPillIndex == 1 ? auth.currentUser?.id : null;
+    final deptId = departments.selectedDepartmentId;
+
+    context.read<ContactProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+    context.read<CompanyProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+    context.read<DealProvider>().setSegmentScope(ownerId: ownerId, departmentId: deptId);
+
+    return context.read<DashboardProvider>().loadDashboardData(
+          ownerId: ownerId,
+          departmentId: deptId,
+          departmentName: departments.selectedDepartmentName,
+          startDate: range['startDate'],
+          endDate: range['endDate'],
+          subtitleLabel: _performanceSubtitleLabel,
+          teamMembers: auth.teamMembers,
+          reportUsers: master.reportsUsers,
+        );
   }
 
   void _onTogglePill(int index) {
     setState(() {
       _selectedPillIndex = index;
     });
-    final auth = context.read<AuthProvider>();
-    final master = context.read<MasterDataProvider>();
-    final ownerId = index == 1 ? auth.currentUser?.id : null;
-    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
-    final range = _getDashboardTimeFilterRange();
-
-    context.read<DashboardProvider>().loadDashboardData(
-      ownerId: ownerId,
-      departmentId: deptId,
-      startDate: range['startDate'],
-      endDate: range['endDate'],
-      subtitleLabel: _performanceSubtitleLabel,
-      teamMembers: auth.teamMembers,
-      reportUsers: master.reportsUsers,
-    );
+    _loadDashboard();
   }
 
   DateTime? get _performanceCutoffDate {
@@ -254,23 +486,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _selectedTimeFilter = index;
     });
-    final auth = context.read<AuthProvider>();
-    final master = context.read<MasterDataProvider>();
-    final ownerId = _selectedPillIndex == 1 ? auth.currentUser?.id : null;
-    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
-    final range = _getDashboardTimeFilterRange();
-
-    context.read<DashboardProvider>().loadDashboardData(
-      ownerId: ownerId,
-      departmentId: deptId,
-      startDate: range['startDate'],
-      endDate: range['endDate'],
-      subtitleLabel: _performanceSubtitleLabel,
-      teamMembers: auth.teamMembers,
-      reportUsers: master.reportsUsers,
-    );
-    context.read<ContactProvider>().fetchContacts(departmentId: deptId);
-    context.read<DealProvider>().fetchDeals(departmentId: deptId);
+    _loadDashboard();
   }
 
   Future<void> _handleAskBingoTap() async {
@@ -714,9 +930,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         dateString: _formatDateSubtitle(today),
                         taskGroup: todayGroup,
                         onViewAllTap: navigateToTasks,
-                        onToggleTaskStatus: (taskId, newStatus) {
-                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
-                        },
+                        onToggleTaskStatus: _onToggleTaskStatus,
                         onTaskTap: _onTaskTap,
                       );
 
@@ -725,9 +939,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         dateString: _formatDateSubtitle(yesterday),
                         taskGroup: yesterdayGroup,
                         onViewAllTap: navigateToTasks,
-                        onToggleTaskStatus: (taskId, newStatus) {
-                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
-                        },
+                        onToggleTaskStatus: _onToggleTaskStatus,
                         onTaskTap: _onTaskTap,
                       );
 
@@ -738,9 +950,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         showFilterButton: true,
                         onFilterTap: _onCustomDateSearchTap,
                         onViewAllTap: navigateToTasks,
-                        onToggleTaskStatus: (taskId, newStatus) {
-                          dashboardProvider.toggleTaskStatus(taskId, newStatus);
-                        },
+                        onToggleTaskStatus: _onToggleTaskStatus,
                         onTaskTap: _onTaskTap,
                       );
 

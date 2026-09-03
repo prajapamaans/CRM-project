@@ -9,9 +9,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/models/master_dropdown_model.dart';
+import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/utils/activity_delete.dart';
+import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/activity_task_fields.dart';
+import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/filter_query_utils.dart';
+import '../../../../core/utils/task_query_builder.dart';
+import '../../../../core/utils/task_status_filter.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/create_task_modal.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
@@ -27,12 +34,29 @@ class TasksScreen extends StatefulWidget {
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
-class _TasksScreenState extends State<TasksScreen> {
-  int _selectedSegment = 0; // 0: All, 1: Pending, 2: Completed
+class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
+  /// All / Pending / Completed. Drives both the `status` sent to the API and
+  /// the check applied to what comes back.
+  TaskStatusTab _statusTab = TaskStatusTab.all;
+
+  /// Ids of the tasks ticked for deletion. Only ids that are currently on
+  /// screen are kept, so a delete can never reach a task the user cannot see.
+  final Set<String> _selectedForDelete = {};
+  bool _isDeleting = false;
+  bool _isCompleting = false;
+
   String _searchQuery = '';
   Timer? _searchDebounce;
   final List<TaskModel> _tasks = [];
   bool _isLoadingTasks = false;
+
+  /// Incremented for every request; only the newest one is allowed to write
+  /// its answer into the list.
+  int _requestSeq = 0;
+
+  /// The department the tasks on screen belong to.
+  String? _loadedDepartmentId;
+
   bool _showFiltersRow = false;
   int _currentPage = 1;
   final int _pageSize = 25;
@@ -73,7 +97,6 @@ class _TasksScreenState extends State<TasksScreen> {
     'Z to A',
   ];
 
-  String? _lastDepartmentId;
 
   @override
   void initState() {
@@ -95,16 +118,44 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final currentDeptId = context.watch<DepartmentProvider>().selectedDepartmentId;
-    if (_lastDepartmentId != currentDeptId) {
-      _lastDepartmentId = currentDeptId;
-      _fetchTasks(page: 1);
-    }
+    // The previous department's tasks — and the company/contact/deal/user
+    // lists behind the filter pills — are wiped as soon as the switch starts,
+    // so none of them stay on screen while the access token is being swapped.
+    // The reload runs once that swap is done: the API reads the department
+    // from the token, so fetching any earlier answers with the department
+    // being left.
+    watchDepartmentChanges(
+      (_) => _loadMasterDataAndFetchTasks(),
+      onSwitchStarted: _clearDepartmentScopedData,
+    );
+  }
+
+  /// Drops everything on screen that belongs to one department.
+  void _clearDepartmentScopedData() {
+    if (!mounted) return;
+    setState(() {
+      _tasks.clear();
+      _totalTasks = 0;
+      _currentPage = 1;
+      _loadedDepartmentId = null;
+      _selectedTaskId = null;
+      _selectedForDelete.clear();
+      _users = [];
+      _companies = [];
+      _contacts = [];
+      _deals = [];
+    });
   }
 
   Future<void> _loadMasterDataAndFetchTasks() async {
     final repository = MasterDataRepositoryImpl();
     final apiService = ApiService();
+
+    // These four lists populate the Company / Contact / Deal / Owner filter
+    // pills. They used to be fetched unscoped, so the pills offered records
+    // belonging to other departments.
+    final deptId = currentDepartmentId();
+    final deptScope = {'department_id': deptId, 'departmentId': deptId};
 
     try {
       try {
@@ -115,7 +166,7 @@ class _TasksScreenState extends State<TasksScreen> {
       } catch (_) {}
 
       try {
-        final uResp = await apiService.get('/users');
+        final uResp = await apiService.get('/users', queryParameters: deptScope);
         if (uResp.data != null) {
           final raw = uResp.data;
           if (raw is List) {
@@ -127,7 +178,7 @@ class _TasksScreenState extends State<TasksScreen> {
       } catch (_) {}
 
       try {
-        final cResp = await apiService.get('/companies', queryParameters: {'limit': 200});
+        final cResp = await apiService.get('/companies', queryParameters: {'limit': 200, ...deptScope});
         if (cResp.data != null) {
           final raw = cResp.data;
           if (raw is List) {
@@ -139,7 +190,7 @@ class _TasksScreenState extends State<TasksScreen> {
       } catch (_) {}
 
       try {
-        final contResp = await apiService.get('/contacts', queryParameters: {'limit': 200});
+        final contResp = await apiService.get('/contacts', queryParameters: {'limit': 200, ...deptScope});
         if (contResp.data != null) {
           final raw = contResp.data;
           if (raw is List) {
@@ -151,7 +202,7 @@ class _TasksScreenState extends State<TasksScreen> {
       } catch (_) {}
 
       try {
-        final dResp = await apiService.get('/deals', queryParameters: {'limit': 200});
+        final dResp = await apiService.get('/deals', queryParameters: {'limit': 200, ...deptScope});
         if (dResp.data != null) {
           final raw = dResp.data;
           if (raw is List) {
@@ -277,9 +328,15 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Future<void> _fetchTasks({int? page, bool resetPage = false}) async {
     if (!mounted) return;
-    if (_isLoadingTasks) return;
 
     final targetPage = resetPage ? 1 : (page ?? _currentPage);
+
+    // A newer request always wins. The in-flight one is not cancelled — Dio
+    // has no handle on it here — but its answer is dropped when it lands, so
+    // a slow reply for the department just left cannot repopulate the list.
+    // This also replaces an early return on "already loading", which used to
+    // make a department switch during a fetch do nothing at all.
+    final requestSeq = ++_requestSeq;
 
     setState(() {
       _isLoadingTasks = true;
@@ -288,70 +345,78 @@ class _TasksScreenState extends State<TasksScreen> {
     });
 
     final apiService = ApiService();
+
+    // The selected department, read at the moment the request is built. The
+    // same value is checked again when the response lands.
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
-    final queryParams = <String, dynamic>{
-      'page': targetPage,
-      'limit': _pageSize,
-      'sort': _getSortField(),
-      'order': _getSortOrder(),
-    };
-
-    if (deptId != null && deptId.isNotEmpty) {
-      queryParams['department_id'] = deptId;
-    }
-
-    if (_searchQuery.trim().isNotEmpty) {
-      queryParams['search'] = _searchQuery.trim();
-    }
-
-    if (_selectedSegment == 1) {
-      queryParams['status'] = 'pending';
-    } else if (_selectedSegment == 2) {
-      queryParams['status'] = 'completed';
+    // The All / Pending / Completed tab and the Status pill both set the same
+    // field, so the tab wins while it is narrowing and the pill applies under
+    // All. The value is the backend's own, taken from `task_status`.
+    final tabStatus = taskStatusValueFor(_statusTab, statusOptions: _taskStatuses);
+    String? status;
+    if (tabStatus != null) {
+      status = tabStatus;
+      if (_selectedStatusFilter != 'Status') {
+        debugPrint('[TasksScreen] status pill "$_selectedStatusFilter" is not sent '
+            'while the ${_statusTab.name} tab is selected');
+      }
     } else if (_selectedStatusFilter != 'Status') {
-      queryParams['status'] = _selectedStatusFilter.toLowerCase();
+      status = _selectedStatusFilter.toLowerCase();
     }
 
-    if (_selectedPriorityFilter != 'Priority') {
-      queryParams['priority'] = _selectedPriorityFilter.toLowerCase();
-    }
-
+    String? ownerId;
     if (_selectedOwnerFilter != 'Owner') {
       final matchedUser = _users.firstWhere(
         (u) => '${u['firstName'] ?? ''} ${u['lastName'] ?? ''}'.trim().toLowerCase() == _selectedOwnerFilter.toLowerCase(),
         orElse: () => {},
       );
-      if (matchedUser.containsKey('id') || matchedUser.containsKey('_id')) {
-        queryParams['ownerId'] = matchedUser['id'] ?? matchedUser['_id'];
-      }
+      ownerId = (matchedUser['id'] ?? matchedUser['_id'])?.toString();
     }
 
-    // The Create date pill used to be recorded and then never used — it now
-    // becomes the documented `createdDateRange` value.
-    final createdDateRange = FilterDateRange.toQueryValue(_selectedCreateDate);
-    if (createdDateRange != null) {
-      queryParams['createdDateRange'] = createdDateRange;
-    }
+    final queryParams = buildTaskListQuery(
+      page: targetPage,
+      limit: _pageSize,
+      departmentId: deptId,
+      sort: _getSortField(),
+      order: _getSortOrder(),
+      search: _searchQuery,
+      status: status,
+      priority: _selectedPriorityFilter != 'Priority' ? _selectedPriorityFilter.toLowerCase() : null,
+      ownerId: ownerId,
+      // The Create date pill used to be recorded and then never used — it now
+      // becomes the documented `createdDateRange` value.
+      createdDateRange: FilterDateRange.toQueryValue(_selectedCreateDate),
+      // Company / Contact / Deal pills hold the record's display name; the API
+      // filters by id, so the name is resolved back to one here.
+      companyId: _resolveCompanyId(),
+      contactId: _resolveContactId(),
+      dealId: _resolveDealId(),
+    );
 
-    // Company / Contact / Deal pills hold the record's display name; the API
-    // filters by id, so the name is resolved back to one here.
-    final companyId = _resolveCompanyId();
-    if (companyId != null) queryParams['companyId'] = companyId;
-
-    final contactId = _resolveContactId();
-    if (contactId != null) queryParams['contactId'] = contactId;
-
-    final dealId = _resolveDealId();
-    if (dealId != null) queryParams['dealId'] = dealId;
-
-    debugPrint('[TasksScreen] GET /activities query: $queryParams');
+    debugPrint('[TasksScreen] GET ${ApiConstants.activities} query: $queryParams');
 
     try {
       final response = await apiService.get(
-        '/activities',
+        ApiConstants.activities,
         queryParameters: queryParams,
       );
+
+      if (!mounted) return;
+
+      // Anything that arrives after a newer request went out, or after the
+      // department changed, is thrown away rather than rendered.
+      final currentDeptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      if (!shouldApplyTaskResponse(
+        responseSeq: requestSeq,
+        latestSeq: _requestSeq,
+        requestedDepartmentId: deptId,
+        selectedDepartmentId: currentDeptId,
+      )) {
+        debugPrint('[TasksScreen] dropped a stale response asked for department $deptId '
+            '(request $requestSeq of $_requestSeq, $currentDeptId is selected now)');
+        return;
+      }
 
       final dynamic rawData = response.data;
       List<dynamic> records = [];
@@ -381,15 +446,18 @@ class _TasksScreenState extends State<TasksScreen> {
         total = rawData.length;
       }
 
+      // Everything below comes from the row the API returned. Where a field is
+      // missing the record says so — no placeholder person, date or status is
+      // filled in on its behalf.
       final loadedTasks = records.whereType<Map>().map((e) {
         final item = Map<String, dynamic>.from(e);
         final id = (item['id'] ?? item['_id'])?.toString();
-        final title = item['title'] as String? ?? item['subject'] as String? ?? item['notes'] as String? ?? 'Untitled Activity';
-        final dueDate = item['dueDate'] as String? ?? item['due_date'] as String? ?? item['scheduledAt'] as String? ?? item['createdAt'] as String? ?? '8/11/2026';
-        final priority = item['priority'] as String? ?? 'None';
-        final status = item['status'] as String? ?? 'pending';
-        final assignedTo = item['ownerName'] as String? ?? item['assignedTo'] as String? ?? item['creatorName'] as String? ?? 'Admin User';
-        final notes = item['description'] as String? ?? item['notes'] as String? ?? '';
+        final title = (item['title'] ?? item['subject'] ?? item['notes'] ?? 'Untitled task').toString();
+        final dueDate = activityDueLabel(item) ?? '—';
+        final priority = (item['priority'] ?? '').toString();
+        final status = (item['status'] ?? '').toString();
+        final assignedTo = activityAssigneeLabel(item) ?? 'Unassigned';
+        final notes = parseActivityDescription(item['description'] ?? item['notes'] ?? '');
         final taskType = (item['type'] ?? item['taskType'] ?? 'task').toString();
 
         return TaskModel(
@@ -401,6 +469,7 @@ class _TasksScreenState extends State<TasksScreen> {
           assignedTo: assignedTo,
           notes: notes,
           taskType: taskType,
+          queue: item['queue']?.toString() ?? 'None',
           rawMap: item,
         );
       }).toList();
@@ -412,11 +481,25 @@ class _TasksScreenState extends State<TasksScreen> {
           _totalTasks = total;
           _currentPage = resPage;
           _isLoadingTasks = false;
+          _loadedDepartmentId = deptId;
+          // A tick only survives while its task is still on screen, so a
+          // reload, a page change or a deletion cannot leave a selection
+          // pointing at something the user is no longer looking at.
+          final loadedIds = loadedTasks.map((t) => t.id).whereType<String>().toSet();
+          _selectedForDelete.removeWhere((id) => !loadedIds.contains(id));
+          if (_selectedTaskId != null && !loadedIds.contains(_selectedTaskId)) {
+            _selectedTaskId = null;
+          }
         });
+        debugPrint('[TasksScreen] loaded ${loadedTasks.length} of $total task(s) '
+            'for department $deptId (page $resPage)');
+        _logStatusMismatch(loadedTasks);
       }
     } catch (e) {
-      debugPrint('[FETCH /api/activities ERROR]: $e');
-      if (mounted) {
+      debugPrint('[FETCH ${ApiConstants.activities} ERROR]: $e');
+      // An error from a request that has already been superseded must not
+      // replace the newer request's state either.
+      if (mounted && requestSeq == _requestSeq) {
         setState(() {
           _isLoadingTasks = false;
           _errorMessage = 'Failed to load tasks. Please check your connection and try again.';
@@ -437,10 +520,256 @@ class _TasksScreenState extends State<TasksScreen> {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Status tabs
+  // ---------------------------------------------------------------------------
+
+  /// The loaded tasks that belong under the selected tab.
+  ///
+  /// `status` is sent to the API as well, so this is normally the whole page.
+  /// It is applied again here because the tab's promise — a completed task
+  /// never shows under Pending — has to hold even if the backend ignores the
+  /// parameter, and it is checked against the status the API itself returned.
+  /// True while the loaded rows belong to a department that is no longer the
+  /// selected one — the gap between the switch and the new response landing.
+  bool get _isShowingOtherDepartment {
+    final loaded = _loadedDepartmentId;
+    if (loaded == null) return false;
+    // The dependency on the provider is already established by
+    // `watchDepartmentChanges`, so this only reads the current value.
+    return loaded != context.read<DepartmentProvider>().selectedDepartmentId;
+  }
+
+  List<TaskModel> get _visibleTasks {
+    // Rows belonging to the previous department are never rendered, not even
+    // for the frame between the switch and the reload.
+    if (_isShowingOtherDepartment) return const [];
+    if (_statusTab == TaskStatusTab.all) return List.unmodifiable(_tasks);
+    return _tasks
+        .where((t) => taskStatusMatchesTab(t.status, _statusTab, statusOptions: _taskStatuses))
+        .toList();
+  }
+
+  /// Reports rows the API returned that the selected tab does not accept —
+  /// the signal that the backend ignored the `status` it was sent.
+  void _logStatusMismatch(List<TaskModel> loaded) {
+    if (_statusTab == TaskStatusTab.all || loaded.isEmpty) return;
+    final dropped = loaded
+        .where((t) => !taskStatusMatchesTab(t.status, _statusTab, statusOptions: _taskStatuses))
+        .toList();
+    if (dropped.isEmpty) return;
+    debugPrint('[TasksScreen] the ${_statusTab.name} tab hid ${dropped.length} of '
+        '${loaded.length} loaded rows, with statuses ${dropped.map((t) => t.status).toSet()} — '
+        'the API returned rows the status filter did not ask for.');
+  }
+
+  void _onStatusTabChanged(TaskStatusTab tab) {
+    if (_statusTab == tab) return;
+    setState(() {
+      _statusTab = tab;
+      // Ticks are dropped so a delete can only ever act on what is on screen.
+      _selectedForDelete.clear();
+    });
+    _fetchTasks(resetPage: true);
+  }
+
+  String get _emptyListMessage {
+    switch (_statusTab) {
+      case TaskStatusTab.pending:
+        return 'No pending tasks.';
+      case TaskStatusTab.completed:
+        return 'No completed tasks.';
+      case TaskStatusTab.all:
+        return 'No tasks found.';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selection and deletion
+  // ---------------------------------------------------------------------------
+
+  void _toggleSelection(TaskModel task) {
+    final id = task.id;
+    if (id == null || id.isEmpty) {
+      debugPrint('[TasksScreen] "${task.title}" has no id and cannot be selected for deletion');
+      return;
+    }
+    setState(() {
+      if (!_selectedForDelete.remove(id)) _selectedForDelete.add(id);
+    });
+  }
+
+  /// The ticked tasks that are actually on screen under the current tab.
+  List<TaskModel> get _tasksToDelete => _visibleTasks
+      .where((t) => t.id != null && _selectedForDelete.contains(t.id))
+      .toList();
+
+  Future<void> _confirmAndDeleteSelected() async {
+    final targets = _tasksToDelete;
+    if (targets.isEmpty || _isDeleting) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          targets.length == 1 ? 'Delete task' : 'Delete ${targets.length} tasks',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          targets.length == 1
+              ? 'Are you sure you want to delete "${targets.single.title}"? This cannot be undone.'
+              : 'Are you sure you want to delete these ${targets.length} tasks? This cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeleting = true);
+
+    final result = await deleteActivities(targets.map((t) => t.id!));
+    final failed = result.failed;
+    final deletedCount = result.deleted.length;
+
+    if (!mounted) return;
+
+    setState(() {
+      _isDeleting = false;
+      // Only what the backend actually removed loses its tick; anything that
+      // failed stays selected and on screen so it can be retried.
+      _selectedForDelete
+        ..clear()
+        ..addAll(failed);
+    });
+
+    if (deletedCount > 0) {
+      // The current page and every filter are kept, so the list comes back
+      // under the same tab the user was working in.
+      await _fetchTasks(page: _currentPage);
+      if (mounted && _tasks.isEmpty && _currentPage > 1) {
+        await _fetchTasks(page: _currentPage - 1);
+      }
+    }
+
+    if (!mounted) return;
+
+    if (failed.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            deletedCount == 1 ? 'Task deleted successfully' : '$deletedCount tasks deleted successfully',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF00A884),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            deletedCount > 0
+                ? '$deletedCount deleted, ${failed.length} could not be deleted. Please try again.'
+                : 'Could not delete ${failed.length == 1 ? 'the task' : 'the selected tasks'}. Please try again.',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _markSelectedAsCompleted() async {
+    final targets = _tasksToDelete;
+    if (targets.isEmpty || _isCompleting || _isDeleting) return;
+
+    setState(() => _isCompleting = true);
+
+    final apiService = ApiService();
+    int completedCount = 0;
+    int failedCount = 0;
+
+    for (final task in targets) {
+      if (task.id == null || task.id!.isEmpty) continue;
+      try {
+        await apiService.put(
+          '${ApiConstants.activities}/${task.id}',
+          data: {'status': 'completed'},
+        );
+        completedCount++;
+      } catch (e) {
+        debugPrint('[Mark completed PUT error for ${task.id}]: $e');
+        try {
+          await apiService.patch(
+            '${ApiConstants.activities}/${task.id}',
+            data: {'status': 'completed'},
+          );
+          completedCount++;
+        } catch (patchErr) {
+          debugPrint('[Mark completed PATCH error for ${task.id}]: $patchErr');
+          failedCount++;
+        }
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _isCompleting = false;
+      _selectedForDelete.clear();
+    });
+
+    if (completedCount > 0) {
+      await _fetchTasks(page: _currentPage);
+    }
+
+    if (!mounted) return;
+
+    if (failedCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            completedCount == 1 ? 'Task completed successfully' : '$completedCount tasks marked as completed',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF00A884),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            completedCount > 0
+                ? '$completedCount completed, $failedCount could not be updated.'
+                : 'Failed to update selected tasks. Please try again.',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
 
 
   @override
   Widget build(BuildContext context) {
+    final visibleTasks = _visibleTasks;
     final totalPages = _totalTasks == 0 ? 1 : ((_totalTasks - 1) ~/ _pageSize) + 1;
     final startIndex = _totalTasks == 0 ? 0 : (_currentPage - 1) * _pageSize + 1;
     final endIndex = math.min(_currentPage * _pageSize, _totalTasks);
@@ -531,16 +860,12 @@ class _TasksScreenState extends State<TasksScreen> {
               child: Column(
                 children: [
                   SearchAndFilterBar(
+                    filterBeforeSearch: true,
                     searchHint: 'Search tasks...',
-                    allLabel: 'All Tasks',
-                    mineLabel: 'Mine Tasks',
+                    // The list is scoped by the All / Pending / Completed tabs
+                    // below, so the All / Mine pill is not shown here.
+                    showSegments: false,
                     onSearchChanged: _onSearchChanged,
-                    onSegmentChanged: (index) {
-                      setState(() {
-                        _selectedSegment = index;
-                      });
-                      _fetchTasks(resetPage: true);
-                    },
                     isFilterActive: _selectedCreateDate != 'Create date' ||
                         _selectedStatusFilter != 'Status' ||
                         _selectedPriorityFilter != 'Priority' ||
@@ -568,6 +893,9 @@ class _TasksScreenState extends State<TasksScreen> {
                       _fetchTasks(resetPage: true);
                     },
                   ),
+
+                  const SizedBox(height: 10),
+                  _buildStatusTabs(),
 
                   if (_showFiltersRow)
                     TaskInlineFilterSection(
@@ -629,12 +957,16 @@ class _TasksScreenState extends State<TasksScreen> {
                   ),
                   child: Column(
                     children: [
+                      if (_tasksToDelete.isNotEmpty) _buildSelectionBar(),
                       Expanded(
                         child: AppRefreshIndicator(
                           onRefresh: () async {
                             await _fetchTasks(resetPage: true);
                           },
-                          child: _isLoadingTasks
+                          // A department switch shows the spinner straight
+                          // away rather than an empty list, because the reload
+                          // for the new department is about to go out.
+                          child: _isLoadingTasks || _isShowingOtherDepartment
                               ? const Center(
                                   child: CircularProgressIndicator(
                                     color: Color(0xFF00A884),
@@ -688,7 +1020,7 @@ class _TasksScreenState extends State<TasksScreen> {
                                         ),
                                       ],
                                     )
-                                  : _tasks.isEmpty
+                                  : visibleTasks.isEmpty
                                       ? ListView(
                                           physics: const AlwaysScrollableScrollPhysics(
                                               parent: BouncingScrollPhysics()),
@@ -696,7 +1028,7 @@ class _TasksScreenState extends State<TasksScreen> {
                                             const SizedBox(height: 120),
                                             Center(
                                               child: Text(
-                                                'No tasks found.',
+                                                _emptyListMessage,
                                                 style: GoogleFonts.poppins(
                                                   fontSize: 13,
                                                   color: const Color(0xFF64748B),
@@ -709,9 +1041,9 @@ class _TasksScreenState extends State<TasksScreen> {
                                           physics: const AlwaysScrollableScrollPhysics(
                                               parent: BouncingScrollPhysics()),
                                           padding: const EdgeInsets.symmetric(horizontal: 14),
-                                          itemCount: _tasks.length,
+                                          itemCount: visibleTasks.length,
                                           itemBuilder: (context, index) {
-                                            final task = _tasks[index];
+                                            final task = visibleTasks[index];
                                             return _buildTaskCard(task);
                                           },
                                         ),
@@ -723,27 +1055,34 @@ class _TasksScreenState extends State<TasksScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            RichText(
-                              text: TextSpan(
-                                text: _totalTasks == 0
-                                    ? '0-0 of '
-                                    : '$startIndex-$endIndex of ',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: const Color(0xFF64748B),
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: '$_totalTasks',
-                                    style: GoogleFonts.poppins(
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF1E293B),
-                                    ),
+                            // The range gives way to the pager instead of
+                            // pushing it past the edge of the row.
+                            Flexible(
+                              child: RichText(
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                text: TextSpan(
+                                  text: _totalTasks == 0
+                                      ? '0-0 of '
+                                      : '$startIndex-$endIndex of ',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: const Color(0xFF64748B),
                                   ),
-                                ],
+                                  children: [
+                                    TextSpan(
+                                      text: '$_totalTasks',
+                                      style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 TextButton.icon(
                                   onPressed: _currentPage > 1 && !_isLoadingTasks
@@ -812,6 +1151,169 @@ class _TasksScreenState extends State<TasksScreen> {
 
 
 
+  /// All | Pending | Completed.
+  Widget _buildStatusTabs() {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Row(
+              children: [
+                _buildStatusTabItem(TaskStatusTab.all, 'All'),
+                _buildStatusTabItem(TaskStatusTab.pending, 'Pending'),
+                _buildStatusTabItem(TaskStatusTab.completed, 'Completed'),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusTabItem(TaskStatusTab tab, String label) {
+    final isSelected = _statusTab == tab;
+    return Expanded(
+      child: GestureDetector(
+        onTap: _isDeleting ? null : () => _onStatusTabChanged(tab),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    )
+                  ]
+                : [],
+          ),
+          child: Center(
+            // The app scales its text, so "Completed" is allowed to shrink
+            // inside its third of the row rather than overflow it.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? const Color(0xFF111827) : const Color(0xFF6B7280),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Shown only while something is ticked.
+  Widget _buildSelectionBar() {
+    final count = _tasksToDelete.length;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Color(0xFFE6F4F1),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: (_isDeleting || _isCompleting) ? null : () => setState(_selectedForDelete.clear),
+            icon: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF64748B)),
+            tooltip: 'Clear selection',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              count == 1 ? '1 selected' : '$count selected',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF1E293B),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          ElevatedButton.icon(
+            onPressed: (_isDeleting || _isCompleting) ? null : _markSelectedAsCompleted,
+            icon: _isCompleting
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.white),
+            label: Text(
+              'Complete',
+              style: GoogleFonts.poppins(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A884),
+              disabledBackgroundColor: const Color(0xFF00A884),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+          ),
+          const SizedBox(width: 6),
+          ElevatedButton.icon(
+            onPressed: (_isDeleting || _isCompleting) ? null : _confirmAndDeleteSelected,
+            icon: _isDeleting
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.delete_outline_rounded, size: 14, color: Colors.white),
+            label: Text(
+              'Delete',
+              style: GoogleFonts.poppins(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              disabledBackgroundColor: const Color(0xFFEF4444),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Color _getPriorityColor(String priority) {
     final match = _taskPriorities.firstWhere(
       (p) => p.value.toLowerCase() == priority.toLowerCase() || p.label.toLowerCase() == priority.toLowerCase(),
@@ -835,22 +1337,59 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  /// A small rounded label — the status and priority the API returned.
+  Widget _buildTaskChip(String text, {required Color background, required Color foreground}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          color: foreground,
+        ),
+      ),
+    );
+  }
+
   Widget _buildTaskCard(TaskModel task) {
-    final bool isCompleted = task.status.toLowerCase() == 'completed';
+    final bool isCompleted =
+        taskStatusMatchesTab(task.status, TaskStatusTab.completed, statusOptions: _taskStatuses);
     final bool isSelected = task.id != null && task.id == _selectedTaskId;
+    final bool isTicked = task.id != null && _selectedForDelete.contains(task.id);
+    final bool isSelecting = _selectedForDelete.isNotEmpty;
+
+    // The contact, company or deal this task hangs off, when the row names one.
+    final String? relatedRecord =
+        task.rawMap == null ? null : activityRelatedRecordLabel(task.rawMap!);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
+        color: isTicked
+            ? const Color(0xFFFFF1F0)
+            : (isSelected ? const Color(0xFFE6F4F1) : Colors.white),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isSelected ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
-          width: isSelected ? 1.5 : 1,
+          color: isTicked
+              ? const Color(0xFFEF4444)
+              : (isSelected ? const Color(0xFF00A884) : const Color(0xFFCBD5E1)),
+          width: isTicked || isSelected ? 1.5 : 1,
         ),
       ),
       child: InkWell(
         onTap: () async {
+          // While a selection is being built, tapping a card adds to it rather
+          // than navigating away from it.
+          if (isSelecting) {
+            _toggleSelection(task);
+            return;
+          }
+
           // Mark this task as the selected one before opening its details.
           setState(() => _selectedTaskId = task.id);
 
@@ -940,65 +1479,47 @@ class _TasksScreenState extends State<TasksScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Square Checkbox icon (Image 1 style)
+              // Selection checkbox — ticking tasks is what the Delete button
+              // acts on.
               GestureDetector(
-                onTap: () {
-                  setState(() {
-                    final newStatus = isCompleted ? 'pending' : 'completed';
-                    final index = _tasks.indexOf(task);
-                    if (index != -1) {
-                      _tasks[index] = TaskModel(
-                        id: task.id,
-                        title: task.title,
-                        dueDate: task.dueDate,
-                        priority: task.priority,
-                        status: newStatus,
-                        assignedTo: task.assignedTo,
-                        notes: task.notes,
-                        taskType: task.taskType,
-                        queue: task.queue,
-                        activityDateText: task.activityDateText,
-                        reminderText: task.reminderText,
-                        rawMap: task.rawMap,
-                      );
-                    }
-                  });
-                },
+                onTap: () => _toggleSelection(task),
+                behavior: HitTestBehavior.opaque,
                 child: Container(
                   width: 24,
                   height: 24,
                   margin: const EdgeInsets.only(top: 2, right: 12),
                   decoration: BoxDecoration(
-                    color: isCompleted ? const Color(0xFFE6F4F1) : Colors.white,
+                    color: isTicked ? const Color(0xFFEF4444) : Colors.white,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                      color: isCompleted ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
+                      color: isTicked ? const Color(0xFFEF4444) : const Color(0xFFCBD5E1),
                       width: 1.5,
                     ),
                   ),
-                  child: isCompleted
-                      ? const Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: Color(0xFF00A884),
-                        )
-                      : (task.taskType != null && !task.taskType!.toLowerCase().contains('task'))
-                          ? Icon(
-                              task.taskType!.toLowerCase().contains('note')
-                                  ? Icons.description_outlined
-                                  : (task.taskType!.toLowerCase().contains('email')
-                                      ? Icons.mail_outline_rounded
-                                      : (task.taskType!.toLowerCase().contains('call')
-                                          ? Icons.phone_outlined
-                                          : (task.taskType!.toLowerCase().contains('meeting')
-                                              ? Icons.videocam_outlined
-                                              : Icons.task_alt_rounded))),
-                              size: 15,
-                              color: const Color(0xFF00A884),
-                            )
-                          : null,
+                  child: isTicked
+                      ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+                      : null,
                 ),
               ),
+
+              // Activity type icon, previously shown inside the box above.
+              if (task.taskType != null && !task.taskType!.toLowerCase().contains('task'))
+                Padding(
+                  padding: const EdgeInsets.only(top: 3, right: 8),
+                  child: Icon(
+                    task.taskType!.toLowerCase().contains('note')
+                        ? Icons.description_outlined
+                        : (task.taskType!.toLowerCase().contains('email')
+                            ? Icons.mail_outline_rounded
+                            : (task.taskType!.toLowerCase().contains('call')
+                                ? Icons.phone_outlined
+                                : (task.taskType!.toLowerCase().contains('meeting')
+                                    ? Icons.videocam_outlined
+                                    : Icons.task_alt_rounded))),
+                    size: 16,
+                    color: const Color(0xFF00A884),
+                  ),
+                ),
 
               // Title and Due / Priority / Assigned Info
               Expanded(
@@ -1015,7 +1536,12 @@ class _TasksScreenState extends State<TasksScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Row(
+                    // Wrap, not Row: a long due date and the status chip move
+                    // onto a second line instead of overflowing the card.
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           'Due: ${task.dueDate}',
@@ -1024,11 +1550,42 @@ class _TasksScreenState extends State<TasksScreen> {
                             color: const Color(0xFF475569),
                           ),
                         ),
+                        if (task.status.trim().isNotEmpty)
+                          // The status exactly as the API returned it, so what
+                          // the tabs filter on stays visible on the card.
+                          _buildTaskChip(
+                            task.status,
+                            background: isCompleted ? const Color(0xFFE6F4F1) : const Color(0xFFF1F5F9),
+                            foreground: isCompleted ? const Color(0xFF00A884) : const Color(0xFF64748B),
+                          ),
+                        if (task.priority.trim().isNotEmpty &&
+                            task.priority.trim().toLowerCase() != 'none')
+                          _buildTaskChip(
+                            task.priority,
+                            background: _getPriorityColor(task.priority).withValues(alpha: 0.12),
+                            foreground: _getPriorityColor(task.priority),
+                          ),
                       ],
                     ),
+                    if (parseActivityDescription(task.notes).trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        parseActivityDescription(task.notes).trim(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 2),
                     Text(
-                      'Assigned: ${task.assignedTo}',
+                      relatedRecord == null
+                          ? 'Assigned: ${task.assignedTo}'
+                          : 'Assigned: ${task.assignedTo}  ·  $relatedRecord',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 11.5,
                         color: const Color(0xFF94A3B8),

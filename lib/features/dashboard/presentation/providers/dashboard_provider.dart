@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
+import '../../../../core/network/network_exception.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/storage/follow_up_link_storage.dart';
+import '../../../../core/utils/department_scope.dart';
+import '../../../../core/utils/follow_up_task_request.dart';
 import '../../../authentication/data/models/team_member_model.dart';
 import '../../data/models/activity_stats_model.dart';
 import '../../data/models/dashboard_unified_model.dart';
@@ -29,9 +33,31 @@ class TaskWorkGroup {
 
 class DashboardProvider extends ChangeNotifier {
   final DashboardRepository _repository;
+  final ApiService _apiService;
 
-  DashboardProvider({DashboardRepository? repository})
-      : _repository = repository ?? DashboardRepositoryImpl();
+  /// Which department every in-flight request was issued for.
+  ///
+  /// The Dashboard fires seven requests at once and the user can change
+  /// department while they are in the air. Without this, whichever answer came
+  /// back last won — so a slow request for the department they just left could
+  /// repaint the Dashboard with its records under the new department's name.
+  final DepartmentRequestGuard _guard = DepartmentRequestGuard();
+
+  // One key per section, so reloading one does not discard another's answer.
+  static const String _statsKey = 'stats';
+  static const String _feedKey = 'feed';
+  static const String _reportsKey = 'reports';
+  static const String _tasksKey = 'tasks';
+  static const String _leaderboardKey = 'leaderboard';
+  static const String _contactCountsKey = 'contactCounts';
+  static const String _callMeetingKey = 'callAndMeeting';
+
+  DashboardProvider({DashboardRepository? repository, ApiService? apiService})
+      : _repository = repository ?? DashboardRepositoryImpl(),
+        _apiService = apiService ?? ApiService();
+
+  /// The department the Dashboard is currently showing, as last requested.
+  String get activeDepartmentId => _guard.activeDepartmentId;
 
   ActivityStatsModel? _stats;
   DashboardUnifiedResponseModel? _unifiedFeed;
@@ -41,6 +67,8 @@ class DashboardProvider extends ChangeNotifier {
   List<ContactOwnerCountItem> _contactOwnerCounts = [];
   List<CallAndMeetingRepItem> _callAndMeetingTotals = [];
   String _leaderboardSubtitleLabel = 'LAST 7 DAYS';
+  String? _currentOwnerId;
+  String? _currentDepartmentId;
 
   bool _isLoadingStats = false;
   bool _isLoadingFeed = false;
@@ -59,7 +87,18 @@ class DashboardProvider extends ChangeNotifier {
   ActivityStatsModel? get stats => _stats;
   DashboardUnifiedResponseModel? get unifiedFeed => _unifiedFeed;
   Map<String, dynamic>? get reportsDashboardData => _reportsDashboardData;
-  List<DashboardActivityItem> get activities => _unifiedFeed?.data ?? [];
+  List<DashboardActivityItem> get activities {
+    final items = _unifiedFeed?.data ?? [];
+    if (_currentOwnerId != null && _currentOwnerId!.isNotEmpty) {
+      return items.where((item) {
+        if (item.ownerId != null && item.ownerId!.isNotEmpty && item.ownerId != _currentOwnerId) {
+          return false;
+        }
+        return true;
+      }).toList();
+    }
+    return items;
+  }
   List<Map<String, dynamic>> get dashboardTasks => _dashboardTasks;
   List<ActivityLeaderboardItem> get activityLeaderboard => _activityLeaderboard;
   List<ContactOwnerCountItem> get contactOwnerCounts => _contactOwnerCounts;
@@ -97,7 +136,20 @@ class DashboardProvider extends ChangeNotifier {
     List<TeamMemberModel>? teamMembers,
     List<Map<String, dynamic>>? reportUsers,
   }) async {
-    // Clear previous state to prevent showing stale data while loading new department
+    _currentOwnerId = ownerId;
+    _currentDepartmentId = departmentId;
+
+    debugPrint('==================================================');
+    debugPrint('[DASHBOARD PROVIDER DATA LOAD]');
+    debugPrint('Mode: ${ownerId != null && ownerId.isNotEmpty ? "MY_WORK" : "TEAM"}');
+    debugPrint('Logged-in / Owner ID: ${ownerId ?? 'NONE (TEAM MODE)'}');
+    debugPrint('Selected Department Name: ${departmentName ?? 'N/A'}');
+    debugPrint('Selected Department ID: ${departmentId ?? 'N/A'}');
+    debugPrint('Dashboard Start Date: ${startDate ?? 'N/A'}');
+    debugPrint('Dashboard End Date: ${endDate ?? 'N/A'}');
+    debugPrint('==================================================');
+
+    // Clear previous state to prevent showing stale data while loading new department/mode
     _stats = null;
     _unifiedFeed = null;
     _reportsDashboardData = null;
@@ -121,7 +173,7 @@ class DashboardProvider extends ChangeNotifier {
         endDate: endDate,
       ),
       fetchReportsDashboardsDefault(
-          departmentId: departmentId, departmentName: departmentName),
+          departmentId: departmentId, ownerId: ownerId, departmentName: departmentName),
       fetchDashboardTasks(
         ownerId: ownerId,
         departmentId: departmentId,
@@ -148,6 +200,7 @@ class DashboardProvider extends ChangeNotifier {
     String? ownerId,
     String? departmentId,
   }) async {
+    final ticket = _guard.begin(_tasksKey, departmentId);
     _isLoadingTasks = true;
     _tasksError = null;
     notifyListeners();
@@ -161,18 +214,24 @@ class DashboardProvider extends ChangeNotifier {
         ownerId: ownerId,
         departmentId: departmentId,
       );
+      if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
       _dashboardTasks = fetched;
     } catch (e) {
       debugPrint('[DashboardProvider fetchDashboardTasks Error]: $e');
+      if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
       _tasksError = e.toString();
     } finally {
-      _isLoadingTasks = false;
-      notifyListeners();
+      // A superseded request must not clear the loading flag either — the
+      // request that replaced it is still running.
+      if (_guard.mayApply(_tasksKey, ticket, departmentId)) {
+        _isLoadingTasks = false;
+        notifyListeners();
+      }
     }
   }
 
   /// Reusable date + status task classification mechanism.
-  /// Uses [scheduledAt] (fallback to dueDate), converts UTC to local timezone,
+  /// Uses [scheduledAt] (fallback to dueDate/createdAt), converts UTC to local timezone,
   /// and compares calendar date with [date].
   TaskWorkGroup getTasksForDate(DateTime date) {
     final targetYear = date.year;
@@ -182,11 +241,83 @@ class DashboardProvider extends ChangeNotifier {
     final List<Map<String, dynamic>> pending = [];
     final List<Map<String, dynamic>> completed = [];
 
-    for (final task in _dashboardTasks) {
+    // Combine candidate tasks from _dashboardTasks AND _unifiedFeed.data
+    final List<Map<String, dynamic>> candidateTasks = [..._dashboardTasks];
+    final Set<String> existingIds = candidateTasks
+        .map((t) => (t['id'] ?? t['_id'])?.toString())
+        .whereType<String>()
+        .toSet();
+
+    if (_unifiedFeed != null) {
+      for (final act in _unifiedFeed!.data) {
+        final actType = (act.type ?? '').toLowerCase();
+        if (actType == 'task' || actType == 'to-do' || actType == 'todo') {
+          if (!existingIds.contains(act.id)) {
+            existingIds.add(act.id);
+            candidateTasks.add({
+              'id': act.id,
+              'title': act.title,
+              'type': act.type,
+              'status': act.status,
+              'scheduledAt': act.dueDate ?? act.createdAt,
+              'dueDate': act.dueDate,
+              'createdAt': act.createdAt,
+              'description': act.description,
+              'ownerId': act.ownerId,
+              'ownerName': act.ownerName,
+            });
+          }
+        }
+      }
+    }
+
+    int totalCandidates = candidateTasks.length;
+    int deptMatchedCount = 0;
+    int ownerMatchedCount = 0;
+    int finalMatchedCount = 0;
+
+    for (final task in candidateTasks) {
+      // 1. Department Filter Check
+      final taskDeptId = (task['departmentId'] ??
+              task['department_id'] ??
+              (task['department'] is Map ? task['department']['id'] : null) ??
+              (task['department'] is Map ? task['department']['_id'] : null))
+          ?.toString()
+          .trim();
+      bool deptMatch = true;
+      if (_currentDepartmentId != null && _currentDepartmentId!.isNotEmpty) {
+        if (taskDeptId != null && taskDeptId.isNotEmpty && taskDeptId != _currentDepartmentId) {
+          deptMatch = false;
+        }
+      }
+      if (deptMatch) deptMatchedCount++;
+
+      // 2. Owner Filter Check (for MY WORK mode)
+      bool ownerMatch = true;
+      if (_currentOwnerId != null && _currentOwnerId!.isNotEmpty) {
+        final taskOwnerId = (task['ownerId'] ??
+                task['owner_id'] ??
+                (task['owner'] is Map ? task['owner']['id'] : null) ??
+                (task['owner'] is Map ? task['owner']['_id'] : null) ??
+                task['userId'] ??
+                task['user_id'])
+            ?.toString()
+            .trim();
+        if (taskOwnerId != null && taskOwnerId.isNotEmpty && taskOwnerId != _currentOwnerId) {
+          ownerMatch = false;
+        }
+      }
+      if (ownerMatch) ownerMatchedCount++;
+
+      if (!deptMatch || !ownerMatch) continue;
+      finalMatchedCount++;
+
       final rawScheduled = task['scheduledAt'] ??
           task['scheduled_at'] ??
           task['dueDate'] ??
-          task['due_date'];
+          task['due_date'] ??
+          task['createdAt'] ??
+          task['created_at'];
 
       if (rawScheduled == null) continue;
 
@@ -202,12 +333,18 @@ class DashboardProvider extends ChangeNotifier {
 
       if (dt == null) continue;
 
-      // Convert UTC timestamp to local timezone before calendar date comparison
+      final utcDt = dt.toUtc();
       final localDt = dt.isUtc ? dt.toLocal() : dt;
 
-      if (localDt.year == targetYear &&
+      final matchesLocal = (localDt.year == targetYear &&
           localDt.month == targetMonth &&
-          localDt.day == targetDay) {
+          localDt.day == targetDay);
+
+      final matchesUtc = (utcDt.year == targetYear &&
+          utcDt.month == targetMonth &&
+          utcDt.day == targetDay);
+
+      if (matchesLocal || matchesUtc) {
         final statusVal = (task['status'] ?? 'pending').toString().trim().toLowerCase();
         if (statusVal == 'completed') {
           completed.add(task);
@@ -217,26 +354,241 @@ class DashboardProvider extends ChangeNotifier {
       }
     }
 
+    debugPrint('========== DASHBOARD MY WORK DEBUG ==========');
+    debugPrint('Mode: ${_currentOwnerId != null && _currentOwnerId!.isNotEmpty ? "MY_WORK" : "TEAM"}');
+    debugPrint('Selected Department ID: ${_currentDepartmentId ?? 'NONE'}');
+    debugPrint('Logged-in User ID: ${_currentOwnerId ?? 'NONE (TEAM MODE)'}');
+    debugPrint('Target Date: ${date.toIso8601String()}');
+    debugPrint('Total Candidates: $totalCandidates');
+    debugPrint('Department Matching Records: $deptMatchedCount');
+    debugPrint('Owner Matching Records: $ownerMatchedCount');
+    debugPrint('Final My Work Records: $finalMatchedCount');
+    debugPrint('Pending Tasks for Date: ${pending.length}');
+    debugPrint('Completed Tasks for Date: ${completed.length}');
+    debugPrint('==============================================');
+
     return TaskWorkGroup(pendingTasks: pending, completedTasks: completed);
   }
 
-  /// Toggles task status between pending and completed.
-  Future<void> toggleTaskStatus(String taskId, String newStatus) async {
+  /// The follow-up already created for a given task in this session, so a
+  /// second Create task — a double tap, or a retry after a slow response —
+  /// hands back the task that exists instead of posting another one.
+  final Map<String, Map<String, dynamic>> _followUpsCreated = {};
+
+  /// Tasks whose follow-up is mid-flight right now.
+  final Set<String> _followUpsInFlight = {};
+
+  /// Moves a task between pending and completed through the API.
+  ///
+  /// The row on screen is moved first so the checkbox answers immediately, but
+  /// a request that fails puts it back the way it was and throws: a task that
+  /// the server did not complete must never be left looking completed, and the
+  /// caller needs the failure to show it and to hold back the follow-up popup.
+  ///
+  /// Answers with the task as it now stands — the server's own row when it
+  /// sent one back, which is what carries the real `completedAt`.
+  ///
+  /// [departmentId] scopes the write to the department the user is working in,
+  /// the same way every other department-scoped call in the app does. Leave it
+  /// out and the API falls back to the department in the access token.
+  Future<Map<String, dynamic>> setTaskStatus(
+    String taskId,
+    String newStatus, {
+    String? departmentId,
+  }) async {
+    final index = _dashboardTasks.indexWhere(
+      (t) => (t['id'] ?? t['_id'])?.toString() == taskId,
+    );
+    final previous = index == -1 ? null : _dashboardTasks[index];
+
+    if (previous != null) {
+      _dashboardTasks[index] = Map<String, dynamic>.from(previous)
+        ..['status'] = newStatus;
+      notifyListeners();
+    }
+
     try {
-      // Optimistically update local state
-      final index = _dashboardTasks.indexWhere(
-        (t) => (t['id'] ?? t['_id'])?.toString() == taskId,
-      );
+      final data = await _writeTaskStatus(taskId, newStatus, departmentId);
+
+      final merged = <String, dynamic>{
+        ...?previous,
+        ...data,
+        'status': (data['status'] ?? newStatus).toString(),
+      };
       if (index != -1) {
-        _dashboardTasks[index] = Map<String, dynamic>.from(_dashboardTasks[index])
-          ..['status'] = newStatus;
+        _dashboardTasks[index] = merged;
+        notifyListeners();
+      }
+      return merged;
+    } catch (e) {
+      debugPrint('[DashboardProvider setTaskStatus Error]: $e');
+      if (previous != null && index != -1) {
+        _dashboardTasks[index] = previous;
+        notifyListeners();
+      }
+      rethrow;
+    }
+  }
+
+  /// Writes the status and returns whatever activity object came back.
+  ///
+  /// Completing goes through `PATCH /activities/:id/complete`, the endpoint
+  /// built for it, so the server stamps the completion time itself. Where that
+  /// route is not deployed it falls back to the general update, which the API
+  /// documents as accepting `status` and `completedAt` together.
+  Future<Map<String, dynamic>> _writeTaskStatus(
+    String taskId,
+    String newStatus,
+    String? departmentId,
+  ) async {
+    final path = '${ApiConstants.activities}/$taskId';
+    final scope = departmentQuery(departmentId);
+
+    if (newStatus == 'completed') {
+      try {
+        final res = await _apiService.patch(
+          '$path/complete',
+          queryParameters: scope,
+        );
+        return _unwrapActivity(res.data);
+      } on NetworkException catch (e) {
+        if (e.statusCode != 404 && e.statusCode != 405) rethrow;
+        debugPrint('[DashboardProvider] /complete unavailable, updating status directly');
+      }
+      final res = await _apiService.patch(
+        path,
+        queryParameters: scope,
+        data: {
+          'status': 'completed',
+          'completedAt': DateTime.now().toUtc().toIso8601String(),
+        },
+      );
+      return _unwrapActivity(res.data);
+    }
+
+    final res = await _apiService.patch(
+      path,
+      queryParameters: scope,
+      data: {'status': newStatus},
+    );
+    return _unwrapActivity(res.data);
+  }
+
+  /// Creates the follow-up to [original], due at [scheduledAt].
+  ///
+  /// The task is a real one: `POST /api/activities`, keeping the original's
+  /// title, owner, priority, queue, reminder and every record it was linked
+  /// to.
+  ///
+  /// [departmentId] is the department the user is working in — whichever one
+  /// that is — and it goes on the request as `departmentId` / `department_id`,
+  /// the pair every department-scoped call in this app sends, on top of the
+  /// headers `AuthInterceptor` adds. It is checked against
+  /// [selectedDepartmentId] first, so a department switched while the popup was
+  /// open abandons the create rather than filing it under the wrong one.
+  ///
+  /// Throws when the create fails. The original task stays completed either
+  /// way; nothing about it is rolled back.
+  Future<Map<String, dynamic>> createFollowUpTask({
+    required Map<String, dynamic> original,
+    required DateTime scheduledAt,
+    required String departmentId,
+    required String selectedDepartmentId,
+  }) async {
+    if (departmentId != selectedDepartmentId) {
+      throw StateError(
+        'The department changed while the follow-up was being set up, '
+        'so it was not created.',
+      );
+    }
+
+    final originalId = activityId(original);
+    if (originalId == null) {
+      throw StateError('This task has no id, so a follow-up cannot be linked to it.');
+    }
+
+    final alreadyCreated = _followUpsCreated[originalId];
+    if (alreadyCreated != null) return alreadyCreated;
+    if (!_followUpsInFlight.add(originalId)) {
+      throw StateError('A follow-up for this task is already being created.');
+    }
+
+    try {
+      final payload = buildFollowUpTaskPayload(
+        original: original,
+        scheduledAt: scheduledAt,
+      );
+      final scope = departmentQuery(departmentId);
+      debugPrint('[POST ${ApiConstants.activities} FOLLOW-UP]: '
+          'department=${departmentId.isEmpty ? '(from token)' : departmentId} '
+          'payload=$payload');
+
+      final res = await _apiService.post(
+        ApiConstants.activities,
+        queryParameters: scope,
+        data: payload,
+      );
+      final created = _unwrapActivity(res.data);
+      final createdId = activityId(created);
+
+      if (createdId != null) {
+        _followUpsCreated[originalId] = created;
+        await _recordFollowUpLink(
+          originalId: originalId,
+          followUpId: createdId,
+          departmentId: departmentId,
+        );
+      }
+
+      // Show it without waiting for the next fetch; the refresh that follows
+      // replaces it with the server's own copy.
+      if (created.isNotEmpty) {
+        _dashboardTasks = [..._dashboardTasks, created];
         notifyListeners();
       }
 
-      await ApiService().patch('/activities/$taskId', data: {'status': newStatus});
-    } catch (e) {
-      debugPrint('[DashboardProvider toggleTaskStatus Error]: $e');
+      return created;
+    } finally {
+      _followUpsInFlight.remove(originalId);
     }
+  }
+
+  /// Ties the follow-up back to the task it came from.
+  ///
+  /// The activities API has no parent field, so the link goes on as a tag,
+  /// which is the one place the server will hold it. A tag that will not save
+  /// is not worth failing a created task over — the local copy still carries
+  /// the link — so it is logged and left.
+  Future<void> _recordFollowUpLink({
+    required String originalId,
+    required String followUpId,
+    required String departmentId,
+  }) async {
+    await FollowUpLinkStorage.link(
+      originalTaskId: originalId,
+      followUpTaskId: followUpId,
+    );
+
+    try {
+      await _apiService.post(
+        '${ApiConstants.activities}/$followUpId/tags',
+        queryParameters: departmentQuery(departmentId),
+        data: {'tag': followUpTag(originalId)},
+      );
+    } catch (e) {
+      debugPrint('[DashboardProvider follow-up tag not saved]: $e');
+    }
+  }
+
+  /// The activity object out of whichever envelope it arrived in.
+  static Map<String, dynamic> _unwrapActivity(dynamic raw) {
+    if (raw is! Map) return {};
+    final map = Map<String, dynamic>.from(raw);
+    for (final key in ['data', 'activity', 'task']) {
+      final nested = map[key];
+      if (nested is Map) return Map<String, dynamic>.from(nested);
+    }
+    return map;
   }
 
   Future<void> fetchActivityStats({
@@ -245,22 +597,28 @@ class DashboardProvider extends ChangeNotifier {
     String? startDate,
     String? endDate,
   }) async {
+    final ticket = _guard.begin(_statsKey, departmentId);
     _isLoadingStats = true;
     _statsError = null;
     notifyListeners();
 
     try {
-      _stats = await _repository.getActivityStats(
+      final stats = await _repository.getActivityStats(
         ownerId: ownerId,
         departmentId: departmentId,
         startDate: startDate,
         endDate: endDate,
       );
+      if (!_guard.mayApply(_statsKey, ticket, departmentId)) return;
+      _stats = stats;
     } catch (e) {
+      if (!_guard.mayApply(_statsKey, ticket, departmentId)) return;
       _statsError = e.toString();
     } finally {
-      _isLoadingStats = false;
-      notifyListeners();
+      if (_guard.mayApply(_statsKey, ticket, departmentId)) {
+        _isLoadingStats = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -272,12 +630,13 @@ class DashboardProvider extends ChangeNotifier {
     int page = 1,
     int limit = 20,
   }) async {
+    final ticket = _guard.begin(_feedKey, departmentId);
     _isLoadingFeed = true;
     _feedError = null;
     notifyListeners();
 
     try {
-      _unifiedFeed = await _repository.getDashboardUnified(
+      final feed = await _repository.getDashboardUnified(
         ownerId: ownerId,
         departmentId: departmentId,
         startDate: startDate,
@@ -285,18 +644,38 @@ class DashboardProvider extends ChangeNotifier {
         page: page,
         limit: limit,
       );
+      if (!_guard.mayApply(_feedKey, ticket, departmentId)) return;
+      _unifiedFeed = feed;
+
+      final sampleGroup = getTasksForDate(DateTime.tryParse(startDate ?? '') ?? DateTime.now());
+      debugPrint('========== MOBILE DASHBOARD DEBUG ==========');
+      debugPrint('Department Name: ${departmentId == "a1b2c3d4-0000-0000-0000-000000000001" ? "Talent Acquisition (Night)" : (departmentId ?? 'NONE')}');
+      debugPrint('Department ID: ${departmentId ?? 'NONE'}');
+      debugPrint('Start Date: ${startDate ?? 'NONE'}');
+      debugPrint('End Date: ${endDate ?? 'NONE'}');
+      debugPrint('API: ${ApiConstants.activitiesDashboardUnified}');
+      debugPrint('Pending tasks received: ${sampleGroup.pendingCount}');
+      debugPrint('Completed tasks received: ${sampleGroup.completedCount}');
+      debugPrint('=============================================');
     } catch (e) {
+      if (!_guard.mayApply(_feedKey, ticket, departmentId)) return;
       _feedError = e.toString();
     } finally {
-      _isLoadingFeed = false;
-      notifyListeners();
+      if (_guard.mayApply(_feedKey, ticket, departmentId)) {
+        _isLoadingFeed = false;
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> fetchReportsDashboardsDefault({String? departmentId, String? departmentName}) async {
+  Future<void> fetchReportsDashboardsDefault({String? departmentId, String? ownerId, String? departmentName}) async {
+    final ticket = _guard.begin(_reportsKey, departmentId);
     try {
       final repo = MasterDataRepositoryImpl();
-      final data = await repo.getReportsDashboardsDefault(departmentId: departmentId);
+      final data = await repo.getReportsDashboardsDefault(departmentId: departmentId, ownerId: ownerId);
+
+      // The department may have changed while this was in the air.
+      if (!_guard.mayApply(_reportsKey, ticket, departmentId)) return;
 
       // Validate scope against requested department
       final dynamic scope = data['scope'] ?? data['data']?['scope'];
@@ -410,6 +789,7 @@ class DashboardProvider extends ChangeNotifier {
     List<TeamMemberModel>? teamMembers,
     List<Map<String, dynamic>>? reportUsers,
   }) async {
+    final ticket = _guard.begin(_leaderboardKey, departmentId);
     _isLoadingLeaderboard = true;
     _leaderboardError = null;
     if (subtitleLabel != null && subtitleLabel.isNotEmpty) {
@@ -513,6 +893,7 @@ class DashboardProvider extends ChangeNotifier {
       }).toList();
 
       items.sort((a, b) => b.totalCount.compareTo(a.totalCount));
+      if (!_guard.mayApply(_leaderboardKey, ticket, departmentId)) return;
       _activityLeaderboard = items;
 
       debugPrint('[4] Final grouped leaderboard items count: ${items.length}');
@@ -522,10 +903,13 @@ class DashboardProvider extends ChangeNotifier {
       debugPrint('====================================================');
     } catch (e) {
       debugPrint('[DashboardProvider fetchActivityLeaderboard Error]: $e');
+      if (!_guard.mayApply(_leaderboardKey, ticket, departmentId)) return;
       _leaderboardError = e.toString();
     } finally {
-      _isLoadingLeaderboard = false;
-      notifyListeners();
+      if (_guard.mayApply(_leaderboardKey, ticket, departmentId)) {
+        _isLoadingLeaderboard = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -535,6 +919,7 @@ class DashboardProvider extends ChangeNotifier {
     List<TeamMemberModel>? teamMembers,
     List<Map<String, dynamic>>? reportUsers,
   }) async {
+    final ticket = _guard.begin(_contactCountsKey, departmentId);
     _isLoadingContactCounts = true;
     _contactCountsError = null;
     notifyListeners();
@@ -651,13 +1036,17 @@ class DashboardProvider extends ChangeNotifier {
       }).toList();
 
       items.sort((a, b) => b.contactCount.compareTo(a.contactCount));
+      if (!_guard.mayApply(_contactCountsKey, ticket, departmentId)) return;
       _contactOwnerCounts = items;
     } catch (e) {
       debugPrint('[DashboardProvider fetchContactOwnerCounts Error]: $e');
+      if (!_guard.mayApply(_contactCountsKey, ticket, departmentId)) return;
       _contactCountsError = e.toString();
     } finally {
-      _isLoadingContactCounts = false;
-      notifyListeners();
+      if (_guard.mayApply(_contactCountsKey, ticket, departmentId)) {
+        _isLoadingContactCounts = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -667,6 +1056,7 @@ class DashboardProvider extends ChangeNotifier {
     List<TeamMemberModel>? teamMembers,
     List<Map<String, dynamic>>? reportUsers,
   }) async {
+    final ticket = _guard.begin(_callMeetingKey, departmentId);
     _isLoadingCallAndMeeting = true;
     _callAndMeetingError = null;
     notifyListeners();
@@ -751,34 +1141,54 @@ class DashboardProvider extends ChangeNotifier {
       }).toList();
 
       items.sort((a, b) => b.totalCount.compareTo(a.totalCount));
+      if (!_guard.mayApply(_callMeetingKey, ticket, departmentId)) return;
       _callAndMeetingTotals = items;
     } catch (e) {
       debugPrint('[DashboardProvider fetchCallAndMeetingTotals Error]: $e');
+      if (!_guard.mayApply(_callMeetingKey, ticket, departmentId)) return;
       _callAndMeetingError = e.toString();
     } finally {
-      _isLoadingCallAndMeeting = false;
-      notifyListeners();
+      if (_guard.mayApply(_callMeetingKey, ticket, departmentId)) {
+        _isLoadingCallAndMeeting = false;
+        notifyListeners();
+      }
     }
   }
 
   /// Clears cached dashboard state to prevent stale data during department switch.
   void clearData() {
+    // Everything in the air was asked for on behalf of the department being
+    // left. Abandon it first, or an answer already on its way back would
+    // repopulate what is being cleared here.
+    _guard.abandonAll();
+
     _stats = null;
     _unifiedFeed = null;
     _reportsDashboardData = null;
+    // The three work cards read from this. It used to survive a department
+    // switch, which left the previous department's tasks under the new
+    // department's name until the refetch landed.
+    _dashboardTasks = [];
     _activityLeaderboard = [];
     _contactOwnerCounts = [];
     _callAndMeetingTotals = [];
     _statsError = null;
     _feedError = null;
+    _tasksError = null;
     _leaderboardError = null;
     _contactCountsError = null;
     _callAndMeetingError = null;
     _isLoadingStats = false;
     _isLoadingFeed = false;
+    _isLoadingTasks = false;
     _isLoadingLeaderboard = false;
     _isLoadingContactCounts = false;
     _isLoadingCallAndMeeting = false;
+
+    // A follow-up created in the department being left must not be mistaken
+    // for one already created in the department being entered.
+    _followUpsCreated.clear();
+
     notifyListeners();
   }
 }

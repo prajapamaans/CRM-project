@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/utils/activity_utils.dart';
 import '../../../../core/utils/filter_query_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
@@ -24,7 +25,7 @@ class CallsScreen extends StatefulWidget {
   State<CallsScreen> createState() => _CallsScreenState();
 }
 
-class _CallsScreenState extends State<CallsScreen> {
+class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
   int _selectedTab = 0; // 0: All calls, 1: My calls
   String _searchQuery = '';
   ContactSortOption _currentSort = ContactSortOption.mostRecent;
@@ -60,6 +61,18 @@ class _CallsScreenState extends State<CallsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
+    // This screen keeps its own list, so it has to notice a department switch
+    // itself. It previously loaded once in initState and never reacted, which
+    // left the previous department's calls on screen indefinitely.
+    watchDepartmentChanges((_) {
+      setState(() {
+        _calls.clear();
+        _selectedCallId = null;
+      });
+      _loadCalls();
+    });
+
     // A call opened from elsewhere in the app (e.g. a notification).
     final requested = context.watch<NavigationProvider>().focusedActivityId;
     if (requested != null && requested != _appliedFocusId) {

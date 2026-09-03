@@ -137,26 +137,52 @@ class EmailTemplatesResponse {
     required this.path,
   });
 
+  /// Reads the folder/template listing.
+  ///
+  /// The lists were previously only read from the top level, so a response
+  /// that wrapped them — `{ "data": { "templates": [...] } }` — parsed as an
+  /// empty screen even though the request had succeeded. The wrapper is
+  /// unwrapped first, and the usual alternative key names are accepted.
   factory EmailTemplatesResponse.fromJson(Map<String, dynamic> json) {
-    final rawFolders = json['folders'];
-    final rawTemplates = json['templates'];
-    final rawPath = json['path'];
+    Map<String, dynamic> body = json;
+    for (final key in const ['data', 'result', 'payload']) {
+      final wrapped = body[key];
+      if (wrapped is Map<String, dynamic> &&
+          (wrapped.containsKey('templates') ||
+              wrapped.containsKey('folders') ||
+              wrapped.containsKey('items'))) {
+        body = wrapped;
+        break;
+      }
+    }
+
+    List<dynamic> listUnder(List<String> keys) {
+      for (final key in keys) {
+        final value = body[key];
+        if (value is List) return value;
+      }
+      return const [];
+    }
+
+    // A response whose `data` is the template array itself.
+    final rawTemplates = listUnder(const ['templates', 'emailTemplates', 'items', 'data']);
+    final rawFolders = listUnder(const ['folders', 'emailTemplateFolders', 'templateFolders']);
+    final rawPath = body['path'];
 
     return EmailTemplatesResponse(
-      success: json['success'] == true || json['status'] == 'success' || json['success'] == 'true',
-      folders: (rawFolders is List)
-          ? rawFolders
-              .whereType<Map<String, dynamic>>()
-              .map((e) => EmailTemplateFolder.fromJson(e))
-              .toList()
-          : [],
-      templates: (rawTemplates is List)
-          ? rawTemplates
-              .whereType<Map<String, dynamic>>()
-              .map((e) => EmailTemplate.fromJson(e))
-              .toList()
-          : [],
-      path: (rawPath is List) ? rawPath : [],
+      success: body['success'] == true ||
+          json['success'] == true ||
+          body['status'] == 'success' ||
+          body['success'] == 'true',
+      folders: rawFolders
+          .whereType<Map<String, dynamic>>()
+          .map((e) => EmailTemplateFolder.fromJson(e))
+          .toList(),
+      templates: rawTemplates
+          .whereType<Map<String, dynamic>>()
+          .map((e) => EmailTemplate.fromJson(e))
+          .toList(),
+      path: (rawPath is List) ? rawPath : const [],
     );
   }
 }

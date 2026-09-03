@@ -195,16 +195,42 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// The department [_teamMembers] was loaded for.
+  String? _teamDepartmentId;
+  String? get teamDepartmentId => _teamDepartmentId;
+
+  /// Drops the cached team and reloads it for [departmentId].
+  ///
+  /// Called when the department changes. The list feeds every owner and
+  /// assignee dropdown in the app, so leaving the previous department's people
+  /// in place would let them be picked — and shown — under the new one.
+  Future<void> reloadTeamForDepartment(String departmentId) async {
+    _teamDepartmentId = departmentId;
+    _teamMembers = [];
+    notifyListeners();
+    await fetchTeamMembers(departmentId: departmentId);
+  }
+
   /// Calls GET /api/auth/team to retrieve team members by optional role and department filter.
+  ///
+  /// A caller that does not name a department gets the selected one. Most call
+  /// sites are dropdowns that simply want "the people I can pick", and reading
+  /// the selection here keeps them from silently falling back to every
+  /// department's users.
   Future<List<TeamMemberModel>> fetchTeamMembers({
     String? role,
     String? departmentId,
     String? departmentName,
   }) async {
+    final effectiveDepartmentId = departmentId ??
+        _teamDepartmentId ??
+        await SecureStorageService().getSelectedDepartmentId();
+    _teamDepartmentId = effectiveDepartmentId;
+
     try {
       _teamMembers = await _repository.getTeamMembers(
         role: role,
-        departmentId: departmentId,
+        departmentId: effectiveDepartmentId,
         departmentName: departmentName,
       );
       notifyListeners();

@@ -350,31 +350,23 @@ class _CreateContactModalState extends State<CreateContactModal> {
                   const SizedBox(height: 6),
                   Builder(
                     builder: (context) {
-                      final ownerItems = <DropdownSearchItem<String>>[
-                        DropdownSearchItem(
-                          value: '',
-                          label: 'No owner',
-                        ),
-                        if (authProvider.currentUser != null)
-                          DropdownSearchItem(
-                            value: authProvider.currentUser!.id,
-                            label: authProvider.currentUser!.fullName.isNotEmpty
-                                ? authProvider.currentUser!.fullName
-                                : 'Admin User',
-                            subtext: authProvider.currentUser!.email,
-                          ),
-                        ...teamMembers.map(
-                          (m) => DropdownSearchItem(
-                            value: m.id,
-                            label: m.fullName,
-                            subtext: m.email,
-                          ),
-                        ),
-                      ];
+                      final Map<String, DropdownSearchItem<String>> ownerItemMap = {};
+                      ownerItemMap[''] = DropdownSearchItem(
+                        value: '',
+                        label: 'No owner',
+                      );
+                      for (final m in teamMembers) {
+                        ownerItemMap[m.id] = DropdownSearchItem(
+                          value: m.id,
+                          label: m.fullName,
+                          subtext: m.email,
+                        );
+                      }
+
+                      final ownerItems = ownerItemMap.values.toList();
 
                       return SearchableDropdownFormField<String>(
-                        initialValue: _selectedOwnerId ??
-                            (authProvider.currentUser?.id ?? ''),
+                        initialValue: _selectedOwnerId ?? '',
                         hintText: 'Select contact owner',
                         items: ownerItems,
                         onChanged: (val) {

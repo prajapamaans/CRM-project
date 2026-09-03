@@ -1,8 +1,10 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../network/api_constants.dart';
 import '../network/api_service.dart';
+import '../network/network_exception.dart';
 import '../models/master_dropdown_model.dart';
 import '../models/email_signature_model.dart';
 import '../models/email_template_models.dart';
@@ -41,13 +43,14 @@ abstract class MasterDataRemoteDataSource {
     int? page,
     int? limit,
   });
-  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true});
-  Future<EmailTemplatesResponse> getEmailTemplatesFull();
+  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true, String? departmentId});
+  Future<EmailTemplatesResponse> getEmailTemplatesFull({String? departmentId});
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
   Future<Map<String, dynamic>> createEmailTemplateFolder(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
   Future<List<EmailSignatureModel>> getEmailSignatures();
   Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data);
+  Future<EmailSignatureModel> updateEmailSignature(String id, Map<String, dynamic> data);
   Future<bool> deleteEmailSignature(String id);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
   Future<Map<String, dynamic>> getSequences({int page = 1, int limit = 20});
@@ -58,7 +61,7 @@ abstract class MasterDataRemoteDataSource {
   Future<List<Map<String, dynamic>>> getReportsScope();
   Future<List<Map<String, dynamic>>> getReportsUsers({int limit = 200});
   Future<List<Map<String, dynamic>>> getReportsDashboards();
-  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId});
+  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId, String? ownerId});
 }
 
 class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
@@ -288,7 +291,10 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? priority,
   }) async {
     final queryParameters = <String, dynamic>{};
-    if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
+    if (ownerId != null && ownerId.isNotEmpty) {
+      queryParameters['ownerId'] = ownerId;
+      queryParameters['owner_id'] = ownerId;
+    }
     if (status != null && status.isNotEmpty) queryParameters['status'] = status;
     if (limit != null) queryParameters['limit'] = limit.toString();
     if (page != null) queryParameters['page'] = page.toString();
@@ -319,6 +325,7 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     }
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
+      queryParameters['departmentId'] = departmentId;
     }
 
     final response = await _apiService.get(
@@ -350,6 +357,7 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     debugPrint('REQUEST URL: ${ApiConstants.activities}?type=$type&department_id=$departmentId');
     debugPrint('HTTP STATUS: ${response.statusCode}');
     debugPrint('RECORD COUNT: ${list.length}');
+    debugPrint('FIRST RECORD DEPT ID: $firstRecordDeptId');
     if (list.isNotEmpty) {
       final sampleIds = list.map((item) => item['id'] ?? item['_id']).take(5).toList();
       final sampleTitles = list.map((item) => item['title'] ?? item['subject'] ?? item['name']).take(5).toList();
@@ -421,27 +429,70 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   }
 
   @override
-  Future<EmailTemplatesResponse> getEmailTemplatesFull() async {
-    final response = await _apiService.get(ApiConstants.emailTemplatesList);
+  Future<EmailTemplatesResponse> getEmailTemplatesFull({String? departmentId}) async {
+    final queryParameters = <String, dynamic>{
+      'flat': 'true',
+    };
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['departmentId'] = departmentId;
+      queryParameters['department_id'] = departmentId;
+    }
+
+    final response = await _apiService.get(
+      ApiConstants.emailTemplatesList,
+      queryParameters: queryParameters,
+    );
     debugPrint('[GET ${ApiConstants.emailTemplatesList} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
+    EmailTemplatesResponse parsed;
+
     if (rawData is Map<String, dynamic>) {
-      return EmailTemplatesResponse.fromJson(rawData);
+      parsed = EmailTemplatesResponse.fromJson(rawData);
+    } else if (rawData is List) {
+      // The listing answered with the templates themselves.
+      parsed = EmailTemplatesResponse(
+        success: true,
+        folders: const [],
+        templates: rawData
+            .whereType<Map<String, dynamic>>()
+            .map((e) => EmailTemplate.fromJson(e))
+            .toList(),
+        path: const [],
+      );
+    } else {
+      parsed = const EmailTemplatesResponse(
+        success: false,
+        folders: [],
+        templates: [],
+        path: [],
+      );
     }
-    return const EmailTemplatesResponse(
-      success: false,
-      folders: [],
-      templates: [],
-      path: [],
-    );
+
+    if (parsed.templates.isEmpty && parsed.folders.isEmpty) {
+      // This request already asks with `flat=true`, so there is no second
+      // listing left to try — an empty answer here is genuinely empty, or the
+      // response carried its templates under a key this parse does not know.
+      debugPrint('[GET ${ApiConstants.emailTemplatesList}] held no folders or templates '
+          'for department ${departmentId ?? '(from headers)'}');
+    }
+
+    return parsed;
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true}) async {
+  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true, String? departmentId}) async {
+    final queryParameters = <String, dynamic>{
+      'flat': flat.toString(),
+    };
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['departmentId'] = departmentId;
+      queryParameters['department_id'] = departmentId;
+    }
+
     final response = await _apiService.get(
       ApiConstants.emailTemplatesList,
-      queryParameters: {'flat': flat.toString()},
+      queryParameters: queryParameters,
     );
     debugPrint('[GET ${ApiConstants.emailTemplatesList}?flat=$flat SUCCESS]: ${response.data}');
 
@@ -468,35 +519,61 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
 
   @override
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data) async {
+    final payload = _templateWritePayload(data);
+    debugPrint('[POST ${ApiConstants.emailTemplates}] payload=$payload');
+
     try {
       final response = await _apiService.post(
         ApiConstants.emailTemplates,
-        data: data,
+        data: payload,
       );
       debugPrint('[POST ${ApiConstants.emailTemplates} SUCCESS]: ${response.data}');
-      final dynamic rawData = response.data;
-      if (rawData is Map<String, dynamic>) {
-        if (rawData['data'] is Map<String, dynamic>) {
-          return rawData['data'] as Map<String, dynamic>;
-        }
-        return rawData;
+      return _templateWriteResult(response.data);
+    } on NetworkException catch (e) {
+      // A rejected template — a validation error, a permission problem — is
+      // reported with what the server said. Only a missing route is worth
+      // retrying elsewhere; posting a rejected body to the listing path was
+      // just a second failure with a worse message.
+      if (e.statusCode != 404 && e.statusCode != 405) {
+        debugPrint('[POST ${ApiConstants.emailTemplates} REJECTED ${e.statusCode}]: '
+            '${e.message} — ${e.data}');
+        rethrow;
       }
-      return {};
-    } catch (e) {
-      debugPrint('[POST ${ApiConstants.emailTemplates} fallback to list]: $e');
+      debugPrint('[POST ${ApiConstants.emailTemplates} unsupported (${e.statusCode}), '
+          'retrying on ${ApiConstants.emailTemplatesList}]');
       final response = await _apiService.post(
         ApiConstants.emailTemplatesList,
-        data: data,
+        data: payload,
       );
-      final dynamic rawData = response.data;
-      if (rawData is Map<String, dynamic>) {
-        if (rawData['data'] is Map<String, dynamic>) {
-          return rawData['data'] as Map<String, dynamic>;
-        }
-        return rawData;
-      }
-      return {};
+      debugPrint('[POST ${ApiConstants.emailTemplatesList} SUCCESS]: ${response.data}');
+      return _templateWriteResult(response.data);
     }
+  }
+
+  /// Prepares a template body for the API.
+  ///
+  /// Null values are dropped rather than sent: a template at the root level
+  /// has no folder, and `"folderId": null` is rejected by a validator that
+  /// would have accepted the key being absent. Ids that are blank strings go
+  /// the same way, for the same reason.
+  Map<String, dynamic> _templateWritePayload(Map<String, dynamic> data) {
+    final payload = <String, dynamic>{};
+    data.forEach((key, value) {
+      if (value == null) return;
+      if (key.toLowerCase().endsWith('id') && value is String && value.trim().isEmpty) return;
+      payload[key] = value;
+    });
+    return payload;
+  }
+
+  Map<String, dynamic> _templateWriteResult(dynamic rawData) {
+    if (rawData is Map<String, dynamic>) {
+      if (rawData['data'] is Map<String, dynamic>) {
+        return rawData['data'] as Map<String, dynamic>;
+      }
+      return rawData;
+    }
+    return {};
   }
 
   @override
@@ -530,35 +607,28 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
 
   @override
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data) async {
+    // Same sanitising as create: the id belongs in the path, and a null folder
+    // is an absent key rather than a null value.
+    final payload = _templateWritePayload(data)..remove('id');
+    final path = '${ApiConstants.emailTemplates}/$id';
+    debugPrint('[PUT $path] payload=$payload');
+
     try {
-      final response = await _apiService.put(
-        '${ApiConstants.emailTemplates}/$id',
-        data: data,
-      );
-      debugPrint('[PUT ${ApiConstants.emailTemplates}/$id SUCCESS]: ${response.data}');
-      final dynamic rawData = response.data;
-      if (rawData is Map<String, dynamic>) {
-        if (rawData['data'] is Map<String, dynamic>) {
-          return rawData['data'] as Map<String, dynamic>;
-        }
-        return rawData;
+      final response = await _apiService.put(path, data: payload);
+      debugPrint('[PUT $path SUCCESS]: ${response.data}');
+      return _templateWriteResult(response.data);
+    } on NetworkException catch (e) {
+      if (e.statusCode != 404 && e.statusCode != 405) {
+        debugPrint('[PUT $path REJECTED ${e.statusCode}]: ${e.message} — ${e.data}');
+        rethrow;
       }
-      return {};
-    } catch (e) {
-      debugPrint('[PUT ${ApiConstants.emailTemplates}/$id fallback]: $e');
+      debugPrint('[PUT $path unsupported (${e.statusCode}), retrying on the list path]');
       final response = await _apiService.put(
         '${ApiConstants.emailTemplatesList}/$id',
-        data: data,
+        data: payload,
       );
       debugPrint('[PUT ${ApiConstants.emailTemplatesList}/$id SUCCESS]: ${response.data}');
-      final dynamic rawData = response.data;
-      if (rawData is Map<String, dynamic>) {
-        if (rawData['data'] is Map<String, dynamic>) {
-          return rawData['data'] as Map<String, dynamic>;
-        }
-        return rawData;
-      }
-      return {};
+      return _templateWriteResult(response.data);
     }
   }
 
@@ -590,31 +660,21 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
 
   @override
   Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data) async {
-    final String? id = data['id']?.toString();
+    final String? id = data['id']?.toString().trim();
     final bool isUpdate = id != null && id.isNotEmpty;
 
-    dynamic response;
+    // A payload that already carries an id belongs to an existing record, so it
+    // is routed to the update endpoint rather than creating a second copy.
     if (isUpdate) {
-      try {
-        response = await _apiService.put(
-          '${ApiConstants.emailSignatures}/$id',
-          data: data,
-        );
-        debugPrint('[PUT ${ApiConstants.emailSignatures}/$id SUCCESS]: ${response.data}');
-      } catch (e) {
-        debugPrint('[PUT ${ApiConstants.emailSignatures}/$id failed, fallback to POST]: $e');
-        response = await _apiService.post(
-          ApiConstants.emailSignatures,
-          data: data,
-        );
-      }
-    } else {
-      response = await _apiService.post(
-        ApiConstants.emailSignatures,
-        data: data,
-      );
-      debugPrint('[POST ${ApiConstants.emailSignatures} SUCCESS]: ${response.data}');
+      debugPrint('[createEmailSignature]: payload carries id $id, updating instead of creating.');
+      return await updateEmailSignature(id, data);
     }
+
+    final response = await _apiService.post(
+      ApiConstants.emailSignatures,
+      data: data,
+    );
+    debugPrint('[POST ${ApiConstants.emailSignatures} SUCCESS]: ${response.data}');
 
     final dynamic rawData = response.data;
     Map<String, dynamic> itemMap = {};
@@ -630,6 +690,62 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     }
 
     return EmailSignatureModel.fromJson(itemMap);
+  }
+
+  @override
+  Future<EmailSignatureModel> updateEmailSignature(String id, Map<String, dynamic> data) async {
+    final signatureId = id.trim();
+    if (signatureId.isEmpty) {
+      // Writing an update with no id would land on the collection endpoint and
+      // create a second record, which is exactly the duplicate we must avoid.
+      throw ArgumentError('updateEmailSignature requires the id of an existing signature.');
+    }
+
+    // The id addresses the record in the path. Repeating it in the body is what
+    // strict backends reject, and a rejected update used to fall through to a
+    // create.
+    final updatePayload = Map<String, dynamic>.from(data)..remove('id');
+    final path = '${ApiConstants.emailSignatures}/$signatureId';
+
+    Response<dynamic> response;
+    try {
+      response = await _apiService.put(path, data: updatePayload);
+      debugPrint('[PUT $path SUCCESS]: ${response.data}');
+    } on NetworkException catch (e) {
+      // Only a missing route or an unsupported method is worth retrying with
+      // PATCH. A 400/422 means the backend understood the update and refused
+      // it, so retrying elsewhere would write the wrong thing.
+      if (e.statusCode != 404 && e.statusCode != 405) rethrow;
+      debugPrint('[PUT $path unsupported (${e.statusCode}), retrying with PATCH]');
+      response = await _apiService.patch(path, data: updatePayload);
+      debugPrint('[PATCH $path SUCCESS]: ${response.data}');
+    }
+
+    final dynamic rawData = response.data;
+    Map<String, dynamic> itemMap = {};
+
+    if (rawData is Map<String, dynamic>) {
+      if (rawData['signature'] is Map<String, dynamic>) {
+        itemMap = rawData['signature'] as Map<String, dynamic>;
+      } else if (rawData['data'] is Map<String, dynamic>) {
+        itemMap = rawData['data'] as Map<String, dynamic>;
+      } else {
+        itemMap = rawData;
+      }
+    }
+
+    // Keep the record's identity even when the backend answers with a bare
+    // acknowledgement, so callers see the same id they edited.
+    if (itemMap['id'] == null && itemMap['_id'] == null) {
+      itemMap = {...itemMap, 'id': signatureId};
+    }
+
+    final updated = EmailSignatureModel.fromJson(itemMap);
+    if (updated.id != signatureId) {
+      debugPrint('[PUT $path WARNING]: backend answered with id ${updated.id}, '
+          'expected $signatureId — it may have created a new record instead of updating.');
+    }
+    return updated;
   }
 
   @override
@@ -817,10 +933,15 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   }
 
   @override
-  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId}) async {
+  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId, String? ownerId}) async {
     final queryParameters = <String, dynamic>{};
     if (departmentId != null && departmentId.isNotEmpty) {
       queryParameters['department_id'] = departmentId;
+      queryParameters['departmentId'] = departmentId;
+    }
+    if (ownerId != null && ownerId.isNotEmpty) {
+      queryParameters['ownerId'] = ownerId;
+      queryParameters['owner_id'] = ownerId;
     }
 
     final response = await _apiService.get(

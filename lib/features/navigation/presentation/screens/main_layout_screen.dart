@@ -185,8 +185,32 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
               // Department Selector Pill (Only visible & enabled for Super Admin)
               if (deptProvider.canSwitchDepartment)
                 PopupMenuButton<DepartmentModel>(
-                  onSelected: (DepartmentModel dept) {
-                    deptProvider.changeDepartment(context, dept.id, dept.name);
+                  onSelected: (DepartmentModel dept) async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final switched = await deptProvider.changeDepartment(
+                      context,
+                      dept.id,
+                      dept.name,
+                    );
+                    // A refused switch leaves the previous department in
+                    // force. Say so — silently staying put looks like the
+                    // switch worked and the data is simply wrong.
+                    if (!switched) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            deptProvider.error ??
+                                'Could not switch to ${dept.name}.',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 4),
+                        ),
+                      );
+                    }
                   },
                   offset: const Offset(0, 40),
                   shape: RoundedRectangleBorder(
@@ -208,7 +232,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                dept.name,
+                                dept.dropdownName,
                                 style: GoogleFonts.poppins(
                                   fontSize: 13,
                                   fontWeight: dept.id == deptProvider.selectedDepartmentId
@@ -241,7 +265,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          deptProvider.selectedDepartmentName,
+                          deptProvider.dropdownSelectedDepartmentName,
                           style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -277,7 +301,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        deptProvider.selectedDepartmentName,
+                        deptProvider.dropdownSelectedDepartmentName,
                         style: GoogleFonts.poppins(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

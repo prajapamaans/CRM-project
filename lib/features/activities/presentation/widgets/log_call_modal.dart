@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/route_names.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:dio/dio.dart';
 import '../../../../core/models/master_dropdown_model.dart';
@@ -9,6 +11,7 @@ import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/storage/activity_association_storage.dart';
 import '../../../../core/widgets/record_association_sheet.dart';
 import '../../../../core/utils/activity_utils.dart';
+import '../../../../core/utils/follow_up_schedule.dart';
 import 'follow_up_task_section.dart';
 
 class CallModel {
@@ -104,6 +107,9 @@ class _LogCallModalState extends State<LogCallModal> {
   String _selectedOwner = 'Select owner';
   String _selectedDate = 'Today';
   bool _createFollowUpTask = false;
+  String _followUpType = 'To-do';
+  String _followUpDateLabel = 'In 3 business days';
+  String _followUpTime = '8:00 AM';
   bool _isSubmitting = false;
   List<MasterDropdownOptionModel> _apiOutcomes = [];
   List<Map<String, dynamic>> _apiUsers = [];
@@ -1068,9 +1074,27 @@ class _LogCallModalState extends State<LogCallModal> {
                 // Create To-do Follow-up Row
                 FollowUpTaskSection(
                   initialChecked: _createFollowUpTask,
+                  initialType: _followUpType,
+                  initialDateLabel: _followUpDateLabel,
+                  initialTime: _followUpTime,
                   onCheckedChanged: (val) {
                     setState(() {
                       _createFollowUpTask = val;
+                    });
+                  },
+                  onTypeChanged: (val) {
+                    setState(() {
+                      _followUpType = val;
+                    });
+                  },
+                  onDateChanged: (val) {
+                    setState(() {
+                      _followUpDateLabel = val;
+                    });
+                  },
+                  onTimeChanged: (val) {
+                    setState(() {
+                      _followUpTime = val;
                     });
                   },
                 ),
@@ -1410,14 +1434,38 @@ class _LogCallModalState extends State<LogCallModal> {
             ]
           });
 
+          DateTime? dateChoice;
+          for (final opt in followUpDateOptions()) {
+            if (opt.label == _followUpDateLabel) {
+              dateChoice = opt.date;
+              break;
+            }
+          }
+          if (dateChoice == null && _followUpDateLabel.contains('/')) {
+            try {
+              final parts = _followUpDateLabel.split('/');
+              if (parts.length == 3) {
+                dateChoice = DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+              }
+            } catch (_) {}
+          }
+          dateChoice ??= defaultFollowUpDate();
+          final followUpScheduledAt = combineDateAndTime(dateChoice, _followUpTime);
+
           final taskPayload = {
             'type': 'task',
+            'taskType': _followUpType,
             'title': 'Follow-up: ${title.isNotEmpty ? title : "Call"}',
             'subject': 'Follow-up: ${title.isNotEmpty ? title : "Call"}',
-            'priority': 'medium',
+            'priority': 'None',
+            'queue': 'Follow-up 1',
+            'reminderText': '30 minutes before',
             'notes': notes,
             'description': taskDescJson,
-            'scheduledAt': DateTime.now().toIso8601String(),
+            'scheduledAt': followUpScheduledAt.toIso8601String(),
+            'dueDate': followUpScheduledAt.toIso8601String(),
+            if (_selectedOwner != 'Select owner') 'ownerName': _selectedOwner,
+            if (_selectedOwner != 'Select owner') 'assignedTo': _selectedOwner,
             if (targetContactId != null && targetContactId.isNotEmpty) ...{
               'contactId': targetContactId,
               'contact_id': targetContactId,

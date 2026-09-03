@@ -543,9 +543,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final usersDropdownList = [
+    final usersDropdownList = <String>[
       'All Users',
-      ..._users.map((u) => '${u['firstName'] ?? u['name'] ?? ''} ${u['lastName'] ?? ''}'.trim()).where((name) => name.isNotEmpty),
+      ..._users
+          .map((u) => '${u['firstName'] ?? u['name'] ?? ''} ${u['lastName'] ?? ''}'.trim())
+          .where((name) => name.isNotEmpty)
+          .toSet(),
     ];
 
     return Scaffold(

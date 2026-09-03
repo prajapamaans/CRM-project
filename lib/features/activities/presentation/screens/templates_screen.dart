@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 import '../../../../core/datasources/master_data_remote_datasource.dart';
 import '../../../../core/models/email_signature_model.dart';
 import '../../../../core/models/email_template_models.dart';
+import '../../../../core/network/network_exception.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../widgets/create_signature_modal.dart';
 import '../widgets/create_template_modal.dart';
 
+import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/utils/signature_variable_resolver.dart';
 
 class TemplatesScreen extends StatefulWidget {
@@ -19,7 +21,7 @@ class TemplatesScreen extends StatefulWidget {
   State<TemplatesScreen> createState() => _TemplatesScreenState();
 }
 
-class _TemplatesScreenState extends State<TemplatesScreen> {
+class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareState {
   final MasterDataRepository _repository = MasterDataRepositoryImpl();
 
   int _selectedSubTabIndex = 0; // 0 = Templates, 1 = Signatures
@@ -48,6 +50,18 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
       if (mounted) {
         context.read<AuthProvider>().fetchTeamMembers();
       }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    watchDepartmentChanges((deptId) {
+      setState(() {
+        _allFolders.clear();
+        _allTemplates.clear();
+      });
+      _loadTemplatesFromApi();
     });
   }
 
@@ -87,10 +101,11 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         _errorMessage = null;
       });
 
-      final response = await _repository.getEmailTemplatesFull();
+      final deptId = currentDepartmentId();
+      final response = await _repository.getEmailTemplatesFull(departmentId: deptId);
 
       debugPrint(
-        '[GET /api/email-templates/list SUCCESS]: success=${response.success}, folders=${response.folders.length}, templates=${response.templates.length}',
+        '[GET /api/email-templates/list SUCCESS (deptId=$deptId)]: success=${response.success}, folders=${response.folders.length}, templates=${response.templates.length}',
       );
 
       if (mounted) {
@@ -109,6 +124,18 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         });
       }
     }
+  }
+
+  /// What the server said about a rejected save, so the message names the real
+  /// problem instead of asking the user to try the same thing again.
+  String _saveFailureReason(Object error) {
+    if (error is NetworkException) {
+      final reason = error.message.trim();
+      if (reason.isNotEmpty) {
+        return error.statusCode == null ? reason : '$reason (${error.statusCode})';
+      }
+    }
+    return 'Please try again.';
   }
 
   void _navigateToFolder(String? folderId, String folderName) {
@@ -154,12 +181,15 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         createdAt: 'Just now',
       );
 
+      // Shown straight away, but only until the API answers — the reload below
+      // replaces it with whatever the backend actually holds.
       setState(() {
         _allTemplates.insert(0, createdTemplate);
       });
 
       try {
         final ds = MasterDataRemoteDataSourceImpl();
+        final deptId = currentDepartmentId();
         await ds.createEmailTemplate({
           'name': newTemplateModel.name,
           'subject': newTemplateModel.subject,
@@ -167,11 +197,28 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
           'sharedSetting':
               newTemplateModel.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
           'folderId': targetFolderId,
+          if (deptId.isNotEmpty) 'departmentId': deptId,
+          if (deptId.isNotEmpty) 'department_id': deptId,
         });
-        await _loadTemplatesFromApi();
       } catch (e) {
+        // The save failed, so the row that was added optimistically is taken
+        // back out. Reporting success here is what made a template look saved
+        // until the next reload dropped it.
         debugPrint('[TemplatesScreen create template API error]: $e');
+        if (!mounted) return;
+        setState(() {
+          _allTemplates.removeWhere((t) => identical(t, createdTemplate));
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save template "${newTemplateModel.name}". ${_saveFailureReason(e)}'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+        return;
       }
+
+      await _loadTemplatesFromApi();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -206,6 +253,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
       if (targetId != null && targetId.isNotEmpty) {
         try {
           final ds = MasterDataRemoteDataSourceImpl();
+          final deptId = currentDepartmentId();
           await ds.updateEmailTemplate(targetId, {
             'name': updatedTemplateModel.name,
             'subject': updatedTemplateModel.subject,
@@ -217,10 +265,22 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                     ? 'shared'
                     : 'private',
             'folderId': template.folderId,
+            if (deptId.isNotEmpty) 'departmentId': deptId,
+            if (deptId.isNotEmpty) 'department_id': deptId,
           });
           await _loadTemplatesFromApi();
         } catch (e) {
+          // Same as create: a failed save must not be reported as a success.
           debugPrint('[TemplatesScreen update template API error]: $e');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not save changes to "${updatedTemplateModel.name}". ${_saveFailureReason(e)}'),
+              backgroundColor: const Color(0xFFEF4444),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
         }
       }
 
@@ -1167,14 +1227,17 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                                 icon: const Icon(Icons.star_outline_rounded, color: Color(0xFF94A3B8), size: 20),
                                 tooltip: 'Make default',
                                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                padding: EdgeInsets.zero,
                                 onPressed: () async {
-                                  await _repository.createEmailSignature({
-                                    'id': sig.id,
-                                    'name': sig.name,
-                                    'body': sig.body,
-                                    'isDefault': true,
-                                  });
+                                  try {
+                                    await _repository.updateEmailSignature(sig.id, {
+                                      'id': sig.id,
+                                      'name': sig.name,
+                                      'body': sig.body,
+                                      'isDefault': true,
+                                    });
+                                  } catch (e) {
+                                    debugPrint('[Make default error]: $e');
+                                  }
                                   _loadSignaturesFromApi();
                                 },
                               ),

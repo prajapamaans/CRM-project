@@ -9,15 +9,23 @@ import '../../../authentication/presentation/providers/auth_provider.dart';
 
 class CreateSignatureModal extends StatefulWidget {
   final EmailSignatureModel? signatureToEdit;
+  final MasterDataRepository? repository;
 
-  const CreateSignatureModal({super.key, this.signatureToEdit});
+  const CreateSignatureModal({super.key, this.signatureToEdit, this.repository});
 
-  static Future<bool?> show(BuildContext context, {EmailSignatureModel? signatureToEdit}) {
+  static Future<bool?> show(
+    BuildContext context, {
+    EmailSignatureModel? signatureToEdit,
+    MasterDataRepository? repository,
+  }) {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => CreateSignatureModal(signatureToEdit: signatureToEdit),
+      builder: (context) => CreateSignatureModal(
+        signatureToEdit: signatureToEdit,
+        repository: repository,
+      ),
     );
   }
 
@@ -34,15 +42,34 @@ class _CreateSignatureModalState extends State<CreateSignatureModal> {
   bool _isSubmitting = false;
   bool _showPreview = true;
 
-  final MasterDataRepository _repository = MasterDataRepositoryImpl();
+  /// The id of the signature being edited, captured once when the form opens so
+  /// that nothing in the form lifecycle can drop it and turn a save into a
+  /// create. `null` means the form is in create mode.
+  String? _editingSignatureId;
+
+  bool get _isEditing => _editingSignatureId != null;
+
+  late final MasterDataRepository _repository = widget.repository ?? MasterDataRepositoryImpl();
 
   @override
   void initState() {
     super.initState();
-    if (widget.signatureToEdit != null) {
-      _nameController.text = widget.signatureToEdit!.name;
-      _bodyController.text = widget.signatureToEdit!.body;
-      _isDefault = widget.signatureToEdit!.isDefault;
+    final editing = widget.signatureToEdit;
+    if (editing != null) {
+      final id = editing.id.trim();
+      _editingSignatureId = id.isEmpty ? null : id;
+      _nameController.text = editing.name;
+      _bodyController.text = editing.body;
+      _isDefault = editing.isDefault;
+
+      if (_editingSignatureId == null) {
+        debugPrint('[CreateSignatureModal]: opened to edit "${editing.name}" but the '
+            'record carries no id, so it cannot be updated.');
+      } else {
+        debugPrint('[CreateSignatureModal]: EDIT mode for signature $_editingSignatureId');
+      }
+    } else {
+      debugPrint('[CreateSignatureModal]: CREATE mode');
     }
   }
 
@@ -114,22 +141,42 @@ class _CreateSignatureModalState extends State<CreateSignatureModal> {
       return;
     }
 
+    // The form was opened on an existing signature but that record has no id,
+    // so saving would silently add a duplicate instead of updating it.
+    if (widget.signatureToEdit != null && !_isEditing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'This signature is missing its ID, so it cannot be updated. Please refresh the list and try again.',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     if (_isSubmitting) return;
 
     setState(() {
       _isSubmitting = true;
     });
 
-    final isEditing = widget.signatureToEdit != null;
+    final isEditing = _isEditing;
     final payload = {
-      if (isEditing) 'id': widget.signatureToEdit!.id,
       'name': name,
       'body': body.contains('<') ? body : '<p>$body</p>',
       'isDefault': _isDefault,
     };
 
     try {
-      await _repository.createEmailSignature(payload);
+      if (isEditing) {
+        debugPrint('[Signature Save]: UPDATE $_editingSignatureId payload=$payload');
+        await _repository.updateEmailSignature(_editingSignatureId!, payload);
+      } else {
+        debugPrint('[Signature Save]: CREATE payload=$payload');
+        await _repository.createEmailSignature(payload);
+      }
 
       if (!mounted) return;
 

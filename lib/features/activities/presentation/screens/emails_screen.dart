@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:crmproject/core/widgets/app_refresh_indicator.dart';
 
 import '../../../../core/repositories/master_data_repository.dart';
+import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/utils/filter_query_utils.dart';
 import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
@@ -23,7 +24,7 @@ class EmailsScreen extends StatefulWidget {
   State<EmailsScreen> createState() => _EmailsScreenState();
 }
 
-class _EmailsScreenState extends State<EmailsScreen> {
+class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
   final ScrollController _scrollController = ScrollController();
 
   int _selectedTab = 0; // 0: All emails, 1: My emails
@@ -72,6 +73,20 @@ class _EmailsScreenState extends State<EmailsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
+    // This screen keeps its own list, so it has to notice a department switch
+    // itself. It previously loaded once in initState and never reacted, which
+    // left the previous department's emails on screen indefinitely.
+    watchDepartmentChanges((_) {
+      setState(() {
+        _emails.clear();
+        _selectedEmailId = null;
+        _currentPage = 1;
+        _hasMoreData = true;
+      });
+      _fetchEmails(reset: true);
+    });
+
     // An email opened from elsewhere in the app (e.g. a notification).
     final requested = context.watch<NavigationProvider>().focusedActivityId;
     if (requested != null && requested != _appliedFocusId) {
@@ -626,29 +641,10 @@ class _EmailsScreenState extends State<EmailsScreen> {
                   ],
                 ),
               ),
-              InkWell(
-                onTap: () {
-                  setState(() {
-                    _isFilterExpanded = !_isFilterExpanded;
-                  });
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: _isFilterExpanded ? const Color(0xFFE6F4F1) : Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: _isFilterExpanded ? const Color(0xFF00A884) : const Color(0xFFCBD5E1),
-                      width: _isFilterExpanded ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.tune_rounded,
-                    size: 18,
-                    color: _isFilterExpanded ? const Color(0xFF00A884) : const Color(0xFF64748B),
-                  ),
-                ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFFCBD5E1),
+                size: 20,
               ),
             ],
           ),

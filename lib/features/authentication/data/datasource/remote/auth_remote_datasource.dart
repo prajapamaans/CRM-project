@@ -89,12 +89,24 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     if (role != null && role.isNotEmpty) queryParams['role'] = role;
     if (departmentName != null && departmentName.isNotEmpty) queryParams['department'] = departmentName;
 
-    // Header option to instruct interceptors to fetch ALL data across all departments
-    final Options options = Options(headers: {
-      'X-Department-Id': 'all',
-      'departmentId': 'all',
-      'department_id': 'all',
-    });
+    // The team is scoped to the selected department. This used to force
+    // `all` regardless of the caller's departmentId, which is why every owner
+    // and assignee dropdown in the app listed people from every department.
+    final Options options;
+    if (departmentId != null && departmentId.isNotEmpty && departmentId != 'all') {
+      queryParams['departmentId'] = departmentId;
+      queryParams['department_id'] = departmentId;
+      options = Options(headers: {'X-Department-Id': departmentId});
+    } else {
+      // Only when a caller explicitly asks for every department.
+      options = Options(headers: {
+        'X-Department-Id': 'all',
+        'departmentId': 'all',
+        'department_id': 'all',
+      });
+    }
+
+    debugPrint('[GET ${ApiConstants.team}] departmentId=${departmentId ?? 'all'} query=$queryParams');
 
     final Map<String, TeamMemberModel> uniqueMembers = {};
 
@@ -125,31 +137,17 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       }
     }
 
-    // 1. Fetch from /api/auth/team
+    // Fetch exclusively from /api/auth/team
     try {
-    final response = await _apiService.get(
-      ApiConstants.team,
-      queryParameters: queryParams.isNotEmpty ? queryParams : null,
-      options: options,
-    );
-    debugPrint('[GET /api/auth/team SUCCESS]: ${response.data}');
+      final response = await _apiService.get(
+        ApiConstants.team,
+        queryParameters: queryParams.isNotEmpty ? queryParams : null,
+        options: options,
+      );
+      debugPrint('[GET /api/auth/team SUCCESS]: ${response.data}');
       addMembersFromData(response.data);
     } catch (e) {
       debugPrint('[GET /api/auth/team WARNING]: $e');
-    }
-
-    // 2. Fetch from /users (with limit 1000) to ensure complete list of users
-    try {
-      final userQueryParams = <String, dynamic>{'limit': 1000, ...queryParams};
-      final userResp = await _apiService.get(
-        '/users',
-        queryParameters: userQueryParams,
-        options: options,
-      );
-      debugPrint('[GET /users SUCCESS]: ${userResp.data}');
-      addMembersFromData(userResp.data);
-    } catch (e) {
-      debugPrint('[GET /users WARNING]: $e');
     }
 
     return uniqueMembers.values.toList();

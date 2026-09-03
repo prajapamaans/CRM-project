@@ -73,24 +73,16 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
             // 1. Deal owner (fetch users)
             Builder(
               builder: (context) {
-                final ownerItems = <DropdownSearchItem<String>>[
-                  DropdownSearchItem(value: 'all', label: 'All Owners'),
-                  if (authProvider.currentUser != null)
-                    DropdownSearchItem(
-                      value: authProvider.currentUser!.id,
-                      label: authProvider.currentUser!.fullName.isNotEmpty
-                          ? authProvider.currentUser!.fullName
-                          : 'Admin User',
-                      subtext: authProvider.currentUser!.email,
-                    ),
-                  ...teamMembers.map(
-                    (m) => DropdownSearchItem(
-                      value: m.id,
-                      label: m.fullName,
-                      subtext: m.email,
-                    ),
-                  ),
-                ];
+                final Map<String, DropdownSearchItem<String>> ownerItemMap = {};
+                ownerItemMap['all'] = DropdownSearchItem(value: 'all', label: 'All Owners');
+                for (final m in teamMembers) {
+                  ownerItemMap[m.id] = DropdownSearchItem(
+                    value: m.id,
+                    label: m.fullName,
+                    subtext: m.email,
+                  );
+                }
+                final ownerItems = ownerItemMap.values.toList();
 
                 return _buildFilterPill<String>(
                   title: 'Deal owner',
@@ -252,8 +244,8 @@ class _DealInlineFilterSectionState extends State<DealInlineFilterSection> {
                 context: context,
                 barrierColor: Colors.black12,
                 builder: (dialogContext) => Dialog(
-                  alignment: Alignment.topCenter,
-                  insetPadding: const EdgeInsets.only(top: 140, left: 16, right: 16),
+                  alignment: Alignment.center,
+                  insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   elevation: 6,
                   child: _InlineDealDropdownSearchModal<T>(
@@ -391,8 +383,8 @@ class _InlineDealDropdownSearchModalState<T>
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 320,
-      constraints: const BoxConstraints(maxHeight: 420),
+      width: 360,
+      constraints: const BoxConstraints(maxHeight: 480),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),

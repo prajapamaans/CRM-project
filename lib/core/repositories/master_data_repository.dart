@@ -38,12 +38,13 @@ abstract class MasterDataRepository {
     int? page,
     int? limit,
   });
-  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true});
-  Future<EmailTemplatesResponse> getEmailTemplatesFull();
+  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true, String? departmentId});
+  Future<EmailTemplatesResponse> getEmailTemplatesFull({String? departmentId});
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data);
   Future<Map<String, dynamic>> updateEmailTemplate(String id, Map<String, dynamic> data);
   Future<List<EmailSignatureModel>> getEmailSignatures();
   Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data);
+  Future<EmailSignatureModel> updateEmailSignature(String id, Map<String, dynamic> data);
   Future<bool> deleteEmailSignature(String id);
   Future<List<Map<String, dynamic>>> getMeetingSchedulers();
   Future<Map<String, dynamic>> getSequences({int page = 1, int limit = 20});
@@ -54,7 +55,7 @@ abstract class MasterDataRepository {
   Future<List<Map<String, dynamic>>> getReportsScope();
   Future<List<Map<String, dynamic>>> getReportsUsers({int limit = 200});
   Future<List<Map<String, dynamic>>> getReportsDashboards();
-  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId});
+  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId, String? ownerId});
 }
 
 class MasterDataRepositoryImpl implements MasterDataRepository {
@@ -196,9 +197,9 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   }
 
   @override
-  Future<EmailTemplatesResponse> getEmailTemplatesFull() async {
+  Future<EmailTemplatesResponse> getEmailTemplatesFull({String? departmentId}) async {
     try {
-      return await _remoteDataSource.getEmailTemplatesFull();
+      return await _remoteDataSource.getEmailTemplatesFull(departmentId: departmentId);
     } catch (e) {
       debugPrint('[GET /api/email-templates/list ERROR]: $e');
       return const EmailTemplatesResponse(
@@ -211,9 +212,9 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true}) async {
+  Future<List<Map<String, dynamic>>> getEmailTemplates({bool flat = true, String? departmentId}) async {
     try {
-      return await _remoteDataSource.getEmailTemplates(flat: flat);
+      return await _remoteDataSource.getEmailTemplates(flat: flat, departmentId: departmentId);
     } catch (e) {
       debugPrint('[GET /api/email-templates/list ERROR]: $e');
       return [];
@@ -253,6 +254,11 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   @override
   Future<EmailSignatureModel> createEmailSignature(Map<String, dynamic> data) async {
     return await _remoteDataSource.createEmailSignature(data);
+  }
+
+  @override
+  Future<EmailSignatureModel> updateEmailSignature(String id, Map<String, dynamic> data) async {
+    return await _remoteDataSource.updateEmailSignature(id, data);
   }
 
   @override
@@ -351,9 +357,12 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
   }
 
   @override
-  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId}) async {
+  Future<Map<String, dynamic>> getReportsDashboardsDefault({String? departmentId, String? ownerId}) async {
     try {
-      return await _remoteDataSource.getReportsDashboardsDefault(departmentId: departmentId);
+      return await _remoteDataSource.getReportsDashboardsDefault(
+        departmentId: departmentId,
+        ownerId: ownerId,
+      );
     } catch (e) {
       debugPrint('[GET /api/reports/dashboards/default ERROR]: $e');
       return {};

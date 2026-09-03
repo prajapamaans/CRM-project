@@ -28,6 +28,12 @@ class SearchAndFilterBar extends StatefulWidget {
   final String? allLabel;
   final String? mineLabel;
 
+  /// Whether the All / Mine pill is shown. Screens that scope their list some
+  /// other way — the Tasks screen's status tabs, for one — turn it off so the
+  /// row holds only the search and filter controls.
+  final bool showSegments;
+  final bool filterBeforeSearch;
+
   const SearchAndFilterBar({
     super.key,
     required this.searchHint,
@@ -48,6 +54,8 @@ class SearchAndFilterBar extends StatefulWidget {
     this.onStageSelected,
     this.allLabel,
     this.mineLabel,
+    this.showSegments = true,
+    this.filterBeforeSearch = false,
   });
 
   @override
@@ -85,125 +93,128 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
   Widget build(BuildContext context) {
     final active = widget.isFilterActive || widget.isFilterExpanded;
 
+    final filterButton = GestureDetector(
+      onTap: () {
+        if (widget.onToggleFilterExpanded != null) {
+          widget.onToggleFilterExpanded!();
+        } else if (widget.onFilterTap != null) {
+          widget.onFilterTap!();
+        }
+      },
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFFE6F4F1) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: active ? const Color(0xFF00A884) : const Color(0xFFD1D5DB),
+            width: active ? 1.5 : 1,
+          ),
+        ),
+        child: Icon(
+          Icons.tune_rounded,
+          size: 20,
+          color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
+        ),
+      ),
+    );
+
+    final clearButton = (active || widget.isFilterActive || widget.isFilterExpanded)
+        ? InkWell(
+            onTap: _handleClear,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF1F0),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFFCCC7)),
+              ),
+              child: Text(
+                'Clear',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFFFF4D4F),
+                ),
+              ),
+            ),
+          )
+        : null;
+
+    final searchField = Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: widget.onSearchChanged,
+        style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          hintText: widget.searchHint,
+          hintStyle: GoogleFonts.poppins(
+            fontSize: 14,
+            color: const Color(0xFF9CA3AF),
+          ),
+          prefixIcon: const Icon(
+            Icons.search_rounded,
+            color: Color(0xFF9CA3AF),
+            size: 20,
+          ),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 11),
+        ),
+      ),
+    );
+
     return Column(
       children: [
-        // 1. Search TextField Input
-        Container(
-          height: 44,
-          decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
-          ),
-          child: TextField(
-            controller: _searchController,
-            onChanged: widget.onSearchChanged,
-            style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              hintText: widget.searchHint,
-              hintStyle: GoogleFonts.poppins(
-                fontSize: 14,
-                color: const Color(0xFF9CA3AF),
-              ),
-              prefixIcon: const Icon(
-                Icons.search_rounded,
-                color: Color(0xFF9CA3AF),
-                size: 20,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 11),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
-        // 2. Segmented Pill & Filter Icon Button Row
+        // 1. Single Top Row: Search Field on Left + Clear (if active) + Filter Button on Right
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Segment Switch (All / Mine) inside a pill box
-            Flexible(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Container(
-                  height: 36,
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildSegmentItem(index: 0, label: widget.allLabel ?? 'All'),
-                      _buildSegmentItem(index: 1, label: widget.mineLabel ?? 'Mine'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
+            Expanded(child: searchField),
             const SizedBox(width: 8),
-
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (active || widget.isFilterActive || widget.isFilterExpanded) ...[
-                  InkWell(
-                    onTap: _handleClear,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF1F0),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFFCCC7)),
-                      ),
-                      child: Text(
-                        'Clear',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFFFF4D4F),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                // Direct Filter Icon Button (Opens existing Filter UI)
-                GestureDetector(
-                  onTap: () {
-                    if (widget.onToggleFilterExpanded != null) {
-                      widget.onToggleFilterExpanded!();
-                    } else if (widget.onFilterTap != null) {
-                      widget.onFilterTap!();
-                    }
-                  },
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: active ? const Color(0xFFE6F4F1) : Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: active ? const Color(0xFF00A884) : const Color(0xFFD1D5DB),
-                        width: active ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.tune_rounded,
-                      size: 20,
-                      color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            if (clearButton != null) ...[
+              clearButton,
+              const SizedBox(width: 8),
+            ],
+            filterButton,
           ],
         ),
+
+        // 2. Optional Segmented Switch Row (if showSegments is true)
+        if (widget.showSegments) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Container(
+                    height: 36,
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildSegmentItem(index: 0, label: widget.allLabel ?? 'All'),
+                        _buildSegmentItem(index: 1, label: widget.mineLabel ?? 'Mine'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }

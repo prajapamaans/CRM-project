@@ -30,7 +30,7 @@ String parseActivityDescription(dynamic rawDescription) {
             extractText(item);
           }
           final result = sb.toString().trim();
-          if (result.isNotEmpty) return result;
+          if (result.isNotEmpty) return _cleanBrackets(result);
         }
 
         // 2. Quill Delta schema: {"ops":[{"insert":"..."}]}
@@ -42,11 +42,11 @@ String parseActivityDescription(dynamic rawDescription) {
             }
           }
           final result = sb.toString().trim();
-          if (result.isNotEmpty) return result;
+          if (result.isNotEmpty) return _cleanBrackets(result);
         }
 
         if (decoded.containsKey('text') && decoded['text'] != null) {
-          return decoded['text'].toString().trim();
+          return _cleanBrackets(decoded['text'].toString().trim());
         }
         if (decoded.containsKey('notes')) {
           return parseActivityDescription(decoded['notes']);
@@ -60,7 +60,38 @@ String parseActivityDescription(dynamic rawDescription) {
       }
     } catch (_) {}
   }
-  return str;
+
+  if (str.startsWith('[') && str.endsWith(']')) {
+    try {
+      final decoded = jsonDecode(str);
+      if (decoded is List) {
+        final List<String> parts = [];
+        for (var item in decoded) {
+          if (item is String) {
+            parts.add(item);
+          } else if (item is Map && item.containsKey('text')) {
+            parts.add(item['text'].toString());
+          } else {
+            final parsed = parseActivityDescription(item);
+            if (parsed.isNotEmpty) parts.add(parsed);
+          }
+        }
+        if (parts.isNotEmpty) {
+          return _cleanBrackets(parts.join(' ').trim());
+        }
+      }
+    } catch (_) {}
+  }
+
+  return _cleanBrackets(str);
+}
+
+String _cleanBrackets(String input) {
+  var s = input.trim();
+  if (s.startsWith('[') && s.endsWith(']')) {
+    s = s.substring(1, s.length - 1).trim();
+  }
+  return s.replaceAll('[', '').replaceAll(']', '').trim();
 }
 
 /// Parses raw activity date or map into DateTime for consistent sorting (most recent first).

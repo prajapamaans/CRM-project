@@ -23,6 +23,7 @@ import '../../../activities/presentation/widgets/create_note_modal.dart';
 import '../../../activities/presentation/widgets/create_email_modal.dart';
 import '../../../activities/presentation/widgets/log_call_modal.dart';
 import '../../../activities/presentation/widgets/log_meeting_modal.dart';
+import '../../../activities/presentation/widgets/task_activity_card_details.dart';
 import '../../data/models/company_model.dart';
 import '../../data/repositories/company_repository.dart';
 import '../providers/company_provider.dart';
@@ -1572,6 +1573,7 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
           status: (act['status'] ?? 'PENDING').toString(),
           assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
           notes: notesText,
+          queue: (act['queue'] ?? 'None').toString(),
           rawMap: act,
         ),
         companyId: _recordId,
@@ -2093,22 +2095,112 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen>
                                     const SizedBox(height: 10),
                                     const Divider(color: Color(0xFFE2E8F0), height: 1),
                                     const SizedBox(height: 10),
-                                    Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF8FAFC),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                                      ),
-                                      child: Text(
-                                        parseActivityDescription(act['description'] ?? act['notes'] ?? title),
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13,
-                                          color: const Color(0xFF334155),
+                                    if (isTask)
+                                      TaskActivityCardDetails(
+                                        activity: act,
+                                        onManageAssociations: () async {
+                                          final initialAssoc = _extractAssociations(
+                                            act,
+                                            defaultCompId: _recordId,
+                                            defaultCompName: widget.company?.name,
+                                          );
+
+                                          final result = await RecordAssociationSheet.show(
+                                            context,
+                                            initialAssociations: initialAssoc,
+                                          );
+                                          if (result != null) {
+                                            final actId = (act['id'] ?? act['_id'])?.toString();
+                                            final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
+                                            final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
+                                            final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
+                                            final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
+                                            final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
+                                            final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+
+                                            setState(() {
+                                              act['associations'] = result;
+                                              act['companyId'] = newCompId;
+                                              act['company_id'] = newCompId;
+                                              act['companyName'] = newCompName;
+                                              act['contactId'] = newCntId;
+                                              act['contact_id'] = newCntId;
+                                              act['contactName'] = newCntName;
+                                              act['dealId'] = newDealId;
+                                              act['deal_id'] = newDealId;
+                                              act['dealName'] = newDealName;
+                                            });
+
+                                            if (actId != null && actId.isNotEmpty) {
+                                              await ActivityAssociationStorage.saveAssociations(actId, result);
+                                              try {
+                                                final api = ApiService();
+                                                final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                                final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                                final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+
+                                                final List<Map<String, String>> assocList = [];
+                                                for (final id in compIds) {
+                                                  assocList.add({'objectId': id, 'objectType': 'company'});
+                                                }
+                                                for (final id in cntIds) {
+                                                  assocList.add({'objectId': id, 'objectType': 'contact'});
+                                                }
+                                                for (final id in dealIds) {
+                                                  assocList.add({'objectId': id, 'objectType': 'deal'});
+                                                }
+
+                                                final updatePayload = Map<String, dynamic>.from(act);
+                                                updatePayload['companyId'] = newCompId;
+                                                updatePayload['company_id'] = newCompId;
+                                                updatePayload['companyIds'] = compIds;
+                                                updatePayload['company_ids'] = compIds;
+                                                updatePayload['contactId'] = newCntId;
+                                                updatePayload['contact_id'] = newCntId;
+                                                updatePayload['contactIds'] = cntIds;
+                                                updatePayload['contact_ids'] = cntIds;
+                                                updatePayload['dealId'] = newDealId;
+                                                updatePayload['deal_id'] = newDealId;
+                                                updatePayload['dealIds'] = dealIds;
+                                                updatePayload['deal_ids'] = dealIds;
+                                                updatePayload['associations'] = result;
+                                                updatePayload['associationsList'] = assocList;
+                                                updatePayload['associations_list'] = assocList;
+
+                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text('Associations updated successfully'),
+                                                      duration: Duration(seconds: 1),
+                                                    ),
+                                                  );
+                                                }
+                                                await _fetchActivities();
+                                              } catch (e) {
+                                                debugPrint('[Update Association Error]: $e');
+                                              }
+                                            }
+                                          }
+                                        },
+                                      )
+                                    else
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF8FAFC),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                                        ),
+                                        child: Text(
+                                          parseActivityDescription(act['description'] ?? act['notes'] ?? title),
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            color: const Color(0xFF334155),
+                                          ),
                                         ),
                                       ),
-                                    ),
                                     const SizedBox(height: 10),
                                     InkWell(
                                        onTap: () async {

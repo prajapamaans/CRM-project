@@ -10,7 +10,13 @@ class WorkSummaryCard extends StatelessWidget {
   final bool showFilterButton;
   final VoidCallback? onFilterTap;
   final VoidCallback? onViewAllTap;
-  final void Function(String taskId, String newStatus)? onToggleTaskStatus;
+
+  /// Ticking or unticking a task. The whole row is handed over, not just its
+  /// id: what happens next — on the Dashboard, the offer of a follow-up —
+  /// needs the task's owner, priority and linked records, and re-reading them
+  /// from a list that is about to be refreshed would be racing itself.
+  final void Function(Map<String, dynamic> task, String newStatus)?
+      onToggleTaskStatus;
   final void Function(Map<String, dynamic> taskMap)? onTaskTap;
 
   const WorkSummaryCard({
@@ -355,7 +361,7 @@ class WorkSummaryCard extends StatelessWidget {
               GestureDetector(
                 onTap: () {
                   if (taskId.isNotEmpty && onToggleTaskStatus != null) {
-                    onToggleTaskStatus!(taskId, isCompleted ? 'pending' : 'completed');
+                    onToggleTaskStatus!(task, isCompleted ? 'pending' : 'completed');
                   }
                 },
                 child: Padding(

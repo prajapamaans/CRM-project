@@ -37,8 +37,10 @@ class DashboardRemoteDataSourceImpl implements DashboardRemoteDataSource {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) {
       queryParameters['ownerId'] = ownerId;
+      queryParameters['owner_id'] = ownerId;
     }
     if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['departmentId'] = departmentId;
       queryParameters['department_id'] = departmentId;
     }
     if (startDate != null && startDate.isNotEmpty) {
@@ -48,18 +50,26 @@ class DashboardRemoteDataSourceImpl implements DashboardRemoteDataSource {
       queryParameters['endDate'] = endDate;
     }
 
+    final queryUri = Uri(queryParameters: queryParameters.map((k, v) => MapEntry(k, v.toString())));
+    final fullUrl = '${ApiConstants.activitiesStats}${queryUri.query.isNotEmpty ? '?${queryUri.query}' : ''}';
+
+    debugPrint('==================================================');
+    debugPrint('[DASHBOARD STATS API REQUEST]');
+    debugPrint('Selected Department ID: ${departmentId ?? 'NONE'}');
+    debugPrint('Dashboard Start Date: ${startDate ?? 'NONE'}');
+    debugPrint('Dashboard End Date: ${endDate ?? 'NONE'}');
+    debugPrint('Dashboard API URL: $fullUrl');
+    debugPrint('==================================================');
+
     final response = await _apiService.get(
       ApiConstants.activitiesStats,
       queryParameters: queryParameters,
     );
 
-    debugPrint('========== DEPARTMENT API TRACE ==========');
-    debugPrint('Screen: Dashboard Stats');
-    debugPrint('API: ${ApiConstants.activitiesStats}');
-    debugPrint('Selected Department ID: $departmentId');
-    debugPrint('Request department_id: $departmentId');
-    debugPrint('Response status: ${response.statusCode}');
-    debugPrint('==========================================');
+    debugPrint('==================================================');
+    debugPrint('[DASHBOARD STATS API RESPONSE]');
+    debugPrint('Response Status: ${response.statusCode}');
+    debugPrint('==================================================');
 
     final Map<String, dynamic> data = response.data is Map<String, dynamic>
         ? response.data as Map<String, dynamic>
@@ -78,8 +88,12 @@ class DashboardRemoteDataSourceImpl implements DashboardRemoteDataSource {
     int? limit,
   }) async {
     final queryParameters = <String, dynamic>{};
-    if (ownerId != null && ownerId.isNotEmpty) queryParameters['ownerId'] = ownerId;
+    if (ownerId != null && ownerId.isNotEmpty) {
+      queryParameters['ownerId'] = ownerId;
+      queryParameters['owner_id'] = ownerId;
+    }
     if (departmentId != null && departmentId.isNotEmpty) {
+      queryParameters['departmentId'] = departmentId;
       queryParameters['department_id'] = departmentId;
     }
     if (startDate != null && startDate.isNotEmpty) queryParameters['startDate'] = startDate;
@@ -87,17 +101,35 @@ class DashboardRemoteDataSourceImpl implements DashboardRemoteDataSource {
     if (page != null) queryParameters['page'] = page;
     if (limit != null) queryParameters['limit'] = limit;
 
+    final queryUri = Uri(queryParameters: queryParameters.map((k, v) => MapEntry(k, v.toString())));
+    final fullUrl = '${ApiConstants.activitiesDashboardUnified}${queryUri.query.isNotEmpty ? '?${queryUri.query}' : ''}';
+
+    debugPrint('========== DASHBOARD DEPARTMENT DEBUG ==========');
+    debugPrint('Selected Department ID: ${departmentId ?? 'NONE'}');
+    debugPrint('Start Date: ${startDate ?? 'NONE'}');
+    debugPrint('End Date: ${endDate ?? 'NONE'}');
+    debugPrint('API: ${ApiConstants.activitiesDashboardUnified}');
+    debugPrint('Department Query Parameter: department_id');
+    debugPrint('Full API URL: $fullUrl');
+    debugPrint('===============================================');
+
     final response = await _apiService.get(
       ApiConstants.activitiesDashboardUnified,
       queryParameters: queryParameters,
     );
 
-    debugPrint('[GET /api/activities/dashboard-unified SUCCESS]: ${response.data}');
-
     final Map<String, dynamic> data = response.data is Map<String, dynamic>
         ? response.data as Map<String, dynamic>
         : {};
 
-    return DashboardUnifiedResponseModel.fromJson(data);
+    final result = DashboardUnifiedResponseModel.fromJson(data);
+
+    debugPrint('==================================================');
+    debugPrint('[DASHBOARD UNIFIED API RESPONSE]');
+    debugPrint('Response Status: ${response.statusCode}');
+    debugPrint('Response Activity Count: ${result.data.length}');
+    debugPrint('==================================================');
+
+    return result;
   }
 }
