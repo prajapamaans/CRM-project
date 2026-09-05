@@ -540,13 +540,14 @@ class ContactProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> deleteContact(String id) async {
+  Future<bool> deleteContact(String id, {String? departmentId}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final success = await _repository.deleteContact(id);
+      final targetDeptId = departmentId ?? _currentDepartmentId;
+      final success = await _repository.deleteContact(id, departmentId: targetDeptId);
       if (success) {
         _contacts.removeWhere((c) => c.id == id);
         _totalCount = (_totalCount - 1).clamp(0, 999999);

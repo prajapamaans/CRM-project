@@ -407,7 +407,7 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
             child: Column(
               children: [
                 SizedBox(
-                  width: 90,
+                  width: 120,
                   height: 38,
                   child: ElevatedButton(
                     onPressed: () {
@@ -416,6 +416,7 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF00A884),
                       elevation: 0,
+                      padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -432,13 +433,14 @@ class _AssociateMspModalState extends State<AssociateMspModal> {
                 ),
                 const SizedBox(height: 8),
                 SizedBox(
-                  width: 90,
+                  width: 120,
                   height: 36,
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
                       backgroundColor: const Color(0xFFF1F5F9),
                       side: BorderSide.none,
+                      padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),

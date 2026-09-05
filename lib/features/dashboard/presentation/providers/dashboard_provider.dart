@@ -135,6 +135,7 @@ class DashboardProvider extends ChangeNotifier {
     String? subtitleLabel,
     List<TeamMemberModel>? teamMembers,
     List<Map<String, dynamic>>? reportUsers,
+    DateTime? customTaskDate,
   }) async {
     _currentOwnerId = ownerId;
     _currentDepartmentId = departmentId;
@@ -177,6 +178,7 @@ class DashboardProvider extends ChangeNotifier {
       fetchDashboardTasks(
         ownerId: ownerId,
         departmentId: departmentId,
+        customTaskDate: customTaskDate,
       ),
       fetchActivityLeaderboard(
           startDate: startDate,
@@ -196,26 +198,64 @@ class DashboardProvider extends ChangeNotifier {
     ]);
   }
 
+  /// The work-summary groups, keyed by the local calendar day they were asked
+  /// for. Each one is a separate backend query — see [fetchTasksForDate].
+  final Map<String, TaskWorkGroup> _tasksByDate = {};
+
+  /// The days whose tasks have been asked for at least once, so a reload (a
+  /// department switch, a pull-to-refresh, a task being saved) fetches the same
+  /// set again — including whatever custom date the user has chosen.
+  final Set<DateTime> _trackedTaskDates = {};
+
+  static String _dayKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  /// Loads the work-summary days the Dashboard shows: today, yesterday, and
+  /// any custom date the user has picked.
+  ///
+  /// Each day is its own `GET /api/activities` call filtered server-side.
+  /// This used to fetch 200 tasks with no date filter and pick the matching
+  /// days out in Dart, which silently lost days in any department holding more
+  /// tasks than that — this one holds over 1,500.
   Future<void> fetchDashboardTasks({
     String? ownerId,
     String? departmentId,
+    DateTime? customTaskDate,
   }) async {
+    // Today is worked out at the moment of the request, from the device clock,
+    // so the Dashboard opens on the real current day rather than on whatever
+    // day the screen was built.
+    final now = DateTime.now();
+    _trackedTaskDates
+      ..add(DateTime(now.year, now.month, now.day))
+      ..add(DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1)));
+    if (customTaskDate != null) {
+      _trackedTaskDates.add(
+        DateTime(customTaskDate.year, customTaskDate.month, customTaskDate.day),
+      );
+    }
+
     final ticket = _guard.begin(_tasksKey, departmentId);
     _isLoadingTasks = true;
     _tasksError = null;
     notifyListeners();
 
     try {
-      final masterRepo = MasterDataRepositoryImpl();
-      // Fetch type=task with limit=200 and no status filter so both pending and completed are returned
-      final fetched = await masterRepo.getActivities(
-        type: 'task',
-        limit: 200,
-        ownerId: ownerId,
-        departmentId: departmentId,
-      );
+      final days = _trackedTaskDates.toList();
+      final groups = await Future.wait(days.map((day) => _loadTasksForDay(
+            day,
+            ownerId: ownerId,
+            departmentId: departmentId,
+          )));
       if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
-      _dashboardTasks = fetched;
+
+      // Replaced wholesale, never merged: a day's tasks are whatever the
+      // backend answered for that day just now.
+      for (var i = 0; i < days.length; i++) {
+        _tasksByDate[_dayKey(days[i])] = groups[i];
+      }
     } catch (e) {
       debugPrint('[DashboardProvider fetchDashboardTasks Error]: $e');
       if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
@@ -230,144 +270,103 @@ class DashboardProvider extends ChangeNotifier {
     }
   }
 
-  /// Reusable date + status task classification mechanism.
-  /// Uses [scheduledAt] (fallback to dueDate/createdAt), converts UTC to local timezone,
-  /// and compares calendar date with [date].
-  TaskWorkGroup getTasksForDate(DateTime date) {
-    final targetYear = date.year;
-    final targetMonth = date.month;
-    final targetDay = date.day;
+  /// Loads one day on its own — what the custom-date picker calls, so choosing
+  /// a date fetches that date instead of hunting through what is already held.
+  Future<void> fetchTasksForDate(
+    DateTime date, {
+    String? ownerId,
+    String? departmentId,
+  }) async {
+    final day = DateTime(date.year, date.month, date.day);
+    _trackedTaskDates.add(day);
 
-    final List<Map<String, dynamic>> pending = [];
-    final List<Map<String, dynamic>> completed = [];
+    final ticket = _guard.begin(_tasksKey, departmentId);
+    _isLoadingTasks = true;
+    notifyListeners();
 
-    // Combine candidate tasks from _dashboardTasks AND _unifiedFeed.data
-    final List<Map<String, dynamic>> candidateTasks = [..._dashboardTasks];
-    final Set<String> existingIds = candidateTasks
-        .map((t) => (t['id'] ?? t['_id'])?.toString())
-        .whereType<String>()
-        .toSet();
-
-    if (_unifiedFeed != null) {
-      for (final act in _unifiedFeed!.data) {
-        final actType = (act.type ?? '').toLowerCase();
-        if (actType == 'task' || actType == 'to-do' || actType == 'todo') {
-          if (!existingIds.contains(act.id)) {
-            existingIds.add(act.id);
-            candidateTasks.add({
-              'id': act.id,
-              'title': act.title,
-              'type': act.type,
-              'status': act.status,
-              'scheduledAt': act.dueDate ?? act.createdAt,
-              'dueDate': act.dueDate,
-              'createdAt': act.createdAt,
-              'description': act.description,
-              'ownerId': act.ownerId,
-              'ownerName': act.ownerName,
-            });
-          }
-        }
+    try {
+      final group = await _loadTasksForDay(day, ownerId: ownerId, departmentId: departmentId);
+      if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
+      _tasksByDate[_dayKey(day)] = group;
+    } catch (e) {
+      debugPrint('[DashboardProvider fetchTasksForDate Error]: $e');
+      if (!_guard.mayApply(_tasksKey, ticket, departmentId)) return;
+      _tasksError = e.toString();
+    } finally {
+      if (_guard.mayApply(_tasksKey, ticket, departmentId)) {
+        _isLoadingTasks = false;
+        notifyListeners();
       }
     }
+  }
 
-    int totalCandidates = candidateTasks.length;
-    int deptMatchedCount = 0;
-    int ownerMatchedCount = 0;
-    int finalMatchedCount = 0;
+  /// One day's tasks, split into pending and completed.
+  ///
+  /// `startDate`/`endDate` filter `/api/activities` on `scheduledAt`, and they
+  /// are timestamps rather than plain dates — a bare `endDate=2026-09-03` is
+  /// read as that day's midnight, so a single-day range would come back empty.
+  /// The local day's bounds are therefore sent in full, converted to UTC.
+  Future<TaskWorkGroup> _loadTasksForDay(
+    DateTime day, {
+    String? ownerId,
+    String? departmentId,
+  }) async {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = DateTime(day.year, day.month, day.day, 23, 59, 59, 999);
 
-    for (final task in candidateTasks) {
-      // 1. Department Filter Check
-      final taskDeptId = (task['departmentId'] ??
-              task['department_id'] ??
-              (task['department'] is Map ? task['department']['id'] : null) ??
-              (task['department'] is Map ? task['department']['_id'] : null))
-          ?.toString()
-          .trim();
-      bool deptMatch = true;
-      if (_currentDepartmentId != null && _currentDepartmentId!.isNotEmpty) {
-        if (taskDeptId != null && taskDeptId.isNotEmpty && taskDeptId != _currentDepartmentId) {
-          deptMatch = false;
-        }
-      }
-      if (deptMatch) deptMatchedCount++;
+    final result = await MasterDataRepositoryImpl().getActivitiesWithMeta(
+      type: 'task',
+      page: 1,
+      limit: _dayTaskLimit,
+      ownerId: ownerId,
+      departmentId: departmentId,
+      startDate: start.toUtc().toIso8601String(),
+      endDate: end.toUtc().toIso8601String(),
+    );
 
-      // 2. Owner Filter Check (for MY WORK mode)
-      bool ownerMatch = true;
-      if (_currentOwnerId != null && _currentOwnerId!.isNotEmpty) {
-        final taskOwnerId = (task['ownerId'] ??
-                task['owner_id'] ??
-                (task['owner'] is Map ? task['owner']['id'] : null) ??
-                (task['owner'] is Map ? task['owner']['_id'] : null) ??
-                task['userId'] ??
-                task['user_id'])
-            ?.toString()
-            .trim();
-        if (taskOwnerId != null && taskOwnerId.isNotEmpty && taskOwnerId != _currentOwnerId) {
-          ownerMatch = false;
-        }
-      }
-      if (ownerMatch) ownerMatchedCount++;
-
-      if (!deptMatch || !ownerMatch) continue;
-      finalMatchedCount++;
-
-      final rawScheduled = task['scheduledAt'] ??
-          task['scheduled_at'] ??
-          task['dueDate'] ??
-          task['due_date'] ??
-          task['createdAt'] ??
-          task['created_at'];
-
-      if (rawScheduled == null) continue;
-
-      DateTime? dt;
-      if (rawScheduled is DateTime) {
-        dt = rawScheduled;
-      } else {
-        final str = rawScheduled.toString().trim();
-        if (str.isNotEmpty) {
-          dt = DateTime.tryParse(str);
-        }
-      }
-
-      if (dt == null) continue;
-
-      final utcDt = dt.toUtc();
-      final localDt = dt.isUtc ? dt.toLocal() : dt;
-
-      final matchesLocal = (localDt.year == targetYear &&
-          localDt.month == targetMonth &&
-          localDt.day == targetDay);
-
-      final matchesUtc = (utcDt.year == targetYear &&
-          utcDt.month == targetMonth &&
-          utcDt.day == targetDay);
-
-      if (matchesLocal || matchesUtc) {
-        final statusVal = (task['status'] ?? 'pending').toString().trim().toLowerCase();
-        if (statusVal == 'completed') {
-          completed.add(task);
-        } else {
-          pending.add(task);
-        }
-      }
+    final rows = (result['data'] as List?)?.whereType<Map<String, dynamic>>().toList() ??
+        const <Map<String, dynamic>>[];
+    final total = (result['total'] as int?) ?? rows.length;
+    if (total > rows.length) {
+      debugPrint('[DashboardProvider] ${_dayKey(day)} holds $total tasks but only '
+          '${rows.length} were loaded — raise _dayTaskLimit or page this card.');
     }
 
-    debugPrint('========== DASHBOARD MY WORK DEBUG ==========');
-    debugPrint('Mode: ${_currentOwnerId != null && _currentOwnerId!.isNotEmpty ? "MY_WORK" : "TEAM"}');
-    debugPrint('Selected Department ID: ${_currentDepartmentId ?? 'NONE'}');
-    debugPrint('Logged-in User ID: ${_currentOwnerId ?? 'NONE (TEAM MODE)'}');
-    debugPrint('Target Date: ${date.toIso8601String()}');
-    debugPrint('Total Candidates: $totalCandidates');
-    debugPrint('Department Matching Records: $deptMatchedCount');
-    debugPrint('Owner Matching Records: $ownerMatchedCount');
-    debugPrint('Final My Work Records: $finalMatchedCount');
-    debugPrint('Pending Tasks for Date: ${pending.length}');
-    debugPrint('Completed Tasks for Date: ${completed.length}');
-    debugPrint('==============================================');
+    // The id is the identity of a task, so a row can never be counted twice.
+    final seen = <String>{};
+    final pending = <Map<String, dynamic>>[];
+    final completed = <Map<String, dynamic>>[];
+
+    for (final task in rows) {
+      final id = (task['id'] ?? task['_id'])?.toString();
+      if (id != null && id.isNotEmpty && !seen.add(id)) continue;
+      final status = (task['status'] ?? 'pending').toString().trim().toLowerCase();
+      (status == 'completed' ? completed : pending).add(task);
+    }
+
+    debugPrint('[DashboardProvider] tasks for ${_dayKey(day)}: '
+        'pending=${pending.length} completed=${completed.length} of meta.total=$total '
+        '(department=${departmentId ?? '(from token)'}, owner=${ownerId ?? 'all'})');
 
     return TaskWorkGroup(pendingTasks: pending, completedTasks: completed);
+  }
+
+  /// How many tasks one work-summary card loads for its day.
+  static const int _dayTaskLimit = 100;
+
+  /// The tasks for one calendar day, as the backend answered for that day.
+  ///
+  /// The grouping is no longer worked out here: [fetchTasksForDate] asks
+  /// `/api/activities` for the day itself, so the card shows what the backend
+  /// holds rather than whatever happened to be inside a locally cached window.
+  /// A day that has not been fetched yet reads as empty until it arrives.
+  TaskWorkGroup getTasksForDate(DateTime date) {
+    final group = _tasksByDate[_dayKey(date)];
+    if (group == null) {
+      debugPrint('[DashboardProvider] no tasks loaded yet for ${_dayKey(date)}');
+      return TaskWorkGroup(pendingTasks: const [], completedTasks: const []);
+    }
+    return group;
   }
 
   /// The follow-up already created for a given task in this session, so a
@@ -404,8 +403,11 @@ class DashboardProvider extends ChangeNotifier {
     if (previous != null) {
       _dashboardTasks[index] = Map<String, dynamic>.from(previous)
         ..['status'] = newStatus;
-      notifyListeners();
     }
+    // The day cards read from `_tasksByDate`, so the tick has to move the row
+    // between that day's halves to answer immediately.
+    final restoreGroups = _moveTaskBetweenGroups(taskId, newStatus);
+    notifyListeners();
 
     try {
       final data = await _writeTaskStatus(taskId, newStatus, departmentId);
@@ -419,15 +421,57 @@ class DashboardProvider extends ChangeNotifier {
         _dashboardTasks[index] = merged;
         notifyListeners();
       }
+
+      // The write went through, so the cards are refilled from the backend
+      // rather than left showing this edit — the counts on screen are then the
+      // backend's, not an increment applied here.
+      await fetchDashboardTasks(
+        ownerId: _currentOwnerId,
+        departmentId: departmentId ?? _currentDepartmentId,
+      );
       return merged;
     } catch (e) {
       debugPrint('[DashboardProvider setTaskStatus Error]: $e');
       if (previous != null && index != -1) {
         _dashboardTasks[index] = previous;
-        notifyListeners();
       }
+      restoreGroups();
+      notifyListeners();
       rethrow;
     }
+  }
+
+  /// Moves the task with [taskId] into the half of its day card that
+  /// [newStatus] belongs to. Answers with a callback that puts the day groups
+  /// back the way they were, for when the write fails.
+  VoidCallback _moveTaskBetweenGroups(String taskId, String newStatus) {
+    final snapshot = Map<String, TaskWorkGroup>.from(_tasksByDate);
+
+    _tasksByDate.updateAll((day, group) {
+      final all = [...group.pendingTasks, ...group.completedTasks];
+      final holdsIt = all.any((t) => (t['id'] ?? t['_id'])?.toString() == taskId);
+      if (!holdsIt) return group;
+
+      final pending = <Map<String, dynamic>>[];
+      final completed = <Map<String, dynamic>>[];
+      for (final task in all) {
+        final isTarget = (task['id'] ?? task['_id'])?.toString() == taskId;
+        final status = isTarget
+            ? newStatus
+            : (task['status'] ?? 'pending').toString().trim().toLowerCase();
+        final row = isTarget
+            ? (Map<String, dynamic>.from(task)..['status'] = newStatus)
+            : task;
+        (status.toLowerCase() == 'completed' ? completed : pending).add(row);
+      }
+      return TaskWorkGroup(pendingTasks: pending, completedTasks: completed);
+    });
+
+    return () {
+      _tasksByDate
+        ..clear()
+        ..addAll(snapshot);
+    };
   }
 
   /// Writes the status and returns whatever activity object came back.

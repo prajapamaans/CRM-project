@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/navigation/route_names.dart';
@@ -26,6 +27,8 @@ import '../../../activities/presentation/widgets/log_meeting_modal.dart';
 import '../../../activities/presentation/widgets/task_activity_card_details.dart';
 import '../../data/models/contact_model.dart';
 import '../../data/repositories/contact_repository.dart';
+import '../../../companies/data/repositories/company_repository.dart';
+import '../../../deals/data/repositories/deal_repository.dart';
 import '../providers/contact_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 
@@ -182,6 +185,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   final GlobalKey _highlightedActivityKey = GlobalKey();
   final ScrollController _activitiesScrollController = ScrollController();
   bool _hasScrolledToHighlight = false;
+
+  /// Clears the highlight once it has done its job. See
+  /// [_startHighlightFadeOut].
+  Timer? _highlightTimer;
   String _lastActivityDateStr = '--';
 
   @override
@@ -200,8 +207,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     _phoneController = TextEditingController(text: c?.phone ?? '');
     _jobTitleController = TextEditingController(text: c?.jobTitle ?? '');
     _companyController = TextEditingController(text: c?.companyName ?? '');
-    _ownerController =
-        TextEditingController(text: c?.ownerName ?? 'Admin User');
+    _ownerController = TextEditingController(
+      text: c?.ownerName ?? 'Admin User',
+    );
     _mspController = TextEditingController(text: '');
     _searchActivitiesController = TextEditingController();
     _startDateController = TextEditingController();
@@ -247,15 +255,24 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       if (mounted) {
         setState(() {
           // Update controllers if updated
-          if (contactModel.firstName != null) _firstNameController.text = contactModel.firstName!;
-          if (contactModel.lastName != null) _lastNameController.text = contactModel.lastName!;
-          if (contactModel.email.isNotEmpty) _emailController.text = contactModel.email;
-          if (contactModel.phone != null) _phoneController.text = contactModel.phone!;
-          if (contactModel.jobTitle != null) _jobTitleController.text = contactModel.jobTitle!;
-          if (contactModel.companyName != null) _companyController.text = contactModel.companyName!;
-          if (contactModel.ownerName != null) _ownerController.text = contactModel.ownerName!;
-          if (contactModel.lifecycleStage != null) _lifecycleStage = contactModel.lifecycleStage!;
-          if (contactModel.leadStatus != null) _leadStatus = contactModel.leadStatus!;
+          if (contactModel.firstName != null)
+            _firstNameController.text = contactModel.firstName!;
+          if (contactModel.lastName != null)
+            _lastNameController.text = contactModel.lastName!;
+          if (contactModel.email.isNotEmpty)
+            _emailController.text = contactModel.email;
+          if (contactModel.phone != null)
+            _phoneController.text = contactModel.phone!;
+          if (contactModel.jobTitle != null)
+            _jobTitleController.text = contactModel.jobTitle!;
+          if (contactModel.companyName != null)
+            _companyController.text = contactModel.companyName!;
+          if (contactModel.ownerName != null)
+            _ownerController.text = contactModel.ownerName!;
+          if (contactModel.lifecycleStage != null)
+            _lifecycleStage = contactModel.lifecycleStage!;
+          if (contactModel.leadStatus != null)
+            _leadStatus = contactModel.leadStatus!;
 
           // Update associations from API response
           _associatedCompanies.clear();
@@ -263,9 +280,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
             for (final comp in contactModel.associatedCompanies!) {
               _associatedCompanies.add({
                 'id': comp['id']?.toString() ?? '',
-                'name': comp['name']?.toString() ?? comp['companyName']?.toString() ?? '',
-                'subtext': comp['domain']?.toString() ?? comp['companyDomain']?.toString() ?? '',
-                'isPrimary': comp['isPrimary'] == true || comp['primary'] == true,
+                'name':
+                    comp['name']?.toString() ??
+                    comp['companyName']?.toString() ??
+                    '',
+                'subtext':
+                    comp['domain']?.toString() ??
+                    comp['companyDomain']?.toString() ??
+                    '',
+                'isPrimary':
+                    comp['isPrimary'] == true || comp['primary'] == true,
               });
             }
           }
@@ -274,9 +298,17 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           if (contactModel.associatedContacts != null) {
             for (final cont in contactModel.associatedContacts!) {
               final rawName = cont['name']?.toString() ?? '';
-              final firstName = cont['firstName']?.toString() ?? cont['first_name']?.toString() ?? '';
-              final lastName = cont['lastName']?.toString() ?? cont['last_name']?.toString() ?? '';
-              final fullName = rawName.isNotEmpty ? rawName : '$firstName $lastName'.trim();
+              final firstName =
+                  cont['firstName']?.toString() ??
+                  cont['first_name']?.toString() ??
+                  '';
+              final lastName =
+                  cont['lastName']?.toString() ??
+                  cont['last_name']?.toString() ??
+                  '';
+              final fullName = rawName.isNotEmpty
+                  ? rawName
+                  : '$firstName $lastName'.trim();
               final email = cont['email']?.toString() ?? '';
 
               _associatedContacts.add({
@@ -284,8 +316,12 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                 'name': fullName.isNotEmpty ? fullName : 'Unnamed Contact',
                 'subtext': email.isNotEmpty ? email : '-',
                 'email': email,
-                'jobTitle': cont['jobTitle']?.toString() ?? cont['job_title']?.toString() ?? '',
-                'isPrimary': cont['isPrimary'] == true || cont['primary'] == true,
+                'jobTitle':
+                    cont['jobTitle']?.toString() ??
+                    cont['job_title']?.toString() ??
+                    '',
+                'isPrimary':
+                    cont['isPrimary'] == true || cont['primary'] == true,
               });
             }
           }
@@ -321,11 +357,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           // Several MSPs can be stored on one record as a comma-separated
           // string; keeping them whole showed 'Magnit, Beeline' as one entry.
           _associatedMsps = MspFieldUtils.namesFrom(contactModel.msp)
-              .map((name) => {
-                    'id': name,
-                    'name': name,
-                    'subtext': 'Managed Service Provider',
-                  })
+              .map(
+                (name) => {
+                  'id': name,
+                  'name': name,
+                  'subtext': 'Managed Service Provider',
+                },
+              )
               .toList();
         });
       }
@@ -358,8 +396,12 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     final search = _searchActivitiesController.text.trim().toLowerCase();
 
     return _activities.where((act) {
-      final type = (act['type'] ?? act['activityType'] ?? '').toString().toUpperCase();
-      final fieldKey = (act['fieldKey'] ?? act['field_key'] ?? '').toString().toLowerCase();
+      final type = (act['type'] ?? act['activityType'] ?? '')
+          .toString()
+          .toUpperCase();
+      final fieldKey = (act['fieldKey'] ?? act['field_key'] ?? '')
+          .toString()
+          .toLowerCase();
 
       // 1. Sub-tab filter
       if (_selectedActivitySubTab == 1) {
@@ -367,42 +409,61 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         if (!type.contains('NOTE') && !fieldKey.contains('note')) return false;
       } else if (_selectedActivitySubTab == 2) {
         // Emails
-        if (!type.contains('EMAIL') && !fieldKey.contains('email')) return false;
+        if (!type.contains('EMAIL') && !fieldKey.contains('email'))
+          return false;
       } else if (_selectedActivitySubTab == 3) {
         // Calls
         if (!type.contains('CALL') && !fieldKey.contains('call')) return false;
       } else if (_selectedActivitySubTab == 4) {
         // Tasks
-        if (!type.contains('TASK') && !type.contains('TO-DO') && !type.contains('TO_DO') && !fieldKey.contains('task')) return false;
+        if (!type.contains('TASK') &&
+            !type.contains('TO-DO') &&
+            !type.contains('TO_DO') &&
+            !fieldKey.contains('task'))
+          return false;
       } else if (_selectedActivitySubTab == 5) {
         // Meetings
-        if (!type.contains('MEETING') && !fieldKey.contains('meeting')) return false;
+        if (!type.contains('MEETING') && !fieldKey.contains('meeting'))
+          return false;
       }
 
       // 2. Search query filter
       if (search.isNotEmpty) {
-        final title = (act['title'] ?? act['notes'] ?? act['type'] ?? '').toString().toLowerCase();
+        final title = (act['title'] ?? act['notes'] ?? act['type'] ?? '')
+            .toString()
+            .toLowerCase();
         final notes = (act['notes'] ?? '').toString().toLowerCase();
-        final ownerName = (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '').toString().toLowerCase();
-        if (!title.contains(search) && !notes.contains(search) && !ownerName.contains(search) && !type.toLowerCase().contains(search)) {
+        final ownerName =
+            (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '')
+                .toString()
+                .toLowerCase();
+        if (!title.contains(search) &&
+            !notes.contains(search) &&
+            !ownerName.contains(search) &&
+            !type.toLowerCase().contains(search)) {
           return false;
         }
       }
 
       // 3. Assignee Filter
       if (_selectedAssigneeFilter != 'Activity assigned to') {
-        final ownerName = (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '').toString();
+        final ownerName =
+            (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '')
+                .toString();
         if (_selectedAssigneeFilter == 'Unassigned') {
           if (ownerName.isNotEmpty && ownerName != 'Unassigned') return false;
         } else {
-          if (!ownerName.toLowerCase().contains(_selectedAssigneeFilter.toLowerCase())) {
+          if (!ownerName.toLowerCase().contains(
+            _selectedAssigneeFilter.toLowerCase(),
+          )) {
             return false;
           }
         }
       }
 
       // 4. Date Filter
-      final rawDateStr = act['createdAt'] ?? act['scheduledAt'] ?? act['date'] ?? '';
+      final rawDateStr =
+          act['createdAt'] ?? act['scheduledAt'] ?? act['date'] ?? '';
       if (rawDateStr.toString().isNotEmpty) {
         DateTime? dt;
         try {
@@ -417,21 +478,30 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           if (_selectedDateFilter == 'Today') {
             if (dt.isBefore(todayStart)) return false;
           } else if (_selectedDateFilter == 'Yesterday') {
-            if (dt.isBefore(yesterdayStart) || dt.isAfter(todayStart)) return false;
+            if (dt.isBefore(yesterdayStart) || dt.isAfter(todayStart))
+              return false;
           } else if (_selectedDateFilter == 'This week') {
-            final startOfWeek = todayStart.subtract(Duration(days: now.weekday - 1));
+            final startOfWeek = todayStart.subtract(
+              Duration(days: now.weekday - 1),
+            );
             if (dt.isBefore(startOfWeek)) return false;
           } else if (_selectedDateFilter == 'Last week') {
-            final startOfThisWeek = todayStart.subtract(Duration(days: now.weekday - 1));
-            final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
-            if (dt.isBefore(startOfLastWeek) || dt.isAfter(startOfThisWeek)) return false;
+            final startOfThisWeek = todayStart.subtract(
+              Duration(days: now.weekday - 1),
+            );
+            final startOfLastWeek = startOfThisWeek.subtract(
+              const Duration(days: 7),
+            );
+            if (dt.isBefore(startOfLastWeek) || dt.isAfter(startOfThisWeek))
+              return false;
           } else if (_selectedDateFilter == 'This month') {
             final startOfMonth = DateTime(now.year, now.month, 1);
             if (dt.isBefore(startOfMonth)) return false;
           } else if (_selectedDateFilter == 'Last month') {
             final startOfThisMonth = DateTime(now.year, now.month, 1);
             final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-            if (dt.isBefore(startOfLastMonth) || dt.isAfter(startOfThisMonth)) return false;
+            if (dt.isBefore(startOfLastMonth) || dt.isAfter(startOfThisMonth))
+              return false;
           } else if (_selectedDateFilter == 'This year') {
             final startOfYear = DateTime(now.year, 1, 1);
             if (dt.isBefore(startOfYear)) return false;
@@ -463,8 +533,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       if (rawAssoc['Companies'] is List) {
         for (final item in rawAssoc['Companies']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-            final name = (item['name'] ?? item['title'])?.toString() ?? 'Company';
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
+            final name =
+                (item['name'] ?? item['title'])?.toString() ?? 'Company';
             if (id != null && id.isNotEmpty) {
               if (!result['Companies']!.any((x) => x['id'] == id)) {
                 result['Companies']!.add({'id': id, 'name': name});
@@ -476,8 +548,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       if (rawAssoc['Contacts'] is List) {
         for (final item in rawAssoc['Contacts']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-            final name = (item['name'] ?? item['title'])?.toString() ?? 'Contact';
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
+            final name =
+                (item['name'] ?? item['title'])?.toString() ?? 'Contact';
             if (id != null && id.isNotEmpty) {
               if (!result['Contacts']!.any((x) => x['id'] == id)) {
                 result['Contacts']!.add({'id': id, 'name': name});
@@ -489,7 +563,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       if (rawAssoc['Deals'] is List) {
         for (final item in rawAssoc['Deals']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
             final name = (item['name'] ?? item['title'])?.toString() ?? 'Deal';
             if (id != null && id.isNotEmpty) {
               if (!result['Deals']!.any((x) => x['id'] == id)) {
@@ -502,8 +577,11 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     } else if (rawAssoc is List) {
       for (final item in rawAssoc) {
         if (item is Map) {
-          final id = (item['objectId'] ?? item['id'] ?? item['_id'])?.toString();
-          final type = (item['objectType'] ?? item['type'])?.toString().toLowerCase();
+          final id = (item['objectId'] ?? item['id'] ?? item['_id'])
+              ?.toString();
+          final type = (item['objectType'] ?? item['type'])
+              ?.toString()
+              .toLowerCase();
           final name = (item['name'] ?? item['title'])?.toString();
           if (id != null && id.isNotEmpty) {
             if (type == 'company' || type == 'companies') {
@@ -524,21 +602,60 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       }
     }
 
-    final cId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? defaultCompId)?.toString();
-    final cName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null) ?? defaultCompName ?? 'Company').toString();
-    if (cId != null && cId.isNotEmpty && !result['Companies']!.any((x) => x['id'] == cId)) {
+    final cId =
+        (act['companyId'] ??
+                act['company_id'] ??
+                (act['company'] is Map ? act['company']['id'] : null) ??
+                defaultCompId)
+            ?.toString();
+    final cName =
+        (act['companyName'] ??
+                act['company_name'] ??
+                (act['company'] is Map ? act['company']['name'] : null) ??
+                defaultCompName ??
+                'Company')
+            .toString();
+    if (cId != null &&
+        cId.isNotEmpty &&
+        !result['Companies']!.any((x) => x['id'] == cId)) {
       result['Companies']!.add({'id': cId, 'name': cName});
     }
 
-    final cntId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null) ?? defaultContactId)?.toString();
-    final cntName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['name'] : null) ?? defaultContactName ?? 'Contact').toString();
-    if (cntId != null && cntId.isNotEmpty && !result['Contacts']!.any((x) => x['id'] == cntId)) {
+    final cntId =
+        (act['contactId'] ??
+                act['contact_id'] ??
+                (act['contact'] is Map ? act['contact']['id'] : null) ??
+                defaultContactId)
+            ?.toString();
+    final cntName =
+        (act['contactName'] ??
+                act['contact_name'] ??
+                (act['contact'] is Map ? act['contact']['name'] : null) ??
+                defaultContactName ??
+                'Contact')
+            .toString();
+    if (cntId != null &&
+        cntId.isNotEmpty &&
+        !result['Contacts']!.any((x) => x['id'] == cntId)) {
       result['Contacts']!.add({'id': cntId, 'name': cntName});
     }
 
-    final dId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null) ?? defaultDealId)?.toString();
-    final dName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['name'] : null) ?? defaultDealName ?? 'Deal').toString();
-    if (dId != null && dId.isNotEmpty && !result['Deals']!.any((x) => x['id'] == dId)) {
+    final dId =
+        (act['dealId'] ??
+                act['deal_id'] ??
+                (act['deal'] is Map ? act['deal']['id'] : null) ??
+                defaultDealId)
+            ?.toString();
+    final dName =
+        (act['dealName'] ??
+                act['deal_name'] ??
+                (act['deal'] is Map ? act['deal']['name'] : null) ??
+                defaultDealName ??
+                'Deal')
+            .toString();
+    if (dId != null &&
+        dId.isNotEmpty &&
+        !result['Deals']!.any((x) => x['id'] == dId)) {
       result['Deals']!.add({'id': dId, 'name': dName});
     }
 
@@ -565,21 +682,43 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       final allActivitiesList = results[2];
 
       final associatedList = allActivitiesList.where((act) {
-        final cntId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null))?.toString();
+        final cntId =
+            (act['contactId'] ??
+                    act['contact_id'] ??
+                    (act['contact'] is Map ? act['contact']['id'] : null))
+                ?.toString();
         if (cntId == contactId) return true;
-        if (ActivityAssociationStorage.isAssociatedWithEntity(act, 'contact', contactId)) return true;
+        if (ActivityAssociationStorage.isAssociatedWithEntity(
+          act,
+          'contact',
+          contactId,
+        ))
+          return true;
         if (act['associations'] is Map) {
           final cnts = (act['associations'] as Map)['Contacts'];
           if (cnts is List) {
-            return cnts.any((item) => (item is Map ? item['id']?.toString() : item?.toString()) == contactId);
+            return cnts.any(
+              (item) =>
+                  (item is Map ? item['id']?.toString() : item?.toString()) ==
+                  contactId,
+            );
           }
         } else if (act['associations'] is List) {
-          return (act['associations'] as List).any((item) => item is Map && (item['objectId']?.toString() == contactId || item['id']?.toString() == contactId));
+          return (act['associations'] as List).any(
+            (item) =>
+                item is Map &&
+                (item['objectId']?.toString() == contactId ||
+                    item['id']?.toString() == contactId),
+          );
         }
         return false;
       }).toList();
 
-      final combined = <Map<String, dynamic>>[...activitiesList, ...timelineList, ...associatedList];
+      final combined = <Map<String, dynamic>>[
+        ...activitiesList,
+        ...timelineList,
+        ...associatedList,
+      ];
       // Deduplicate by id if available
       final seenIds = <String>{};
       final uniqueList = <Map<String, dynamic>>[];
@@ -601,21 +740,22 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         return dtB.compareTo(dtA);
       });
 
-        String updatedLastDate = '--';
-        if (uniqueList.isNotEmpty) {
-          final dt = parseActivityDateTime(uniqueList.first);
-          if (dt.millisecondsSinceEpoch > 0) {
-            final local = dt.toLocal();
-            updatedLastDate = '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-          }
+      String updatedLastDate = '--';
+      if (uniqueList.isNotEmpty) {
+        final dt = parseActivityDateTime(uniqueList.first);
+        if (dt.millisecondsSinceEpoch > 0) {
+          final local = dt.toLocal();
+          updatedLastDate =
+              '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
         }
+      }
 
-        if (mounted) {
-          setState(() {
-            _activities = uniqueList;
-            _lastActivityDateStr = updatedLastDate;
-          });
-        }
+      if (mounted) {
+        setState(() {
+          _activities = uniqueList;
+          _lastActivityDateStr = updatedLastDate;
+        });
+      }
     } catch (e) {
       debugPrint('[ContactDetailsScreen _fetchActivities ERROR]: $e');
     } finally {
@@ -635,7 +775,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   Future<void> _scrollToHighlightedActivity() async {
     final id = _highlightedActivityId;
     if (id == null || _hasScrolledToHighlight) return;
-    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id)) return;
+    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id))
+      return;
 
     // Only counts as done once it actually scrolled — if the Activities tab
     // was not built yet, the next load tries again.
@@ -643,10 +784,26 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       controller: _activitiesScrollController,
       itemKey: _highlightedActivityKey,
     );
+    if (_hasScrolledToHighlight) _startHighlightFadeOut(id);
+  }
+
+  /// Clears the highlight a few seconds after the row has been found.
+  ///
+  /// The highlight is there to point the activity out after arriving from a
+  /// notification, not to mark it permanently — once it has been seen the row
+  /// goes back to looking like every other one. A highlight the user has since
+  /// moved by tapping another row is left alone.
+  void _startHighlightFadeOut(String id) {
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted || _highlightedActivityId != id) return;
+      setState(() => _highlightedActivityId = null);
+    });
   }
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _activitiesScrollController.dispose();
     _tabController.dispose();
     _firstNameController.dispose();
@@ -694,7 +851,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   }
 
   String get _formattedLastActivityDate {
-    return formatLastActivityDateFromList(_activities, fallback: _lastActivityDateStr);
+    return formatLastActivityDateFromList(
+      _activities,
+      fallback: _lastActivityDateStr,
+    );
   }
 
   /// The MSP value to persist. The picker's 'None' entry means "no MSP".
@@ -744,19 +904,30 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       'msp': _mspValueForApi(),
     };
 
-    final success = await context.read<ContactProvider>().updateContact(contactId, payload);
+    final success = await context.read<ContactProvider>().updateContact(
+      contactId,
+      payload,
+    );
 
     if (mounted) {
       final updatedCont = context.read<ContactProvider>().selectedContact;
       if (updatedCont != null) {
-        if (updatedCont.firstName != null) _firstNameController.text = updatedCont.firstName!;
-        if (updatedCont.lastName != null) _lastNameController.text = updatedCont.lastName!;
-        if (updatedCont.email.isNotEmpty) _emailController.text = updatedCont.email;
-        if (updatedCont.phone != null) _phoneController.text = updatedCont.phone!;
-        if (updatedCont.jobTitle != null) _jobTitleController.text = updatedCont.jobTitle!;
-        if (updatedCont.companyName != null) _companyController.text = updatedCont.companyName!;
-        if (updatedCont.ownerName != null) _ownerController.text = updatedCont.ownerName!;
-        if (updatedCont.lifecycleStage != null && updatedCont.lifecycleStage!.isNotEmpty) {
+        if (updatedCont.firstName != null)
+          _firstNameController.text = updatedCont.firstName!;
+        if (updatedCont.lastName != null)
+          _lastNameController.text = updatedCont.lastName!;
+        if (updatedCont.email.isNotEmpty)
+          _emailController.text = updatedCont.email;
+        if (updatedCont.phone != null)
+          _phoneController.text = updatedCont.phone!;
+        if (updatedCont.jobTitle != null)
+          _jobTitleController.text = updatedCont.jobTitle!;
+        if (updatedCont.companyName != null)
+          _companyController.text = updatedCont.companyName!;
+        if (updatedCont.ownerName != null)
+          _ownerController.text = updatedCont.ownerName!;
+        if (updatedCont.lifecycleStage != null &&
+            updatedCont.lifecycleStage!.isNotEmpty) {
           _lifecycleStage = updatedCont.lifecycleStage!;
         }
         if (updatedCont.leadStatus != null) {
@@ -767,7 +938,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            success ? 'Contact updated successfully' : 'Failed to update contact',
+            success
+                ? 'Contact updated successfully'
+                : 'Failed to update contact',
           ),
           backgroundColor: success ? const Color(0xFF00A884) : Colors.red,
           duration: const Duration(seconds: 2),
@@ -1068,7 +1241,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                              color: const Color(0xFFCBD5E1), width: 1),
+                            color: const Color(0xFFCBD5E1),
+                            width: 1,
+                          ),
                         ),
                         child: Center(
                           child: Text(
@@ -1199,13 +1374,15 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     itemBuilder: (context) => _lifecycleStages
-                        .map((s) => PopupMenuItem(
-                              value: s,
-                              child: Text(
-                                s,
-                                style: GoogleFonts.poppins(fontSize: 13),
-                              ),
-                            ))
+                        .map(
+                          (s) => PopupMenuItem(
+                            value: s,
+                            child: Text(
+                              s,
+                              style: GoogleFonts.poppins(fontSize: 13),
+                            ),
+                          ),
+                        )
                         .toList(),
                     child: Row(
                       children: [
@@ -1234,9 +1411,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               Row(
                 children: List.generate(8, (index) {
                   final int currentStageIndex = _lifecycleStages.indexWhere(
-                    (s) => s.trim().toLowerCase() == _lifecycleStage.trim().toLowerCase(),
+                    (s) =>
+                        s.trim().toLowerCase() ==
+                        _lifecycleStage.trim().toLowerCase(),
                   );
-                  final int activeIndex = currentStageIndex >= 0 ? currentStageIndex : 0;
+                  final int activeIndex = currentStageIndex >= 0
+                      ? currentStageIndex
+                      : 0;
                   final bool isCompleted = index <= activeIndex;
                   return Expanded(
                     child: InkWell(
@@ -1283,19 +1464,25 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   });
                   _saveContactChanges();
                 },
-                itemBuilder: (context) => [
-                  'New',
-                  'Open',
-                  'In Progress',
-                  'Unqualified',
-                  'Attempted to Contact',
-                  'Connected'
-                ]
-                    .map((s) => PopupMenuItem(
-                          value: s,
-                          child: Text(s, style: GoogleFonts.poppins(fontSize: 13)),
-                        ))
-                    .toList(),
+                itemBuilder: (context) =>
+                    [
+                          'New',
+                          'Open',
+                          'In Progress',
+                          'Unqualified',
+                          'Attempted to Contact',
+                          'Connected',
+                        ]
+                        .map(
+                          (s) => PopupMenuItem(
+                            value: s,
+                            child: Text(
+                              s,
+                              style: GoogleFonts.poppins(fontSize: 13),
+                            ),
+                          ),
+                        )
+                        .toList(),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1468,7 +1655,8 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                 'Lead Status',
                 'leadStatus',
                 TextEditingController(
-                    text: _leadStatus.isNotEmpty ? _leadStatus : '--'),
+                  text: _leadStatus.isNotEmpty ? _leadStatus : '--',
+                ),
                 options: const [
                   'New',
                   'Open',
@@ -1477,7 +1665,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   'Unqualified',
                   'Attempted to Contact',
                   'Connected',
-                  'Bad Timing'
+                  'Bad Timing',
                 ],
                 onSelectedOption: (selected) {
                   setState(() {
@@ -1519,8 +1707,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   _saveContactChanges();
                 },
               ),
-              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: _lastActivityDateStr)),
-              _buildAboutField('Last Activity Date', 'lastActivityDate', TextEditingController(text: _lastActivityDateStr)),
+              _buildAboutField(
+                'Last Contacted',
+                'lastContacted',
+                TextEditingController(text: _lastActivityDateStr),
+              ),
+              _buildAboutField(
+                'Last Activity Date',
+                'lastActivityDate',
+                TextEditingController(text: _lastActivityDateStr),
+              ),
             ],
           ),
         ),
@@ -1535,17 +1731,28 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete Activity', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to delete this activity?', style: GoogleFonts.poppins()),
+        title: Text(
+          'Delete Activity',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Are you sure you want to delete this activity?',
+          style: GoogleFonts.poppins(),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Cancel', style: GoogleFonts.poppins()),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+            child: Text(
+              'Delete',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -1582,10 +1789,20 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
   Future<void> _editActivityModal(Map<String, dynamic> act) async {
     final actId = (act['id'] ?? act['_id'] ?? '').toString();
-    final type = (act['type'] ?? act['activityType'] ?? '').toString().toLowerCase();
-    final rawNotes = act['notes'] ?? act['content'] ?? act['body'] ?? act['description'] ?? '';
+    final type = (act['type'] ?? act['activityType'] ?? '')
+        .toString()
+        .toLowerCase();
+    final rawNotes =
+        act['notes'] ??
+        act['content'] ??
+        act['body'] ??
+        act['description'] ??
+        '';
     final notesText = parseActivityDescription(rawNotes);
-    final rawTitle = act['title'] ?? act['subject'] ?? (notesText.isNotEmpty ? notesText : 'Activity');
+    final rawTitle =
+        act['title'] ??
+        act['subject'] ??
+        (notesText.isNotEmpty ? notesText : 'Activity');
     final titleText = parseActivityDescription(rawTitle);
 
     dynamic result;
@@ -1595,30 +1812,40 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         taskToEdit: TaskModel(
           id: actId,
           title: titleText,
-          dueDate: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['dueDate'] ?? act['due_date'] ?? '').toString(),
+          dueDate:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['dueDate'] ??
+                      act['due_date'] ??
+                      '')
+                  .toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
-          assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
+          assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User')
+              .toString(),
           notes: notesText,
           queue: (act['queue'] ?? 'None').toString(),
           rawMap: act,
         ),
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('email')) {
       result = await CreateEmailModal.show(
         context,
         emailToEdit: act,
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('note')) {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('call')) {
       result = await LogCallModal.show(
@@ -1627,13 +1854,24 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
-          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
-          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
+          duration:
+              (act['durationMinutes'] ??
+                      act['duration_minutes'] ??
+                      act['duration'] ??
+                      '')
+                  .toString(),
+          startTime:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['startTime'] ??
+                      '')
+                  .toString(),
           notes: notesText,
           rawMap: act,
         ),
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else if (type.contains('meeting')) {
       result = await LogMeetingModal.show(
@@ -1642,20 +1880,32 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
-          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
-          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
+          duration:
+              (act['durationMinutes'] ??
+                      act['duration_minutes'] ??
+                      act['duration'] ??
+                      '')
+                  .toString(),
+          startTime:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['startTime'] ??
+                      '')
+                  .toString(),
           notes: notesText,
           rawMap: act,
         ),
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     } else {
       result = await CreateNoteModal.show(
         context,
         noteToEdit: act,
         contactId: _recordId,
-        associatedRecordName: widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
+        associatedRecordName:
+            widget.contact?.name ?? widget.contact?.firstName ?? 'Contact',
       );
     }
 
@@ -1696,7 +1946,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         margin: const EdgeInsets.only(right: 4),
                         decoration: BoxDecoration(
                           border: Border(
@@ -1712,8 +1964,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                           _activitySubTabs[index],
                           style: GoogleFonts.poppins(
                             fontSize: 13,
-                            fontWeight:
-                                isSelected ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w600,
                             color: isSelected
                                 ? const Color(0xFF1E293B)
                                 : const Color(0xFF64748B),
@@ -1803,17 +2056,26 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                 'Unassigned',
                               ];
                               for (final u in _userList) {
-                                final name = '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'.trim();
-                                if (name.isNotEmpty && !options.contains(name)) {
+                                final name =
+                                    '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'
+                                        .trim();
+                                if (name.isNotEmpty &&
+                                    !options.contains(name)) {
                                   options.add(name);
                                 }
                               }
                               return options
-                                  .map((s) => PopupMenuItem(
-                                        value: s,
-                                        child: Text(s,
-                                            style: GoogleFonts.poppins(fontSize: 13)),
-                                      ))
+                                  .map(
+                                    (s) => PopupMenuItem(
+                                      value: s,
+                                      child: Text(
+                                        s,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  )
                                   .toList();
                             },
                             child: Row(
@@ -1851,7 +2113,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _isActivitiesCollapsed ? 'Expand all ' : 'Collapse all ',
+                          _isActivitiesCollapsed
+                              ? 'Expand all '
+                              : 'Collapse all ',
                           style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -1882,29 +2146,36 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       final modalType = tabName == 'Notes'
                           ? 'Note'
                           : (tabName == 'Emails'
-                              ? 'Email'
-                              : (tabName == 'Calls'
-                                  ? 'Call'
-                                  : (tabName == 'Tasks' ? 'Task' : 'Meeting')));
+                                ? 'Email'
+                                : (tabName == 'Calls'
+                                      ? 'Call'
+                                      : (tabName == 'Tasks'
+                                            ? 'Task'
+                                            : 'Meeting')));
                       _openActivityModal(modalType);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2B3A4A),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       elevation: 0,
                     ),
                     child: Text(
                       _selectedActivitySubTab == 1
                           ? 'Create Note'
                           : (_selectedActivitySubTab == 2
-                              ? 'Create Email'
-                              : (_selectedActivitySubTab == 3
-                                  ? 'Create Call'
-                                  : (_selectedActivitySubTab == 4
-                                      ? 'Create Task'
-                                      : 'Create Meeting'))),
+                                ? 'Create Email'
+                                : (_selectedActivitySubTab == 3
+                                      ? 'Create Call'
+                                      : (_selectedActivitySubTab == 4
+                                            ? 'Create Task'
+                                            : 'Create Meeting'))),
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -1922,7 +2193,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
-                      child: CircularProgressIndicator(color: Color(0xFF00A884)),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF00A884),
+                      ),
                     ),
                   )
                 else if (_filteredActivities.isEmpty)
@@ -1959,19 +2232,46 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   ),
                   const SizedBox(height: 12),
                   ..._filteredActivities.map((act) {
-                    final type = (act['type'] ?? 'activity').toString().toUpperCase();
-                    final title = act['title'] ?? act['notes'] ?? act['type'] ?? 'Activity';
-                    final ownerName = act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
-                    final rawDate = act['createdAt'] ?? act['scheduledAt'] ?? '';
+                    final type = (act['type'] ?? 'activity')
+                        .toString()
+                        .toUpperCase();
+                    final title =
+                        act['title'] ??
+                        act['notes'] ??
+                        act['type'] ??
+                        'Activity';
+                    final ownerName =
+                        act['creatorName'] ??
+                        act['ownerName'] ??
+                        act['assignedTo'] ??
+                        'Admin User';
+                    final rawDate =
+                        act['createdAt'] ?? act['scheduledAt'] ?? '';
                     String formattedDate = '';
                     if (rawDate.toString().isNotEmpty) {
                       try {
                         final dt = DateTime.parse(rawDate.toString()).toLocal();
-                        final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+                        final h = dt.hour > 12
+                            ? dt.hour - 12
+                            : (dt.hour == 0 ? 12 : dt.hour);
                         final ampm = dt.hour >= 12 ? 'PM' : 'AM';
                         final min = dt.minute.toString().padLeft(2, '0');
-                        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                        formattedDate = '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm GMT+5:30';
+                        final months = [
+                          'Jan',
+                          'Feb',
+                          'Mar',
+                          'Apr',
+                          'May',
+                          'Jun',
+                          'Jul',
+                          'Aug',
+                          'Sep',
+                          'Oct',
+                          'Nov',
+                          'Dec',
+                        ];
+                        formattedDate =
+                            '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm GMT+5:30';
                       } catch (_) {
                         formattedDate = rawDate.toString();
                       }
@@ -1979,15 +2279,58 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
                     IconData actIcon = Icons.task_alt_rounded;
                     if (type.contains('CALL')) actIcon = Icons.phone_outlined;
-                    if (type.contains('MEETING')) actIcon = Icons.videocam_outlined;
-                    if (type.contains('NOTE')) actIcon = Icons.description_outlined;
-                    if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
+                    if (type.contains('MEETING'))
+                      actIcon = Icons.videocam_outlined;
+                    if (type.contains('NOTE'))
+                      actIcon = Icons.description_outlined;
+                    if (type.contains('EMAIL'))
+                      actIcon = Icons.mail_outline_rounded;
 
-                    final bool isTask = type.contains('TASK') || act['type']?.toString().toLowerCase() == 'task';
-                    final String statusVal = (act['status'] ?? 'PENDING').toString().toUpperCase();
+                    final bool isTask =
+                        type.contains('TASK') ||
+                        act['type']?.toString().toLowerCase() == 'task';
+                    final String statusVal = (act['status'] ?? 'PENDING')
+                        .toString()
+                        .toUpperCase();
                     final bool isTaskCompleted = statusVal == 'COMPLETED';
-                    final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$formattedDate').toString();
-                    final bool isExpanded = _expandedActivityIds.contains(actId);
+                    final String actId =
+                        (act['id'] ??
+                                act['_id'] ??
+                                '${type}_${title}_$formattedDate')
+                            .toString();
+                    // Only show edit/delete 3-dots when the activity has a real server-assigned ID.
+                    final bool hasRealId =
+                        (act['id'] ?? act['_id']) != null &&
+                        (act['id'] ?? act['_id']).toString().isNotEmpty;
+                    final String typeUpper = (act['type'] ?? '')
+                        .toString()
+                        .toUpperCase();
+                    final String rawTitleUpper =
+                        (act['title'] ?? act['type'] ?? '')
+                            .toString()
+                            .toUpperCase();
+                    final bool isSystemActivity =
+                        typeUpper.contains('PROPERTY') ||
+                        typeUpper.contains('LIFECYCLE') ||
+                        typeUpper.contains('STAGE_CHANGE') ||
+                        typeUpper.contains('STAGE_CHANGED') ||
+                        typeUpper.contains('CONTACT_CREATED') ||
+                        typeUpper.contains('COMPANY_CREATED') ||
+                        typeUpper.contains('DEAL_CREATED') ||
+                        typeUpper.contains('RECORD_CREATED') ||
+                        rawTitleUpper.contains('PROPERTY_CHANGE') ||
+                        rawTitleUpper.contains('PROPERTY_CHANGED') ||
+                        rawTitleUpper.contains('LIFECYCLE_STAGE') ||
+                        rawTitleUpper.contains('STAGE_CHANGE') ||
+                        rawTitleUpper.contains('STAGE_CHANGED') ||
+                        rawTitleUpper.contains('CONTACT_CREATED') ||
+                        rawTitleUpper.contains('COMPANY_CREATED') ||
+                        rawTitleUpper.contains('DEAL_CREATED') ||
+                        rawTitleUpper.contains('RECORD_CREATED');
+                    final bool canEditOrDelete = hasRealId && !isSystemActivity;
+                    final bool isExpanded = _expandedActivityIds.contains(
+                      actId,
+                    );
                     final bool isHighlighted = actId == _highlightedActivityId;
 
                     return InkWell(
@@ -2010,7 +2353,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: isHighlighted ? const Color(0xFFE6F4F1) : Colors.white,
+                          color: isHighlighted
+                              ? const Color(0xFFE6F4F1)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: isExpanded || isHighlighted
@@ -2033,18 +2378,26 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                         // PATCH just the changed field: PUT is not a
                                         // route, and echoing the whole activity back
                                         // failed validation, so the toggle never stuck.
-                                        final newStatus = newValue == true ? 'completed' : 'pending';
+                                        final newStatus = newValue == true
+                                            ? 'completed'
+                                            : 'pending';
                                         try {
                                           await ApiService().patch(
                                             '${ApiConstants.activities}/$actId',
                                             data: {'status': newStatus},
                                           );
                                         } catch (e) {
-                                          debugPrint('[UPDATE ACTIVITY STATUS ERROR]: $e');
+                                          debugPrint(
+                                            '[UPDATE ACTIVITY STATUS ERROR]: $e',
+                                          );
                                           if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
                                               SnackBar(
-                                                content: Text('Failed to update task status: $e'),
+                                                content: Text(
+                                                  'Failed to update task status: $e',
+                                                ),
                                                 backgroundColor: Colors.red,
                                               ),
                                             );
@@ -2136,30 +2489,71 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                   ),
                                   if (isExpanded) ...[
                                     const SizedBox(height: 10),
-                                    const Divider(color: Color(0xFFE2E8F0), height: 1),
+                                    const Divider(
+                                      color: Color(0xFFE2E8F0),
+                                      height: 1,
+                                    ),
                                     const SizedBox(height: 10),
                                     if (isTask)
                                       TaskActivityCardDetails(
                                         activity: act,
                                         onManageAssociations: () async {
-                                          final initialAssoc = _extractAssociations(
-                                            act,
-                                            defaultContactId: _recordId,
-                                            defaultContactName: widget.contact?.name,
-                                          );
+                                          final initialAssoc =
+                                              _extractAssociations(
+                                                act,
+                                                defaultContactId: _recordId,
+                                                defaultContactName:
+                                                    widget.contact?.name,
+                                              );
 
-                                          final result = await RecordAssociationSheet.show(
-                                            context,
-                                            initialAssociations: initialAssoc,
-                                          );
+                                          final result =
+                                              await RecordAssociationSheet.show(
+                                                context,
+                                                initialAssociations:
+                                                    initialAssoc,
+                                              );
                                           if (result != null) {
-                                            final actId = (act['id'] ?? act['_id'])?.toString();
-                                            final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
-                                            final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
-                                            final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
-                                            final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
-                                            final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
-                                            final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+                                            final actId =
+                                                (act['id'] ?? act['_id'])
+                                                    ?.toString();
+                                            final newCompId =
+                                                result['Companies']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Companies']!
+                                                      .first['id']
+                                                : null;
+                                            final newCompName =
+                                                result['Companies']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Companies']!
+                                                      .first['name']
+                                                : null;
+                                            final newCntId =
+                                                result['Contacts']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Contacts']!
+                                                      .first['id']
+                                                : null;
+                                            final newCntName =
+                                                result['Contacts']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Contacts']!
+                                                      .first['name']
+                                                : null;
+                                            final newDealId =
+                                                result['Deals']?.isNotEmpty ==
+                                                    true
+                                                ? result['Deals']!.first['id']
+                                                : null;
+                                            final newDealName =
+                                                result['Deals']?.isNotEmpty ==
+                                                    true
+                                                ? result['Deals']!.first['name']
+                                                : null;
 
                                             setState(() {
                                               act['associations'] = result;
@@ -2174,54 +2568,112 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                               act['dealName'] = newDealName;
                                             });
 
-                                            if (actId != null && actId.isNotEmpty) {
-                                              await ActivityAssociationStorage.saveAssociations(actId, result);
+                                            if (actId != null &&
+                                                actId.isNotEmpty) {
+                                              await ActivityAssociationStorage.saveAssociations(
+                                                actId,
+                                                result,
+                                              );
                                               try {
                                                 final api = ApiService();
-                                                final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                                final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                                final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                                final compIds =
+                                                    result['Companies']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
+                                                final cntIds =
+                                                    result['Contacts']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
+                                                final dealIds =
+                                                    result['Deals']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
 
-                                                final List<Map<String, String>> assocList = [];
+                                                final List<Map<String, String>>
+                                                assocList = [];
                                                 for (final id in compIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'company'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'company',
+                                                  });
                                                 }
                                                 for (final id in cntIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'contact'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'contact',
+                                                  });
                                                 }
                                                 for (final id in dealIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'deal'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'deal',
+                                                  });
                                                 }
 
-                                                final updatePayload = Map<String, dynamic>.from(act);
-                                                updatePayload['companyId'] = newCompId;
-                                                updatePayload['company_id'] = newCompId;
-                                                updatePayload['companyIds'] = compIds;
-                                                updatePayload['company_ids'] = compIds;
-                                                updatePayload['contactId'] = newCntId;
-                                                updatePayload['contact_id'] = newCntId;
-                                                updatePayload['contactIds'] = cntIds;
-                                                updatePayload['contact_ids'] = cntIds;
-                                                updatePayload['dealId'] = newDealId;
-                                                updatePayload['deal_id'] = newDealId;
-                                                updatePayload['dealIds'] = dealIds;
-                                                updatePayload['deal_ids'] = dealIds;
-                                                updatePayload['associations'] = result;
-                                                updatePayload['associationsList'] = assocList;
-                                                updatePayload['associations_list'] = assocList;
+                                                final updatePayload =
+                                                    Map<String, dynamic>.from(
+                                                      act,
+                                                    );
+                                                updatePayload['companyId'] =
+                                                    newCompId;
+                                                updatePayload['company_id'] =
+                                                    newCompId;
+                                                updatePayload['companyIds'] =
+                                                    compIds;
+                                                updatePayload['company_ids'] =
+                                                    compIds;
+                                                updatePayload['contactId'] =
+                                                    newCntId;
+                                                updatePayload['contact_id'] =
+                                                    newCntId;
+                                                updatePayload['contactIds'] =
+                                                    cntIds;
+                                                updatePayload['contact_ids'] =
+                                                    cntIds;
+                                                updatePayload['dealId'] =
+                                                    newDealId;
+                                                updatePayload['deal_id'] =
+                                                    newDealId;
+                                                updatePayload['dealIds'] =
+                                                    dealIds;
+                                                updatePayload['deal_ids'] =
+                                                    dealIds;
+                                                updatePayload['associations'] =
+                                                    result;
+                                                updatePayload['associationsList'] =
+                                                    assocList;
+                                                updatePayload['associations_list'] =
+                                                    assocList;
 
-                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
+                                                await api.patch(
+                                                  '${ApiConstants.activities}/$actId',
+                                                  data: updatePayload,
+                                                );
                                                 if (context.mounted) {
-                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
                                                     const SnackBar(
-                                                      content: Text('Associations updated successfully'),
-                                                      duration: Duration(seconds: 1),
+                                                      content: Text(
+                                                        'Associations updated successfully',
+                                                      ),
+                                                      duration: Duration(
+                                                        seconds: 1,
+                                                      ),
                                                     ),
                                                   );
                                                 }
                                                 await _fetchActivities();
                                               } catch (e) {
-                                                debugPrint('[Update Association Error]: $e');
+                                                debugPrint(
+                                                  '[Update Association Error]: $e',
+                                                );
                                               }
                                             }
                                           }
@@ -2233,11 +2685,19 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF8FAFC),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: const Color(0xFFE2E8F0),
+                                          ),
                                         ),
                                         child: Text(
-                                          parseActivityDescription(act['description'] ?? act['notes'] ?? title),
+                                          parseActivityDescription(
+                                            act['description'] ??
+                                                act['notes'] ??
+                                                title,
+                                          ),
                                           style: GoogleFonts.poppins(
                                             fontSize: 13,
                                             color: const Color(0xFF334155),
@@ -2247,24 +2707,55 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                     const SizedBox(height: 10),
                                     InkWell(
                                       onTap: () async {
-                                        final initialAssoc = _extractAssociations(
-                                          act,
-                                          defaultContactId: _recordId,
-                                          defaultContactName: widget.contact?.name,
-                                        );
+                                        final initialAssoc =
+                                            _extractAssociations(
+                                              act,
+                                              defaultContactId: _recordId,
+                                              defaultContactName:
+                                                  widget.contact?.name,
+                                            );
 
-                                        final result = await RecordAssociationSheet.show(
-                                          context,
-                                          initialAssociations: initialAssoc,
-                                        );
+                                        final result =
+                                            await RecordAssociationSheet.show(
+                                              context,
+                                              initialAssociations: initialAssoc,
+                                            );
                                         if (result != null) {
-                                          final actId = (act['id'] ?? act['_id'])?.toString();
-                                          final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
-                                          final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
-                                          final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
-                                          final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
-                                          final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
-                                          final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+                                          final actId =
+                                              (act['id'] ?? act['_id'])
+                                                  ?.toString();
+                                          final newCompId =
+                                              result['Companies']?.isNotEmpty ==
+                                                  true
+                                              ? result['Companies']!.first['id']
+                                              : null;
+                                          final newCompName =
+                                              result['Companies']?.isNotEmpty ==
+                                                  true
+                                              ? result['Companies']!
+                                                    .first['name']
+                                              : null;
+                                          final newCntId =
+                                              result['Contacts']?.isNotEmpty ==
+                                                  true
+                                              ? result['Contacts']!.first['id']
+                                              : null;
+                                          final newCntName =
+                                              result['Contacts']?.isNotEmpty ==
+                                                  true
+                                              ? result['Contacts']!
+                                                    .first['name']
+                                              : null;
+                                          final newDealId =
+                                              result['Deals']?.isNotEmpty ==
+                                                  true
+                                              ? result['Deals']!.first['id']
+                                              : null;
+                                          final newDealName =
+                                              result['Deals']?.isNotEmpty ==
+                                                  true
+                                              ? result['Deals']!.first['name']
+                                              : null;
 
                                           setState(() {
                                             act['associations'] = result;
@@ -2279,56 +2770,114 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                             act['dealName'] = newDealName;
                                           });
 
-                                          if (actId != null && actId.isNotEmpty) {
-                                            await ActivityAssociationStorage.saveAssociations(actId, result);
+                                          if (actId != null &&
+                                              actId.isNotEmpty) {
+                                            await ActivityAssociationStorage.saveAssociations(
+                                              actId,
+                                              result,
+                                            );
                                             try {
                                               final api = ApiService();
-                                              final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                              final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                              final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                              final compIds =
+                                                  result['Companies']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
+                                              final cntIds =
+                                                  result['Contacts']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
+                                              final dealIds =
+                                                  result['Deals']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
 
-                                              final List<Map<String, String>> assocList = [];
+                                              final List<Map<String, String>>
+                                              assocList = [];
                                               for (final id in compIds) {
-                                                assocList.add({'objectId': id, 'objectType': 'company'});
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'company',
+                                                });
                                               }
                                               for (final id in cntIds) {
-                                                assocList.add({'objectId': id, 'objectType': 'contact'});
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'contact',
+                                                });
                                               }
                                               for (final id in dealIds) {
-                                                assocList.add({'objectId': id, 'objectType': 'deal'});
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'deal',
+                                                });
                                               }
 
-                                              final updatePayload = Map<String, dynamic>.from(act);
-                                              updatePayload['companyId'] = newCompId;
-                                              updatePayload['company_id'] = newCompId;
-                                              updatePayload['companyIds'] = compIds;
-                                              updatePayload['company_ids'] = compIds;
-                                              updatePayload['contactId'] = newCntId;
-                                              updatePayload['contact_id'] = newCntId;
-                                              updatePayload['contactIds'] = cntIds;
-                                              updatePayload['contact_ids'] = cntIds;
-                                              updatePayload['dealId'] = newDealId;
-                                              updatePayload['deal_id'] = newDealId;
-                                              updatePayload['dealIds'] = dealIds;
-                                              updatePayload['deal_ids'] = dealIds;
-                                              updatePayload['associations'] = result;
-                                              updatePayload['associationsList'] = assocList;
-                                              updatePayload['associations_list'] = assocList;
+                                              final updatePayload =
+                                                  Map<String, dynamic>.from(
+                                                    act,
+                                                  );
+                                              updatePayload['companyId'] =
+                                                  newCompId;
+                                              updatePayload['company_id'] =
+                                                  newCompId;
+                                              updatePayload['companyIds'] =
+                                                  compIds;
+                                              updatePayload['company_ids'] =
+                                                  compIds;
+                                              updatePayload['contactId'] =
+                                                  newCntId;
+                                              updatePayload['contact_id'] =
+                                                  newCntId;
+                                              updatePayload['contactIds'] =
+                                                  cntIds;
+                                              updatePayload['contact_ids'] =
+                                                  cntIds;
+                                              updatePayload['dealId'] =
+                                                  newDealId;
+                                              updatePayload['deal_id'] =
+                                                  newDealId;
+                                              updatePayload['dealIds'] =
+                                                  dealIds;
+                                              updatePayload['deal_ids'] =
+                                                  dealIds;
+                                              updatePayload['associations'] =
+                                                  result;
+                                              updatePayload['associationsList'] =
+                                                  assocList;
+                                              updatePayload['associations_list'] =
+                                                  assocList;
 
                                               // PATCH /api/activities/:id is the
                                               // documented update route.
-                                              await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
+                                              await api.patch(
+                                                '${ApiConstants.activities}/$actId',
+                                                data: updatePayload,
+                                              );
                                               if (context.mounted) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
                                                   const SnackBar(
-                                                    content: Text('Associations updated successfully'),
-                                                    duration: Duration(seconds: 1),
+                                                    content: Text(
+                                                      'Associations updated successfully',
+                                                    ),
+                                                    duration: Duration(
+                                                      seconds: 1,
+                                                    ),
                                                   ),
                                                 );
                                               }
                                               await _fetchActivities();
                                             } catch (e) {
-                                              debugPrint('[Update Association Error]: $e');
+                                              debugPrint(
+                                                '[Update Association Error]: $e',
+                                              );
                                             }
                                           }
                                         }
@@ -2338,18 +2887,26 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                         children: [
                                           Builder(
                                             builder: (context) {
-                                              final assocMap = _extractAssociations(
-                                                act,
-                                                defaultContactId: _recordId,
-                                                defaultContactName: widget.contact?.name,
-                                              );
-                                              final cnt = assocMap['Companies']!.length + assocMap['Contacts']!.length + assocMap['Deals']!.length;
+                                              final assocMap =
+                                                  _extractAssociations(
+                                                    act,
+                                                    defaultContactId: _recordId,
+                                                    defaultContactName:
+                                                        widget.contact?.name,
+                                                  );
+                                              final cnt =
+                                                  assocMap['Companies']!
+                                                      .length +
+                                                  assocMap['Contacts']!.length +
+                                                  assocMap['Deals']!.length;
                                               return Text(
                                                 '$cnt association${cnt == 1 ? '' : 's'} ',
                                                 style: GoogleFonts.poppins(
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.w600,
-                                                  color: const Color(0xFF00A884),
+                                                  color: const Color(
+                                                    0xFF00A884,
+                                                  ),
                                                 ),
                                               );
                                             },
@@ -2366,43 +2923,67 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                 ],
                               ),
                             ),
-                            PopupMenuButton<String>(
-                              icon: const Icon(
-                                Icons.more_vert_rounded,
-                                color: Color(0xFF94A3B8),
-                                size: 20,
+                            // Only show edit/delete menu when this activity
+                            // has a real backend ID and is not an immutable system event.
+                            if (canEditOrDelete)
+                              PopupMenuButton<String>(
+                                icon: const Icon(
+                                  Icons.more_vert_rounded,
+                                  color: Color(0xFF94A3B8),
+                                  size: 20,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                itemBuilder: (context) => [
+                                  PopupMenuItem<String>(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.edit_outlined,
+                                          size: 16,
+                                          color: Color(0xFF00A884),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Edit Activity',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem<String>(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 16,
+                                          color: Color(0xFFEF4444),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Delete Activity',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            color: const Color(0xFFEF4444),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                onSelected: (action) {
+                                  if (action == 'delete') {
+                                    _confirmAndDeleteActivity(act);
+                                  } else if (action == 'edit') {
+                                    _editActivityModal(act);
+                                  }
+                                },
                               ),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              itemBuilder: (context) => [
-                                PopupMenuItem<String>(
-                                  value: 'edit',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF00A884)),
-                                      const SizedBox(width: 8),
-                                      Text('Edit Activity', style: GoogleFonts.poppins(fontSize: 13)),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'delete',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
-                                      const SizedBox(width: 8),
-                                      Text('Delete Activity', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onSelected: (action) {
-                                if (action == 'delete') {
-                                  _confirmAndDeleteActivity(act);
-                                } else if (action == 'edit') {
-                                  _editActivityModal(act);
-                                }
-                              },
-                            ),
                           ],
                         ),
                       ),
@@ -2418,13 +2999,21 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
   }
 
   void _showActivityDetailsModal(Map<String, dynamic> act) {
-    final type = (act['type'] ?? act['activityType'] ?? 'Activity').toString().toUpperCase();
+    final type = (act['type'] ?? act['activityType'] ?? 'Activity')
+        .toString()
+        .toUpperCase();
     final title = act['title'] ?? act['notes'] ?? act['type'] ?? 'Activity';
-    final ownerName = act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
-    final description = act['description'] ?? act['notes'] ?? act['message'] ?? '';
+    final ownerName =
+        act['creatorName'] ??
+        act['ownerName'] ??
+        act['assignedTo'] ??
+        'Admin User';
+    final description =
+        act['description'] ?? act['notes'] ?? act['message'] ?? '';
     final status = act['status'] ?? 'Completed';
     final priority = act['priority'] ?? 'Normal';
-    final rawDate = act['createdAt'] ?? act['scheduledAt'] ?? act['activityDate'] ?? '';
+    final rawDate =
+        act['createdAt'] ?? act['scheduledAt'] ?? act['activityDate'] ?? '';
 
     String formattedDate = '';
     if (rawDate.toString().isNotEmpty) {
@@ -2433,8 +3022,22 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
         final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
         final ampm = dt.hour >= 12 ? 'PM' : 'AM';
         final min = dt.minute.toString().padLeft(2, '0');
-        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        formattedDate = '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm';
+        final months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        formattedDate =
+            '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm';
       } catch (_) {
         formattedDate = rawDate.toString();
       }
@@ -2450,73 +3053,76 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           elevation: 6,
           child: Padding(
             padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title.toString(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF1E293B),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title.toString(),
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF1E293B),
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Color(0xFF64748B)),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-              const Divider(color: Color(0xFFE2E8F0)),
-              const SizedBox(height: 10),
-              _buildDetailRow('Type', type),
-              _buildDetailRow('Assigned / Created By', ownerName.toString()),
-              if (formattedDate.isNotEmpty) _buildDetailRow('Date', formattedDate),
-              _buildDetailRow('Status', status.toString()),
-              if (act['priority'] != null) _buildDetailRow('Priority', priority.toString()),
-              if (act['outcome'] != null) _buildDetailRow('Outcome', act['outcome'].toString()),
-              if (description.toString().isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Details / Changes:',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF475569),
-                  ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Text(
-                    description.toString(),
+                const Divider(color: Color(0xFFE2E8F0)),
+                const SizedBox(height: 10),
+                _buildDetailRow('Type', type),
+                _buildDetailRow('Assigned / Created By', ownerName.toString()),
+                if (formattedDate.isNotEmpty)
+                  _buildDetailRow('Date', formattedDate),
+                _buildDetailRow('Status', status.toString()),
+                if (act['priority'] != null)
+                  _buildDetailRow('Priority', priority.toString()),
+                if (act['outcome'] != null)
+                  _buildDetailRow('Outcome', act['outcome'].toString()),
+                if (description.toString().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Details / Changes:',
                     style: GoogleFonts.poppins(
                       fontSize: 13,
-                      color: const Color(0xFF334155),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF475569),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Text(
+                      description.toString(),
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: const Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
               ],
-              const SizedBox(height: 16),
-            ],
+            ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -2643,18 +3249,23 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                               const SizedBox(height: 4),
                               Container(
                                 height: 36,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                      color: const Color(0xFF00A884)),
+                                    color: const Color(0xFF00A884),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: TextField(
                                         controller: _startDateController,
-                                        style: GoogleFonts.poppins(fontSize: 12),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                        ),
                                         decoration: const InputDecoration(
                                           hintText: 'dd-mm-',
                                           border: InputBorder.none,
@@ -2687,18 +3298,23 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                               const SizedBox(height: 4),
                               Container(
                                 height: 36,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                      color: const Color(0xFFCBD5E1)),
+                                    color: const Color(0xFFCBD5E1),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: TextField(
                                         controller: _endDateController,
-                                        style: GoogleFonts.poppins(fontSize: 12),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                        ),
                                         decoration: const InputDecoration(
                                           hintText: 'dd-mm-',
                                           border: InputBorder.none,
@@ -2794,8 +3410,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                     ],
                   ),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE11D48),
                       borderRadius: BorderRadius.circular(4),
@@ -2867,8 +3485,11 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                             color: Color(0xFFE11D48),
                           ),
                         )
-                      : const Icon(Icons.auto_awesome,
-                          color: Color(0xFFE11D48), size: 16),
+                      : const Icon(
+                          Icons.auto_awesome,
+                          color: Color(0xFFE11D48),
+                          size: 16,
+                        ),
                   label: Text(
                     _isLoadingAiSummary ? 'Summarizing...' : 'Summarize',
                     style: GoogleFonts.poppins(
@@ -2889,7 +3510,6 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
             ],
           ),
         ),
-
         // Card 2: Companies
         _buildAssociationCard(
           title: 'Companies',
@@ -2897,8 +3517,12 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           buttonText: 'Create company',
           entityType: 'company',
           associatedItems: _associatedCompanies,
+          onItemAction: (action, item) => _syncCompanyAssociations(),
           onPressed: () async {
-            final res = await AddAssociationModal.show(context, entityType: 'company');
+            final res = await AddAssociationModal.show(
+              context,
+              entityType: 'company',
+            );
             if (res != null && res['action'] == 'add_existing') {
               final selected = res['selected'] as List;
               setState(() {
@@ -2909,6 +3533,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   }
                 }
               });
+              _syncCompanyAssociations();
             }
           },
         ),
@@ -2920,8 +3545,12 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           buttonText: 'Create contact',
           entityType: 'contact',
           associatedItems: _associatedContacts,
+          onItemAction: (action, item) => _syncContactAssociations(),
           onPressed: () async {
-            final res = await AddAssociationModal.show(context, entityType: 'contact');
+            final res = await AddAssociationModal.show(
+              context,
+              entityType: 'contact',
+            );
             if (res != null && res['action'] == 'add_existing') {
               final selected = res['selected'] as List;
               setState(() {
@@ -2932,6 +3561,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   }
                 }
               });
+              _syncContactAssociations();
             }
           },
         ),
@@ -2953,17 +3583,23 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               context,
               initialSelectedMsps: currentMsps.isNotEmpty
                   ? currentMsps
-                  : (_mspController.text.trim().isNotEmpty ? [_mspController.text.trim()] : null),
+                  : (_mspController.text.trim().isNotEmpty
+                        ? [_mspController.text.trim()]
+                        : null),
             );
             if (res != null) {
               final newMspString = res.join(', ');
               setState(() {
                 _mspController.text = newMspString;
-                _associatedMsps = res.map((m) => {
-                  'id': m,
-                  'name': m,
-                  'subtext': 'Managed Service Provider',
-                }).toList();
+                _associatedMsps = res
+                    .map(
+                      (m) => {
+                        'id': m,
+                        'name': m,
+                        'subtext': 'Managed Service Provider',
+                      },
+                    )
+                    .toList();
               });
               _saveContactChanges();
             }
@@ -2977,8 +3613,14 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           buttonText: 'Create deal',
           entityType: 'deal',
           associatedItems: _associatedDeals,
+          onItemAction: (action, item) => _syncDealAssociations(
+            removedItem: action == 'remove' ? item : null,
+          ),
           onPressed: () async {
-            final res = await AddAssociationModal.show(context, entityType: 'deal');
+            final res = await AddAssociationModal.show(
+              context,
+              entityType: 'deal',
+            );
             if (res != null && res['action'] == 'add_existing') {
               final selected = res['selected'] as List;
               setState(() {
@@ -2989,6 +3631,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   }
                 }
               });
+              _syncDealAssociations();
             }
           },
         ),
@@ -3004,7 +3647,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           topActionText: '+ Add',
           onPressed: () async {
             final contactId = _recordId;
-            final res = await CreateTaskModal.show(context, contactId: contactId);
+            final res = await CreateTaskModal.show(
+              context,
+              contactId: contactId,
+            );
             if (res != null) {
               setState(() {
                 _associatedTasks.add({'name': res.title});
@@ -3036,6 +3682,105 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     context.pushNamed(routeName, pathParameters: {RoutePaths.idParam: id});
   }
 
+  Future<void> _syncCompanyAssociations() async {
+    final contactId = _recordId;
+    if (contactId == null || contactId.isEmpty) return;
+    try {
+      final companyIds = _associatedCompanies
+          .map((c) => c['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final primaryComp = _associatedCompanies.firstWhere(
+        (c) => c['isPrimary'] == true || c['primary'] == true,
+        orElse: () =>
+            _associatedCompanies.isNotEmpty ? _associatedCompanies.first : {},
+      );
+      final primaryCompId = primaryComp['id']?.toString();
+
+      await ContactRepositoryImpl().updateContact(contactId, {
+        'companyId': primaryCompId,
+        'company_id': primaryCompId,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'associatedCompanies': _associatedCompanies,
+        'associated_companies': _associatedCompanies,
+      });
+    } catch (e) {
+      debugPrint('[ContactDetailsScreen _syncCompanyAssociations ERROR]: $e');
+    }
+  }
+
+  Future<void> _syncContactAssociations() async {
+    final contactId = _recordId;
+    if (contactId == null || contactId.isEmpty) return;
+    try {
+      final contactIds = _associatedContacts
+          .map((c) => c['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      await ContactRepositoryImpl().updateContact(contactId, {
+        'associatedContactIds': contactIds,
+        'associated_contact_ids': contactIds,
+        'associatedContacts': _associatedContacts,
+        'associated_contacts': _associatedContacts,
+      });
+    } catch (e) {
+      debugPrint('[ContactDetailsScreen _syncContactAssociations ERROR]: $e');
+    }
+  }
+
+  Future<void> _syncDealAssociations({
+    Map<String, dynamic>? removedItem,
+  }) async {
+    final contactId = _recordId;
+    if (contactId == null || contactId.isEmpty) return;
+    try {
+      final dealIds = _associatedDeals
+          .map((d) => d['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      // 1. Update Contact record
+      await ContactRepositoryImpl().updateContact(contactId, {
+        'dealIds': dealIds,
+        'deal_ids': dealIds,
+        'deals': _associatedDeals,
+      });
+
+      // 2. Update Deal records for two-way synchronization
+      final dealRepo = DealRepositoryImpl();
+      for (final d in _associatedDeals) {
+        final dId = d['id']?.toString();
+        if (dId != null && dId.isNotEmpty) {
+          try {
+            await dealRepo.updateDeal(dId, {
+              'contactId': contactId,
+              'contact_id': contactId,
+              'contactIds': [contactId],
+              'contact_ids': [contactId],
+            });
+          } catch (_) {}
+        }
+      }
+
+      // 3. If a deal was removed, un-link contact from that deal
+      if (removedItem != null) {
+        final remId = removedItem['id']?.toString();
+        if (remId != null && remId.isNotEmpty) {
+          try {
+            await dealRepo.updateDeal(remId, {
+              'contactId': null,
+              'contact_id': null,
+            });
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      debugPrint('[ContactDetailsScreen _syncDealAssociations ERROR]: $e');
+    }
+  }
+
   Widget _buildAssociationCard({
     required String title,
     required String description,
@@ -3045,6 +3790,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
     bool isTeal = false,
     String? topActionText,
     VoidCallback? onPressed,
+    Function(String action, Map<String, dynamic> item)? onItemAction,
   }) {
     final bool hasItems = associatedItems.isNotEmpty;
 
@@ -3075,7 +3821,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   if (hasItems) ...[
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF1F5F9),
                         borderRadius: BorderRadius.circular(10),
@@ -3120,10 +3869,19 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               children: associatedItems.asMap().entries.map((entry) {
                 final index = entry.key;
                 final item = entry.value;
-                final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
-                final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+                final name =
+                    (item['name'] ??
+                            item['title'] ??
+                            item['company_name'] ??
+                            item['contact_name'] ??
+                            '')
+                        .toString();
+                final subtext =
+                    (item['subtext'] ?? item['email'] ?? item['domain'] ?? '')
+                        .toString();
                 final initialLetter = name.isNotEmpty ? name[0] : 'W';
-                final isPrimary = item['isPrimary'] == true || item['primary'] == true;
+                final isPrimary =
+                    item['isPrimary'] == true || item['primary'] == true;
 
                 return Container(
                   margin: const EdgeInsets.only(top: 8),
@@ -3162,7 +3920,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                               children: [
                                 Flexible(
                                   child: InkWell(
-                                    onTap: () => _navigateToEntityDetails(entityType, item),
+                                    onTap: () => _navigateToEntityDetails(
+                                      entityType,
+                                      item,
+                                    ),
                                     child: Text(
                                       name,
                                       style: GoogleFonts.poppins(
@@ -3177,11 +3938,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                                 if (isPrimary) ...[
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFEFF6FF),
                                       borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                                      border: Border.all(
+                                        color: const Color(0xFFBFDBFE),
+                                      ),
                                     ),
                                     child: Text(
                                       'PRIMARY',
@@ -3228,10 +3994,16 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                               item['isPrimary'] = true;
                               item['primary'] = true;
                             });
+                            if (onItemAction != null) {
+                              onItemAction('primary', item);
+                            }
                           } else if (value == 'remove') {
                             setState(() {
                               associatedItems.remove(item);
                             });
+                            if (onItemAction != null) {
+                              onItemAction('remove', item);
+                            }
                           }
                         },
                         itemBuilder: (context) => [
@@ -3313,11 +4085,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
             ),
-            child: Icon(
-              icon,
-              size: 18,
-              color: const Color(0xFF475569),
-            ),
+            child: Icon(icon, size: 18, color: const Color(0xFF475569)),
           ),
           const SizedBox(height: 6),
           Text(
@@ -3334,19 +4102,42 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
 
   void _openActivityModal(String type) async {
     final contactId = _recordId;
-    final name = widget.contact?.name.isNotEmpty == true ? widget.contact!.name : 'xyzzzz';
+    final name = widget.contact?.name.isNotEmpty == true
+        ? widget.contact!.name
+        : 'xyzzzz';
     dynamic result;
 
     if (type == 'Task') {
-      result = await CreateTaskModal.show(context, contactId: contactId, associatedRecordName: name);
+      result = await CreateTaskModal.show(
+        context,
+        contactId: contactId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Note') {
-      result = await CreateNoteModal.show(context, contactId: contactId, associatedRecordName: name);
+      result = await CreateNoteModal.show(
+        context,
+        contactId: contactId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Email') {
-      result = await CreateEmailModal.show(context, contactId: contactId, associatedRecordName: name);
+      result = await CreateEmailModal.show(
+        context,
+        contactId: contactId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Call') {
-      result = await LogCallModal.show(context, contactId: contactId, associatedRecordName: name, activityType: type);
+      result = await LogCallModal.show(
+        context,
+        contactId: contactId,
+        associatedRecordName: name,
+        activityType: type,
+      );
     } else if (type == 'Meeting') {
-      result = await LogMeetingModal.show(context, contactId: contactId, associatedRecordName: name);
+      result = await LogMeetingModal.show(
+        context,
+        contactId: contactId,
+        associatedRecordName: name,
+      );
     }
 
     if (mounted && result != null && result != false) {
@@ -3417,7 +4208,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
           _selectedActivitySubTab = 5;
         }
         if (newActMap.isNotEmpty) {
-          _activities.removeWhere((item) => item['id']?.toString() == newActMap['id']?.toString());
+          _activities.removeWhere(
+            (item) => item['id']?.toString() == newActMap['id']?.toString(),
+          );
           _activities.insert(0, newActMap);
         }
         _tabController.animateTo(1); // Switch to Activities tab
@@ -3496,7 +4289,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                   )
                   .toList(),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(8),
@@ -3533,7 +4329,9 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF00A884), width: 1.5),
+                        color: const Color(0xFF00A884),
+                        width: 1.5,
+                      ),
                     ),
                     child: TextField(
                       controller: controller,
@@ -3543,8 +4341,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen>
                         color: const Color(0xFF1E293B),
                       ),
                       decoration: const InputDecoration(
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         border: InputBorder.none,
                       ),
                     ),

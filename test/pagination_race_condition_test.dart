@@ -44,7 +44,7 @@ class MockContactRepository implements ContactRepository {
   @override
   Future<ContactModel> updateContact(String id, Map<String, dynamic> data) async => throw UnimplementedError();
   @override
-  Future<bool> deleteContact(String id) async => throw UnimplementedError();
+  Future<bool> deleteContact(String id, {String? departmentId}) async => throw UnimplementedError();
   @override
   Future<ContactModel> getContactById(String id) async => throw UnimplementedError();
 }

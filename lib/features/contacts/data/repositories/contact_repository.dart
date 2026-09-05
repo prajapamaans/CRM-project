@@ -25,7 +25,7 @@ abstract class ContactRepository {
 
   Future<ContactModel> updateContact(String id, Map<String, dynamic> contactData);
 
-  Future<bool> deleteContact(String id);
+  Future<bool> deleteContact(String id, {String? departmentId});
 }
 
 class ContactRepositoryImpl implements ContactRepository {
@@ -111,9 +111,9 @@ class ContactRepositoryImpl implements ContactRepository {
   }
 
   @override
-  Future<bool> deleteContact(String id) async {
+  Future<bool> deleteContact(String id, {String? departmentId}) async {
     try {
-      return await _remoteDataSource.deleteContact(id);
+      return await _remoteDataSource.deleteContact(id, departmentId: departmentId);
     } catch (e) {
       debugPrint('[DELETE /api/contacts/$id ERROR]: $e');
       if (e is DioException) {

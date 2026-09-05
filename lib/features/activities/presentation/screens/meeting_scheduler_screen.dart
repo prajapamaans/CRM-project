@@ -14,6 +14,7 @@ import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../../core/providers/master_data_provider.dart';
 import '../../data/models/meeting_scheduler_model.dart';
 import '../providers/meeting_scheduler_provider.dart';
+import '../../../../core/widgets/searchable_dropdown_form_field.dart';
 
 class MeetingSchedulerScreen extends StatefulWidget {
   const MeetingSchedulerScreen({super.key});
@@ -64,10 +65,8 @@ class _MeetingSchedulerScreenState extends State<MeetingSchedulerScreen> {
 
     if (result != null && mounted) {
       final provider = context.read<MeetingSchedulerProvider>();
+      provider.addOrUpdateScheduler(result);
       await provider.fetchMeetingSchedulers(isRefresh: true);
-      if (provider.error != null) {
-        provider.addOrUpdateScheduler(result);
-      }
     }
   }
 
@@ -395,10 +394,22 @@ class _MeetingSchedulerScreenState extends State<MeetingSchedulerScreen> {
                     );
                     if (confirm == true) {
                       if (mounted) {
-                        context.read<MeetingSchedulerProvider>().removeScheduler(item.id);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Scheduling page deleted.')),
-                        );
+                        final success = await context
+                            .read<MeetingSchedulerProvider>()
+                            .deleteMeetingScheduler(item.id);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success
+                                    ? 'Scheduling page deleted.'
+                                    : 'Failed to delete scheduling page.',
+                              ),
+                              backgroundColor:
+                                  success ? const Color(0xFF00897B) : Colors.red,
+                            ),
+                          );
+                        }
                       }
                     }
                   },
@@ -502,9 +513,91 @@ class _CreateSchedulingPageWizardModalState
     _currentStep = widget.initialStep;
     _isLivePreviewTab = widget.initialLivePreview;
 
-    if (widget.existingItem != null) {
-      _internalNameController.text = widget.existingItem!.title;
-      _eventTitleController.text = widget.existingItem!.title;
+    final item = widget.existingItem;
+    if (item != null) {
+      _internalNameController.text = item.name;
+      _eventTitleController.text = item.eventTitle?.isNotEmpty == true ? item.eventTitle! : item.name;
+      if (item.description != null && item.description!.isNotEmpty) {
+        _descriptionController.text = item.description!;
+      }
+
+      if (item.ownerId != null && item.ownerId!.isNotEmpty) {
+        _selectedOrganizer = item.ownerId;
+      }
+
+      final cId = item.contactId ?? item.associatedContact?.id;
+      if (cId != null && cId.isNotEmpty) {
+        _selectedContact = cId;
+      }
+
+      _cancelAndReschedule = item.cancelReschedule;
+
+      if (item.timeZone != null && item.timeZone!.isNotEmpty) {
+        _timezone = item.timeZone!;
+      }
+
+      if (item.durationOptions.isNotEmpty) {
+        _selectedDurations.clear();
+        for (final dur in item.durationOptions) {
+          if (dur == 15) {
+            _selectedDurations.add('15 min');
+          } else if (dur == 30) {
+            _selectedDurations.add('30 min');
+          } else if (dur == 45) {
+            _selectedDurations.add('45 min');
+          } else if (dur == 60) {
+            _selectedDurations.add('1 hr');
+          } else if (dur == 90) {
+            _selectedDurations.add('1 hr 30 min');
+          } else if (dur == 120) {
+            _selectedDurations.add('2 hr');
+          } else if (dur > 0) {
+            _selectedDurations.add('$dur min');
+          }
+        }
+        if (_selectedDurations.isNotEmpty) {
+          _activeSelectedDuration = _selectedDurations.first;
+        }
+      }
+
+      if (item.availabilityWindow.isNotEmpty) {
+        _availabilityWindows.clear();
+        for (final window in item.availabilityWindow) {
+          final dayName = window.day.isNotEmpty
+              ? window.day[0].toUpperCase() + window.day.substring(1)
+              : 'Monday';
+          if (window.slots.isNotEmpty) {
+            for (final slot in window.slots) {
+              _availabilityWindows.add({
+                'day': dayName,
+                'from': _format24HourTo12Hour(slot.start),
+                'to': _format24HourTo12Hour(slot.end),
+              });
+            }
+          } else {
+            _availabilityWindows.add({
+              'day': dayName,
+              'from': '9:00 AM',
+              'to': '5:00 PM',
+            });
+          }
+        }
+      }
+
+      _confirmationEmail = item.sendConfirmationEmail;
+
+      if (item.reminderEmails.isNotEmpty) {
+        final rem = item.reminderEmails.first;
+        _reminderValueController.text = rem.value.toString();
+        final unitLower = rem.unit.toLowerCase();
+        if (unitLower.contains('hour')) {
+          _reminderUnit = 'hour(s) before';
+        } else if (unitLower.contains('minute')) {
+          _reminderUnit = 'minute(s) before';
+        } else {
+          _reminderUnit = 'day(s) before';
+        }
+      }
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -580,6 +673,23 @@ class _CreateSchedulingPageWizardModalState
     return '$hStr:$mStr';
   }
 
+  static String _format24HourTo12Hour(String time24) {
+    final clean = time24.trim();
+    if (clean.isEmpty) return '9:00 AM';
+    if (clean.toUpperCase().contains('AM') || clean.toUpperCase().contains('PM')) {
+      return clean;
+    }
+    final parts = clean.split(':');
+    if (parts.length < 2) return clean;
+    int hour = int.tryParse(parts[0]) ?? 9;
+    int minute = int.tryParse(parts[1]) ?? 0;
+    final period = hour >= 12 ? 'PM' : 'AM';
+    if (hour > 12) hour -= 12;
+    if (hour == 0) hour = 12;
+    final minStr = minute.toString().padLeft(2, '0');
+    return '$hour:$minStr $period';
+  }
+
   /// The availability rows in the `[{day, slots:[{start, end}]}]` shape the
   /// API returns, merging repeated days into one entry.
   List<Map<String, dynamic>> _availabilityWindowPayload() {
@@ -648,7 +758,8 @@ class _CreateSchedulingPageWizardModalState
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
         .replaceAll(RegExp(r'^-+|-+$'), '');
-    final slug = rawSlug.isEmpty ? 'meeting' : rawSlug;
+    final cleanSlug = rawSlug.replaceAll(RegExp(r'^/+|/+$'), '');
+    final slug = cleanSlug.isEmpty ? 'meeting' : cleanSlug;
 
     final eventTitleText = _eventTitleController.text.trim();
 
@@ -661,14 +772,16 @@ class _CreateSchedulingPageWizardModalState
 
     final payload = {
       'name': internalName,
-      'slug': slug.startsWith('/') ? slug : '/$slug',
+      'slug': slug,
       'eventTitle': eventTitleText.isNotEmpty ? eventTitleText : internalName,
       if (desc.isNotEmpty) 'description': desc,
       'ownerId': (_selectedOrganizer != null && _selectedOrganizer!.isNotEmpty)
           ? _selectedOrganizer
           : currentUserId,
-      if (currentDeptId.isNotEmpty && !currentDeptId.startsWith('a1b2c3d4-0000'))
+      if (currentDeptId.isNotEmpty) ...{
         'departmentId': currentDeptId,
+        'department_id': currentDeptId,
+      },
       'cancelReschedule': _cancelAndReschedule,
       'collectPayments': false,
       'durationOptions': _durationOptionsInMinutes(),
@@ -713,11 +826,17 @@ class _CreateSchedulingPageWizardModalState
     MeetingSchedulerModel savedModel;
 
     try {
-      final response = isEditing
-          ? await _api
-              .patch('${ApiConstants.meetingSchedulers}/$existingId', data: payload)
-          : await _api
-              .post(ApiConstants.meetingSchedulers, data: payload);
+      Response response;
+      if (isEditing) {
+        try {
+          response = await _api.put('${ApiConstants.meetingSchedulers}/$existingId', data: payload);
+        } catch (putErr) {
+          debugPrint('[PUT /meeting-schedulers/$existingId error, trying PATCH]: $putErr');
+          response = await _api.patch('${ApiConstants.meetingSchedulers}/$existingId', data: payload);
+        }
+      } else {
+        response = await _api.post(ApiConstants.meetingSchedulers, data: payload);
+      }
 
       debugPrint('[SAVE SCHEDULING PAGE SUCCESS]: ${response.statusCode} -> ${response.data}');
 
@@ -1218,41 +1337,45 @@ class _CreateSchedulingPageWizardModalState
         const SizedBox(height: 18),
         _buildLabelWithInfo('Organizer'),
         const SizedBox(height: 6),
-        // Every user from GET /api/users.
-        DropdownButtonFormField<String>(
+        SearchableDropdownFormField<String>(
           initialValue: _selectedOrganizer,
-          isExpanded: true,
-          style: _dropdownTextStyle,
-          decoration: _inputDecoration(
-            _isLoadingUsers ? 'Loading users...' : 'Select organizer',
-          ),
-          items: _organizerItems(),
+          hintText: _isLoadingUsers ? 'Loading users...' : 'Select organizer',
+          items: _users.map((u) {
+            final id = (u['id'] ?? u['_id'] ?? '').toString();
+            final first = (u['firstName'] ?? u['first_name'] ?? '').toString();
+            final last = (u['lastName'] ?? u['last_name'] ?? '').toString();
+            final email = (u['email'] ?? '').toString();
+            final fullName = '$first $last'.trim();
+            final label = fullName.isNotEmpty ? fullName : (email.isNotEmpty ? email : 'User');
+            return DropdownSearchItem<String>(
+              value: id,
+              label: label,
+              subtext: email.isNotEmpty && fullName.isNotEmpty ? email : null,
+            );
+          }).toList(),
           onChanged: (val) => setState(() => _selectedOrganizer = val),
         ),
 
         const SizedBox(height: 18),
         _buildLabelWithInfo('Contact'),
         const SizedBox(height: 6),
-        // Contacts from the shared ContactProvider.
         Consumer<ContactProvider>(
           builder: (context, contactProvider, child) {
             final contacts = contactProvider.contacts;
-            return DropdownButtonFormField<String>(
-              initialValue: contacts.any((c) => c.id == _selectedContact)
-                  ? _selectedContact
-                  : null,
-              isExpanded: true,
-              style: _dropdownTextStyle,
-              decoration: _inputDecoration(
-                contactProvider.isLoading && contacts.isEmpty
-                    ? 'Loading contacts...'
-                    : 'Select a contact',
-              ),
+            final validSelected = contacts.any((c) => c.id == _selectedContact)
+                ? _selectedContact
+                : null;
+            return SearchableDropdownFormField<String>(
+              initialValue: validSelected,
+              hintText: contactProvider.isLoading && contacts.isEmpty
+                  ? 'Loading contacts...'
+                  : 'Select a contact',
               items: contacts
                   .map(
-                    (c) => DropdownMenuItem(
+                    (c) => DropdownSearchItem<String>(
                       value: c.id,
-                      child: Text(c.name, overflow: TextOverflow.ellipsis),
+                      label: c.name,
+                      subtext: c.email.isNotEmpty ? c.email : (c.companyName?.isNotEmpty == true ? c.companyName : null),
                     ),
                   )
                   .toList(),
@@ -1489,15 +1612,16 @@ class _CreateSchedulingPageWizardModalState
           ),
         ),
         const SizedBox(height: 6),
-        DropdownButtonFormField<String>(
+        SearchableDropdownFormField<String>(
           initialValue: _timezone,
-          isExpanded: true,
-          style: _dropdownTextStyle,
-          decoration: _inputDecoration('UTC'),
-          items: const [
-            DropdownMenuItem(value: 'UTC', child: Text('UTC', overflow: TextOverflow.ellipsis)),
-            DropdownMenuItem(value: 'Asia/Calcutta', child: Text('Asia/Calcutta', overflow: TextOverflow.ellipsis)),
-            DropdownMenuItem(value: 'EST', child: Text('EST', overflow: TextOverflow.ellipsis)),
+          hintText: 'Select timezone',
+          items: [
+            const DropdownSearchItem(value: 'UTC', label: 'UTC', subtext: 'Coordinated Universal Time'),
+            const DropdownSearchItem(value: 'Asia/Calcutta', label: 'Asia/Calcutta', subtext: 'India Standard Time (GMT+5:30)'),
+            const DropdownSearchItem(value: 'EST', label: 'EST', subtext: 'Eastern Standard Time (GMT-5:00)'),
+            const DropdownSearchItem(value: 'PST', label: 'PST', subtext: 'Pacific Standard Time (GMT-8:00)'),
+            const DropdownSearchItem(value: 'CST', label: 'CST', subtext: 'Central Standard Time (GMT-6:00)'),
+            const DropdownSearchItem(value: 'GMT', label: 'GMT', subtext: 'Greenwich Mean Time'),
           ],
           onChanged: (val) {
             if (val != null) setState(() => _timezone = val);

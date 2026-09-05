@@ -16,6 +16,7 @@ import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/email_inline_filter_section.dart';
+import '../../../../core/utils/activity_delete.dart';
 
 class EmailsScreen extends StatefulWidget {
   const EmailsScreen({super.key});
@@ -37,13 +38,28 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
   String? _selectedStatusFilter;
 
   final List<Map<String, dynamic>> _emails = [];
+  final Set<String> _selectedForDelete = {};
+  bool _isDeleting = false;
   
   int _currentPage = 1;
+  int _totalCount = 0;
   static const int _pageSize = 25;
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _hasMoreData = true;
   String? _errorMessage;
+
+  String _formatCount(int count) {
+    return count.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  int get _totalPages {
+    if (_totalCount <= 0) return 1;
+    return (_totalCount / _pageSize).ceil();
+  }
 
   /// Id of the email the user selected. Held by id so the highlight survives a
   /// reload of the list.
@@ -74,25 +90,22 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // This screen keeps its own list, so it has to notice a department switch
-    // itself. It previously loaded once in initState and never reacted, which
-    // left the previous department's emails on screen indefinitely.
     watchDepartmentChanges((_) {
       setState(() {
         _emails.clear();
         _selectedEmailId = null;
+        _selectedForDelete.clear();
         _currentPage = 1;
+        _totalCount = 0;
         _hasMoreData = true;
       });
       _fetchEmails(reset: true);
     });
 
-    // An email opened from elsewhere in the app (e.g. a notification).
     final requested = context.watch<NavigationProvider>().focusedActivityId;
     if (requested != null && requested != _appliedFocusId) {
       _appliedFocusId = requested;
       _pendingFocusId = requested;
-      // Off the build phase: applying the focus calls setState.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _applyPendingFocus();
       });
@@ -108,15 +121,12 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
   String? _emailId(Map<String, dynamic> email) =>
       (email['id'] ?? email['_id'])?.toString();
 
-  /// Highlights the requested email and brings it into view. Does nothing until
-  /// the list has loaded — [_fetchEmails] calls back in once it has.
   Future<void> _applyPendingFocus() async {
     final id = _pendingFocusId;
     if (id == null || !_hasLoadedOnce || _isLoading) return;
 
     _pendingFocusId = null;
 
-    // The list is paginated, so keep pulling pages until the email shows up.
     var fetches = 0;
     while (mounted &&
         !_emails.any((e) => _emailId(e) == id) &&
@@ -126,8 +136,6 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
       await _fetchEmails(reset: false);
     }
 
-    // Not in this list (deleted, filtered out, or too far back): leave the
-    // screen as it is rather than scrolling somewhere arbitrary.
     if (!mounted || !_emails.any((e) => _emailId(e) == id)) return;
 
     setState(() => _selectedEmailId = id);
@@ -165,22 +173,20 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
     }
   }
 
-  /// The Owner pill's value as an `ownerId` query value.
   String? get _ownerQuery => FilterValue.orNull(_selectedOwnerId);
 
-  /// The Status pill's value as a `status` query value, when the chosen label
-  /// is one of the four the endpoint accepts. Anything else stays an
-  /// in-memory match against the record's own status field.
   String? get _statusQuery => FilterValue.activityStatus(_selectedStatusFilter);
 
   String? get _createdDateRangeQuery => FilterDateRange.toQueryValue(_selectedCreateDate);
 
-  Future<void> _fetchEmails({bool reset = false}) async {
+  Future<void> _fetchEmails({bool reset = false, int? page}) async {
     if (!mounted) return;
 
-    if (reset) {
+    final pageToFetch = page ?? (reset ? 1 : _currentPage);
+
+    if (reset || page != null) {
       setState(() {
-        _currentPage = 1;
+        _currentPage = pageToFetch;
         _hasMoreData = true;
         _isLoading = true;
         _errorMessage = null;
@@ -191,8 +197,6 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
         _isLoadingMore = true;
       });
     }
-
-    final pageToFetch = reset ? 1 : _currentPage;
 
     debugPrint('==================================================');
     debugPrint('Email API Request:');
@@ -209,12 +213,7 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
       final repository = MasterDataRepositoryImpl();
       final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
-      debugPrint('[EmailsScreen] filters → owner=${_ownerQuery ?? '-'} '
-          'status=${_statusQuery ?? '-'} '
-          'createdDateRange=${_createdDateRangeQuery ?? '-'} '
-          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
-
-      final items = await repository.getActivities(
+      final resMap = await repository.getActivitiesWithMeta(
         type: 'email',
         page: pageToFetch,
         limit: _pageSize,
@@ -227,9 +226,9 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
         createdDateRange: _createdDateRangeQuery,
       );
 
-      debugPrint('[Emails Received]: ${items.length}');
+      final items = (resMap['data'] as List).whereType<Map<String, dynamic>>().toList();
+      final total = (resMap['total'] as int?) ?? items.length;
 
-      // Strict filter: only items with type == 'email'
       final emailItems = items.where((item) {
         final type = (item['type'] ?? item['activity_type'])?.toString().toLowerCase();
         return type == 'email';
@@ -238,29 +237,16 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
       if (!mounted) return;
 
       setState(() {
-        if (reset) {
-          _emails.clear();
-        }
-
-        // Deduplicate by ID
-        final existingIds = _emails.map((e) => (e['id'] ?? e['_id'])?.toString()).toSet();
-        for (final item in emailItems) {
-          final id = (item['id'] ?? item['_id'])?.toString();
-          if (id == null || !existingIds.contains(id)) {
-            _emails.add(item);
-            if (id != null) existingIds.add(id);
-          }
-        }
-
-        _currentPage = pageToFetch + 1;
-        _hasMoreData = items.length >= _pageSize;
+        _emails.clear();
+        _emails.addAll(emailItems);
+        _totalCount = total;
+        _currentPage = pageToFetch;
+        _hasMoreData = pageToFetch < ((total / _pageSize).ceil());
         _isLoading = false;
         _isLoadingMore = false;
         _hasLoadedOnce = true;
       });
 
-      // The list is populated now, so an activity requested by another screen
-      // (including one requested before this load started) can be located.
       if (reset) _applyPendingFocus();
     } catch (e) {
       debugPrint('[Fetch Emails ERROR]: $e');
@@ -271,6 +257,74 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
         _isLoadingMore = false;
         _hasLoadedOnce = true;
       });
+    }
+  }
+
+  Future<void> _confirmAndDeleteSelectedEmails() async {
+    final targets = _emails.where((e) {
+      final id = _emailId(e);
+      return id != null && _selectedForDelete.contains(id);
+    }).toList();
+    if (targets.isEmpty || _isDeleting) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          targets.length == 1 ? 'Delete email' : 'Delete ${targets.length} emails',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          targets.length == 1
+              ? 'Are you sure you want to delete this email log? This action cannot be undone.'
+              : 'Are you sure you want to delete these ${targets.length} email logs? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeleting = true);
+
+    final targetIds = targets.map((e) => _emailId(e)).whereType<String>().toList();
+    final result = await deleteActivities(targetIds);
+    if (!mounted) return;
+
+    setState(() {
+      _isDeleting = false;
+      _selectedForDelete.removeWhere((id) => result.deleted.contains(id));
+    });
+
+    if (result.deleted.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.deleted.length == 1
+                ? 'Email deleted successfully'
+                : '${result.deleted.length} emails deleted successfully',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF00A884),
+        ),
+      );
+      _fetchEmails(reset: true);
     }
   }
 
@@ -369,6 +423,14 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
         final t2 = (b['title'] ?? b['subject'] ?? '').toString().toLowerCase();
         return t2.compareTo(t1);
       });
+    } else if (_currentSort == ContactSortOption.mostRecent) {
+      filteredEmails.sort((a, b) {
+        final d1Str = (a['scheduledAt'] ?? a['scheduled_at'] ?? a['createdAt'] ?? a['created_at'] ?? '').toString();
+        final d2Str = (b['scheduledAt'] ?? b['scheduled_at'] ?? b['createdAt'] ?? b['created_at'] ?? '').toString();
+        final d1 = DateTime.tryParse(d1Str) ?? DateTime(1970);
+        final d2 = DateTime.tryParse(d2Str) ?? DateTime(1970);
+        return d2.compareTo(d1);
+      });
     }
 
     return Scaffold(
@@ -396,6 +458,32 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
                       color: const Color(0xFF1E293B),
                     ),
                   ),
+                  const Spacer(),
+                  if (_selectedForDelete.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _isDeleting ? null : _confirmAndDeleteSelectedEmails,
+                      icon: _isDeleting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.delete_outline_rounded, size: 16, color: Colors.white),
+                      label: Text(
+                        'Delete (${_selectedForDelete.length})',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFEF4444),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -409,6 +497,16 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
                     searchHint: 'Search emails...',
                     allLabel: 'All Emails',
                     mineLabel: 'Mine Emails',
+                    countText: _isLoading && _emails.isEmpty
+                        ? '...'
+                        : _formatCount(_totalCount > 0 ? _totalCount : filteredEmails.length),
+                    currentSort: _currentSort,
+                    onSortChanged: (sort) {
+                      setState(() {
+                        _currentSort = sort;
+                      });
+                      _fetchEmails(reset: true);
+                    },
                     onSearchChanged: _onSearchChanged,
                     onSegmentChanged: (index) {
                       setState(() {
@@ -473,6 +571,81 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
                   await _fetchEmails(reset: true);
                 },
                 child: _buildMainContent(filteredEmails),
+              ),
+            ),
+
+            // 4. Pagination Footer Bar
+            const Divider(height: 1, color: Color(0xFFE2E8F0)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    filteredEmails.isEmpty 
+                        ? '0-0 of 0' 
+                        : '${((_currentPage - 1) * _pageSize) + 1}-${((_currentPage - 1) * _pageSize) + filteredEmails.length} of ${_formatCount(_totalCount > 0 ? _totalCount : filteredEmails.length)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF334155),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      OutlinedButton(
+                        onPressed: _currentPage > 1 && !_isLoading
+                            ? () {
+                                _fetchEmails(page: _currentPage - 1);
+                              }
+                            : null,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF334155),
+                          disabledForegroundColor: const Color(0xFFCBD5E1),
+                          side: const BorderSide(color: Color(0xFFE2E8F0)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: Text(
+                          'Previous',
+                          style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '$_currentPage/$_totalPages',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF475569),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed: _currentPage < _totalPages && !_isLoading
+                            ? () {
+                                _fetchEmails(page: _currentPage + 1);
+                              }
+                            : null,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF334155),
+                          disabledForegroundColor: const Color(0xFFCBD5E1),
+                          side: const BorderSide(color: Color(0xFFE2E8F0)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: Text(
+                          'Next',
+                          style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -564,39 +737,106 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
 
   Widget _buildEmailTile(Map<String, dynamic> act) {
     final title = (act['title'] ?? act['subject'] ?? 'Email').toString();
-    final startTime = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['createdAt'] ?? '').toString();
-    final ownerName = (act['ownerName'] ?? act['owner']?['name'] ?? act['assignedTo'] ?? 'Admin User').toString();
+    final startTime = (act['scheduledAt'] ?? act['scheduled_at'] ?? act['completedAt'] ?? act['completed_at'] ?? act['createdAt'] ?? act['created_at'] ?? '').toString();
+    
+    String ownerName = (act['creatorName'] ?? act['ownerName'] ?? act['owner']?['name'])?.toString() ?? '';
+    if (ownerName.isEmpty && act['creatorFirstName'] != null) {
+      ownerName = '${act['creatorFirstName']} ${act['creatorLastName'] ?? ''}'.trim();
+    }
+    if (ownerName.isEmpty && act['assignees'] is List && (act['assignees'] as List).isNotEmpty) {
+      final firstAssignee = (act['assignees'] as List).first;
+      if (firstAssignee is Map) {
+        ownerName = '${firstAssignee['firstName'] ?? ''} ${firstAssignee['lastName'] ?? ''}'.trim();
+        if (ownerName.isEmpty) ownerName = firstAssignee['email']?.toString() ?? '';
+      }
+    }
+    if (ownerName.isEmpty) {
+      ownerName = (act['assignedTo'] ?? 'Admin User').toString();
+    }
+
+    final recipientName = (act['recipientName'] ?? act['recipient_name'])?.toString();
+    final companyName = (act['companyName'] ?? act['company_name'])?.toString();
+    final status = (act['status'] ?? '').toString();
+
+    Widget? statusChip;
+    if (status.isNotEmpty) {
+      final isCompleted = status.toLowerCase() == 'completed';
+      final isPending = status.toLowerCase() == 'pending';
+      final bgColor = isCompleted
+          ? const Color(0xFFDCFCE7)
+          : (isPending ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9));
+      final textColor = isCompleted
+          ? const Color(0xFF166534)
+          : (isPending ? const Color(0xFF92400E) : const Color(0xFF475569));
+      final label = status[0].toUpperCase() + status.substring(1);
+
+      statusChip = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
+        ),
+      );
+    }
 
     final id = _emailId(act);
     final bool isSelected = id != null && id == _selectedEmailId;
+    final bool isChecked = id != null && _selectedForDelete.contains(id);
 
     return Container(
-      // The key rides along with the selection so the selected row can always
-      // be scrolled to, however it got selected.
       key: isSelected ? _selectedTileKey : null,
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
+        color: isChecked
+            ? const Color(0xFFFEF2F2)
+            : (isSelected ? const Color(0xFFE6F4F1) : Colors.white),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-          width: isSelected ? 1.5 : 1,
+          color: isChecked
+              ? const Color(0xFFFCA5A5)
+              : (isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0)),
+          width: isChecked || isSelected ? 1.5 : 1,
         ),
       ),
       child: InkWell(
         onTap: () async {
-          // Mark this email as the selected one before opening its details.
           setState(() => _selectedEmailId = id);
           _onEmailTileTap(act);
         },
         borderRadius: BorderRadius.circular(10),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           child: Row(
             children: [
+              Transform.scale(
+                scale: 0.9,
+                child: Checkbox(
+                  value: isChecked,
+                  activeColor: const Color(0xFFEF4444),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  onChanged: (bool? val) {
+                    if (id == null || id.isEmpty) return;
+                    setState(() {
+                      if (val == true) {
+                        _selectedForDelete.add(id);
+                      } else {
+                        _selectedForDelete.remove(id);
+                      }
+                    });
+                  },
+                ),
+              ),
               Container(
-                width: 40,
-                height: 40,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(8),
@@ -604,7 +844,7 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
                 child: const Icon(
                   Icons.email_outlined,
                   color: Color(0xFF8B5CF6),
-                  size: 20,
+                  size: 19,
                 ),
               ),
               const SizedBox(width: 12),
@@ -612,16 +852,51 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF0F766E),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF0F766E),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (statusChip != null) ...[
+                          const SizedBox(width: 8),
+                          statusChip,
+                        ],
+                      ],
                     ),
+                    if (recipientName != null && recipientName.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'To: $recipientName${companyName != null && companyName.isNotEmpty ? ' ($companyName)' : ''}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: const Color(0xFF334155),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ] else if (companyName != null && companyName.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Company: $companyName',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: const Color(0xFF334155),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                     const SizedBox(height: 2),
                     Text(
                       _formatEmailDateTime(startTime),
@@ -728,68 +1003,6 @@ class _EmailsScreenState extends State<EmailsScreen> with DepartmentAwareState {
         RouteNames.emailDetails,
         pathParameters: {RoutePaths.idParam: emailId},
       );
-      _fetchEmails(reset: true);
-    }
-  }
-
-  void _showSortMenu(BuildContext context) async {
-    final selected = await showMenu<ContactSortOption>(
-      context: context,
-      position: const RelativeRect.fromLTRB(200, 100, 16, 0),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 6,
-      items: [
-        PopupMenuItem<ContactSortOption>(
-          enabled: false,
-          height: 32,
-          child: Text(
-            'SORT BY',
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF94A3B8),
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.aToZ,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('A to Z', style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: _currentSort == ContactSortOption.aToZ ? FontWeight.w600 : FontWeight.w400)),
-              if (_currentSort == ContactSortOption.aToZ) const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.zToA,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Z to A', style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: _currentSort == ContactSortOption.zToA ? FontWeight.w600 : FontWeight.w400)),
-              if (_currentSort == ContactSortOption.zToA) const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-        PopupMenuItem<ContactSortOption>(
-          value: ContactSortOption.mostRecent,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Most recent', style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: _currentSort == ContactSortOption.mostRecent ? FontWeight.w600 : FontWeight.w400)),
-              if (_currentSort == ContactSortOption.mostRecent) const Icon(Icons.check_rounded, color: Color(0xFF00A884), size: 18),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    if (selected != null) {
-      setState(() {
-        _currentSort = selected;
-      });
       _fetchEmails(reset: true);
     }
   }

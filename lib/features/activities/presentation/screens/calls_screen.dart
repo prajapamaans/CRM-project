@@ -17,6 +17,7 @@ import '../widgets/log_call_modal.dart';
 import '../../../../core/widgets/search_and_filter_bar.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../widgets/call_inline_filter_section.dart';
+import '../../../../core/utils/activity_delete.dart';
 
 class CallsScreen extends StatefulWidget {
   const CallsScreen({super.key});
@@ -35,7 +36,25 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
   String? _selectedCreateDate;
   String? _selectedStatusFilter;
   final List<CallModel> _calls = [];
+  final Set<String> _selectedForDelete = {};
+  bool _isDeleting = false;
   bool _isLoadingCalls = false;
+
+  int _currentPage = 1;
+  int _totalCount = 0;
+  static const int _pageSize = 25;
+
+  String _formatCount(int count) {
+    return count.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  int get _totalPages {
+    if (_totalCount <= 0) return 1;
+    return (_totalCount / _pageSize).ceil();
+  }
 
   /// Id of the call the user selected. Held by id so the highlight survives a
   /// reload of the list.
@@ -54,7 +73,7 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadCalls();
+      _loadCalls(reset: true);
     });
   }
 
@@ -69,8 +88,11 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
       setState(() {
         _calls.clear();
         _selectedCallId = null;
+        _selectedForDelete.clear();
+        _currentPage = 1;
+        _totalCount = 0;
       });
-      _loadCalls();
+      _loadCalls(reset: true);
     });
 
     // A call opened from elsewhere in the app (e.g. a notification).
@@ -121,10 +143,14 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
 
   String? get _createdDateRangeQuery => FilterDateRange.toQueryValue(_selectedCreateDate);
 
-  Future<void> _loadCalls() async {
+  Future<void> _loadCalls({bool reset = false, int? page}) async {
     if (!mounted) return;
+    final pageToFetch = page ?? (reset ? 1 : _currentPage);
     setState(() {
       _isLoadingCalls = true;
+      if (reset || page != null) {
+        _currentPage = pageToFetch;
+      }
     });
     try {
       final repository = MasterDataRepositoryImpl();
@@ -133,17 +159,21 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
           'status=${_statusQuery ?? '-'} '
           'createdDateRange=${_createdDateRangeQuery ?? '-'} '
           'outcome=${_selectedOutcomeFilter ?? '-'} search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
-      final activities = await repository.getActivities(
+      final resMap = await repository.getActivitiesWithMeta(
         type: 'call',
-        page: 1,
-        limit: 25,
+        page: pageToFetch,
+        limit: _pageSize,
         departmentId: deptId,
         ownerId: _ownerQuery,
         status: _statusQuery,
         createdDateRange: _createdDateRangeQuery,
+        search: _searchQuery.isNotEmpty ? _searchQuery : null,
         sort: 'created_at',
         order: 'desc',
       );
+      final activities = (resMap['data'] as List).whereType<Map<String, dynamic>>().toList();
+      final total = (resMap['total'] as int?) ?? activities.length;
+
       final loadedCalls = activities.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Call';
         
@@ -174,44 +204,101 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
         );
         final startTime = scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '';
         final notes = item['notes'] as String? ?? item['description'] as String? ?? '';
-        final assignedTo = item['ownerName'] as String? ?? 'Admin User';
-        final priority = item['priority'] as String? ?? 'Medium';
-        final status = item['status'] as String? ?? 'PENDING';
-        final type = item['type'] as String? ?? 'call';
+        final creatorName = (item['creatorName'] ?? item['ownerName'] ?? item['owner']?['name'] ?? item['assignedTo'] ?? 'Admin User').toString();
 
         return CallModel(
           id: id,
           title: title,
           outcome: outcomeLabel,
-          duration: duration,
           startTime: startTime,
+          duration: duration,
+          assignedTo: creatorName,
           notes: notes,
-          assignedTo: assignedTo,
-          priority: priority,
-          status: status,
-          type: type,
           rawMap: item,
         );
       }).toList();
 
-      if (mounted) {
-        setState(() {
-          _calls.clear();
-          _calls.addAll(loadedCalls);
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _calls.clear();
+        _calls.addAll(loadedCalls);
+        _totalCount = total;
+        _currentPage = pageToFetch;
+        _isLoadingCalls = false;
+        _hasLoadedOnce = true;
+      });
+      if (reset) _applyPendingFocus();
     } catch (e) {
-      debugPrint('[_loadCalls ERROR]: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingCalls = false;
-          _hasLoadedOnce = true;
-        });
-        // The list is populated now, so an activity requested by another screen
-        // (including one requested before this load started) can be located.
-        _applyPendingFocus();
-      }
+      debugPrint('[CallsScreen _loadCalls error]: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingCalls = false;
+      });
+    }
+  }
+
+  Future<void> _confirmAndDeleteSelectedCalls() async {
+    final targets = _calls.where((c) => c.id != null && _selectedForDelete.contains(c.id)).toList();
+    if (targets.isEmpty || _isDeleting) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          targets.length == 1 ? 'Delete call' : 'Delete ${targets.length} calls',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          targets.length == 1
+              ? 'Are you sure you want to delete "${targets.single.title}"? This action cannot be undone.'
+              : 'Are you sure you want to delete these ${targets.length} calls? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeleting = true);
+
+    final result = await deleteActivities(targets.map((c) => c.id!));
+    if (!mounted) return;
+
+    setState(() {
+      _isDeleting = false;
+      _selectedForDelete.removeWhere((id) => result.deleted.contains(id));
+    });
+
+    if (result.deleted.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.deleted.length == 1
+                ? 'Call deleted successfully'
+                : '${result.deleted.length} calls deleted successfully',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF00A884),
+        ),
+      );
+      _loadCalls();
     }
   }
 
@@ -354,6 +441,34 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
                     ),
                     const Spacer(),
 
+                    if (_selectedForDelete.isNotEmpty) ...[
+                      ElevatedButton.icon(
+                        onPressed: _isDeleting ? null : _confirmAndDeleteSelectedCalls,
+                        icon: _isDeleting
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.delete_outline_rounded, size: 16, color: Colors.white),
+                        label: Text(
+                          'Delete (${_selectedForDelete.length})',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFEF4444),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+
                     // + Call Button
                     ElevatedButton.icon(
                       onPressed: () async {
@@ -396,6 +511,9 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
                       searchHint: 'Search calls...',
                       allLabel: 'All Calls',
                       mineLabel: 'Mine Calls',
+                      countText: _isLoadingCalls && _calls.isEmpty
+                          ? '...'
+                          : _formatCount(_totalCount > 0 ? _totalCount : filteredCalls.length),
                       onSearchChanged: (val) {
                         setState(() {
                           _searchQuery = val.trim();
@@ -529,7 +647,7 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
                               Text(
                                 filteredCalls.isEmpty 
                                     ? '0-0 of 0' 
-                                    : '1-${filteredCalls.length} of ${filteredCalls.length}',
+                                    : '${((_currentPage - 1) * _pageSize) + 1}-${((_currentPage - 1) * _pageSize) + filteredCalls.length} of ${_formatCount(_totalCount > 0 ? _totalCount : filteredCalls.length)}',
                                 style: GoogleFonts.poppins(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -538,49 +656,54 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
                               ),
                               Row(
                                 children: [
-                                  TextButton.icon(
-                                    onPressed: null,
-                                    icon: const Icon(Icons.chevron_left_rounded, size: 16),
-                                    label: Text(
-                                      'Prev',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                  OutlinedButton(
+                                    onPressed: _currentPage > 1 && !_isLoadingCalls
+                                        ? () {
+                                            _loadCalls(page: _currentPage - 1);
+                                          }
+                                        : null,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF334155),
+                                      disabledForegroundColor: const Color(0xFFCBD5E1),
+                                      side: const BorderSide(color: Color(0xFFE2E8F0)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                     ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: const Color(0xFF94A3B8),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text(
+                                      'Previous',
+                                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 12),
                                   Text(
-                                    '1/1',
+                                    '$_currentPage/$_totalPages',
                                     style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF1E293B),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: const Color(0xFF475569),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  TextButton(
-                                    onPressed: null,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'Next',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const Icon(Icons.chevron_right_rounded, size: 16),
-                                      ],
+                                  const SizedBox(width: 12),
+                                  OutlinedButton(
+                                    onPressed: _currentPage < _totalPages && !_isLoadingCalls
+                                        ? () {
+                                            _loadCalls(page: _currentPage + 1);
+                                          }
+                                        : null,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF334155),
+                                      disabledForegroundColor: const Color(0xFFCBD5E1),
+                                      side: const BorderSide(color: Color(0xFFE2E8F0)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                     ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: const Color(0xFF94A3B8),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text(
+                                      'Next',
+                                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500),
                                     ),
                                   ),
                                 ],
@@ -621,6 +744,8 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
 
   Widget _buildCallTile(CallModel call) {
     final bool isSelected = call.id != null && call.id == _selectedCallId;
+
+    final bool isChecked = call.id != null && _selectedForDelete.contains(call.id);
 
     return InkWell(
       // The key rides along with the selection so the selected row can always
@@ -713,20 +838,43 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
       borderRadius: BorderRadius.circular(10),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
+          color: isChecked
+              ? const Color(0xFFFEF2F2)
+              : (isSelected ? const Color(0xFFE6F4F1) : Colors.white),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-            width: isSelected ? 1.5 : 1,
+            color: isChecked
+                ? const Color(0xFFFCA5A5)
+                : (isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0)),
+            width: isChecked || isSelected ? 1.5 : 1,
           ),
         ),
       child: Row(
         children: [
+          Transform.scale(
+            scale: 0.9,
+            child: Checkbox(
+              value: isChecked,
+              activeColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+              onChanged: (bool? val) {
+                final id = call.id;
+                if (id == null || id.isEmpty) return;
+                setState(() {
+                  if (val == true) {
+                    _selectedForDelete.add(id);
+                  } else {
+                    _selectedForDelete.remove(id);
+                  }
+                });
+              },
+            ),
+          ),
           Container(
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
               color: const Color(0xFFE6F4F1),
               borderRadius: BorderRadius.circular(8),
@@ -734,7 +882,7 @@ class _CallsScreenState extends State<CallsScreen> with DepartmentAwareState {
             child: const Icon(
               Icons.phone_outlined,
               color: Color(0xFF00A884),
-              size: 20,
+              size: 19,
             ),
           ),
           const SizedBox(width: 12),

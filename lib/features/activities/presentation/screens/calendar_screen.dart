@@ -4,7 +4,11 @@ import '../../../../core/navigation/route_names.dart';
 import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:provider/provider.dart';
+
 import '../../../../core/network/api_service.dart';
+import '../../../../core/utils/department_aware_state.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 import '../widgets/create_task_modal.dart';
 import '../widgets/log_meeting_modal.dart';
 
@@ -15,7 +19,7 @@ class CalendarScreen extends StatefulWidget {
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen> with DepartmentAwareState {
   DateTime _focusedDate = DateTime.now();
   DateTime _selectedDate = DateTime.now();
   bool _isLoadingApis = false;
@@ -59,6 +63,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchCalendarActivities();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The calendar reads `/api/activities`, which is scoped to the department
+    // in the access token — so a switch changes what every cell should hold.
+    // Without this the grid kept showing the department the user had left
+    // until they happened to page to another month.
+    watchDepartmentChanges(
+      (_) => _fetchCalendarActivities(forceRefresh: true),
+      onSwitchStarted: () {
+        if (!mounted) return;
+        setState(() {
+          _activities = [];
+          // The range key is what suppresses a repeat fetch of the same
+          // month; clearing it lets the new department's month be fetched.
+          _lastFetchedRangeKey = null;
+        });
+      },
+    );
   }
 
   /// Calculates the exact start and end DateTime of the visible calendar grid.
@@ -151,18 +176,26 @@ class _CalendarScreenState extends State<CalendarScreen> {
       bool hasMore = true;
 
       // Requirement 1, 3, 15: Fetch all activities with dynamic range & limit=1000 with pagination support
+      final deptId = mounted ? context.read<DepartmentProvider>().selectedDepartmentId : '';
+
       while (hasMore) {
+        final queryParams = <String, dynamic>{
+          'startDate': startDateUtcStr,
+          'endDate': endDateUtcStr,
+          'limit': limit,
+          'page': page,
+        };
+        if (deptId.isNotEmpty) {
+          queryParams['department_id'] = deptId;
+          queryParams['departmentId'] = deptId;
+        }
+
         final requestUrl =
-            '/activities?startDate=$startDateUtcStr&endDate=$endDateUtcStr&limit=$limit&page=$page';
+            '/activities?startDate=$startDateUtcStr&endDate=$endDateUtcStr&limit=$limit&page=$page&department_id=$deptId';
 
         final response = await api.get(
           '/activities',
-          queryParameters: {
-            'startDate': startDateUtcStr,
-            'endDate': endDateUtcStr,
-            'limit': limit,
-            'page': page,
-          },
+          queryParameters: queryParams,
         );
 
         final raw = response.data;
@@ -205,6 +238,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
         // Requirement 19: Debugging logs
         debugPrint('=== CALENDAR FETCH DEBUG ===');
+        debugPrint('Department ID: $deptId');
         debugPrint('Calendar visible range: ${range['start']} to ${range['end']}');
         debugPrint('startDate (UTC): $startDateUtcStr');
         debugPrint('endDate (UTC): $endDateUtcStr');

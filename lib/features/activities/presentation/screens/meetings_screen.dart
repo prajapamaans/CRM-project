@@ -19,6 +19,7 @@ import '../../../contacts/presentation/providers/contact_provider.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
+import '../../../../core/utils/activity_delete.dart';
 import '../widgets/log_meeting_modal.dart';
 
 class MeetingsScreen extends StatefulWidget {
@@ -64,6 +65,16 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
   String _selectedStatus = 'All statuses';
   List<Map<String, dynamic>> _apiUsers = [];
 
+  /// Where the Create Meeting list is in `meta`: which page is on screen and
+  /// how many booked meetings the backend holds in total. The Log Meeting list
+  /// is unpaged, and keeps these at page 1 / the number of rows it loaded, so
+  /// its footer reads exactly as it did before.
+  int _currentPage = 1;
+  int _totalMeetings = 0;
+
+  final Set<String> _selectedForDelete = {};
+  bool _isDeleting = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -73,10 +84,13 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
       setState(() {
         _meetings.clear();
         _selectedMeetingId = null;
+        _selectedForDelete.clear();
         _apiUsers = [];
       });
       _fetchUsers();
-      _loadMeetings();
+      // Back to the first page: a page number from the department being left
+      // means nothing in the one being entered.
+      _loadMeetings(page: 1);
     });
 
     // A meeting opened from elsewhere in the app (e.g. a notification).
@@ -197,6 +211,16 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
   /// status, so it returns null and stays an in-memory match.
   String? get _statusQuery => FilterValue.activityStatus(_selectedStatus);
 
+  /// Whether anything on this screen is narrowing the list — what the Clear
+  /// button offers to undo, and what it resets.
+  bool get _hasActiveFilters =>
+      _selectedTab != 0 ||
+      _selectedOwner != 'All owners' ||
+      _selectedDateRange != 'All time' ||
+      _selectedStatus != 'All statuses' ||
+      _selectedSort != 'created_newest' ||
+      _searchQuery.isNotEmpty;
+
   String? get _createdDateRangeQuery =>
       FilterDateRange.toQueryValue(_selectedDateRange, customRange: _customDateRange);
 
@@ -228,19 +252,115 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
     }
   }
 
+  /// How many booked meetings one page of the Create Meeting list holds.
+  static const int _pageSize = 25;
+
+  /// The last page of the Create Meeting list, where `order=asc` puts the
+  /// most recently booked meeting.
+  int get _lastPage => _totalMeetings <= 0 ? 1 : ((_totalMeetings - 1) ~/ _pageSize) + 1;
+
+  /// Fetches the Create Meeting list.
+  ///
+  /// `GET /api/activities?page=1&limit=25&bookingSource=direct_booking,scheduler_link&order=asc&type=meeting`
+  /// is the request the backend documents for booked meetings, and it is
+  /// issued verbatim apart from the page and the filter pills. It is
+  /// deliberately kept apart from the Log Meeting request, which asks for
+  /// `bookingSource=manual` and sorts by `scheduled_at`.
+  ///
+  /// Both booked sources are asked for. A meeting booked through a shared
+  /// scheduler link is stored as `scheduler_link`, so a request that named
+  /// only `direct_booking` left it out of the list it belongs to.
+  ///
+  /// [departmentId] rides along for parity with every other list in this app,
+  /// but it is not what scopes the answer: the department is baked into the
+  /// access token and there is no per-request override (CRM-CORE-API §3.1).
+  /// `DepartmentAwareState` is what keeps this list right — it reloads the
+  /// screen once the token swap behind a department change has finished.
+  ///
+  /// Returns the page of rows together with `meta.total`, so the footer can
+  /// page through everything rather than showing only the first 25.
+  Future<({List<Map<String, dynamic>> rows, int total})> _fetchCreateMeetings({
+    required MasterDataRepositoryImpl repository,
+    required String? departmentId,
+    required int page,
+    String? ownerId,
+    String? status,
+    String? createdDateRange,
+  }) async {
+    final search = _searchQuery.trim().isNotEmpty ? _searchQuery.trim() : null;
+
+    debugPrint(
+      '[CREATE MEETINGS API CALL]: GET /api/activities?page=$page'
+      '&limit=$_pageSize'
+      '&bookingSource=${BookingSource.createMeetingSources}'
+      '&order=asc&type=meeting'
+      '${departmentId == null || departmentId.isEmpty ? '' : '&department_id=$departmentId'}',
+    );
+
+    final result = await repository.getActivitiesWithMeta(
+      type: 'meeting',
+      bookingSource: BookingSource.createMeetingSources,
+      page: page,
+      limit: _pageSize,
+      order: 'asc',
+      departmentId: departmentId,
+      ownerId: ownerId,
+      status: status,
+      createdDateRange: createdDateRange,
+      search: search,
+    );
+
+    final rows = (result['data'] as List?)?.whereType<Map<String, dynamic>>().toList() ??
+        const <Map<String, dynamic>>[];
+    final total = (result['total'] as int?) ?? rows.length;
+
+    debugPrint('[CREATE MEETINGS]: department=${departmentId ?? '(from token)'} '
+        'page=$page returned=${rows.length} total=$total');
+    return (rows: rows, total: total);
+  }
+
+  /// Who a booked meeting belongs to.
+  ///
+  /// The direct-booking response names people with `creatorName` and an
+  /// `assignees` array rather than the `ownerName` a logged meeting carries,
+  /// so without this every booked row would read "Admin User".
+  String? _bookedMeetingOwner(Map<String, dynamic> item) {
+    final creator = (item['creatorName'] ?? item['creator_name'])?.toString().trim();
+    if (creator != null && creator.isNotEmpty) return creator;
+
+    final assignees = item['assignees'];
+    if (assignees is List) {
+      for (final assignee in assignees) {
+        if (assignee is! Map) continue;
+        final first = (assignee['firstName'] ?? assignee['first_name'] ?? '').toString().trim();
+        final last = (assignee['lastName'] ?? assignee['last_name'] ?? '').toString().trim();
+        final name = '$first $last'.trim();
+        if (name.isNotEmpty) return name;
+        final email = (assignee['email'] ?? '').toString().trim();
+        if (email.isNotEmpty) return email;
+      }
+    }
+
+    return null;
+  }
+
   /// Loads the meetings for the current header mode.
   ///
   /// [ensureVisible] is a meeting that was just saved: it is kept at the top of
   /// the list when the reload has not picked it up yet (indexing lag, or a
   /// backend that ignores the `bookingSource` filter and pages it out).
-  Future<void> _loadMeetings({MeetingModel? ensureVisible}) async {
+  Future<void> _loadMeetings({MeetingModel? ensureVisible, int? page}) async {
     if (!mounted) return;
+
+    final expectedSource = _expectedBookingSource;
+    final isCreateMode = expectedSource == BookingSource.directBooking;
+    // The Log Meeting list is unpaged; it has always asked for page 1.
+    final pageToFetch = isCreateMode ? (page ?? _currentPage) : 1;
+
     setState(() {
       _isLoadingMeetings = true;
     });
 
-    final expectedSource = _expectedBookingSource;
-    final isCreateMode = expectedSource == BookingSource.directBooking;
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
 
     // Read before the awaits below, while the context is still safe to use.
@@ -249,52 +369,62 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
     final createdDateRangeQuery = _createdDateRangeQuery;
 
     List<MeetingModel>? loadedMeetings;
+    int? loadedTotal;
     try {
       await MeetingBookingSourceStore.ensureLoaded();
       final repository = MasterDataRepositoryImpl();
-      debugPrint('[MeetingsScreen] filters → owner=${_selectedOwner} (id=${ownerQuery ?? '-'}) '
-          'status=${statusQuery ?? '-'} createdDateRange=${createdDateRangeQuery ?? '-'} '
-          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
 
-      final activities = await repository.getActivities(
-        type: 'meeting',
-        bookingSource: expectedSource,
-        page: 1,
-        limit: 25,
-        // Booked meetings are read newest-first so one created a moment ago
-        // sits on the first page instead of behind 25 older rows.
-        sort: isCreateMode ? 'createdAt' : null,
-        order: isCreateMode ? 'desc' : 'asc',
-        departmentId: deptId,
-        ownerId: ownerQuery,
-        status: statusQuery,
-        createdDateRange: createdDateRangeQuery,
-      );
+      final List<Map<String, dynamic>> activities;
+      final List<Map<String, dynamic>> scoped;
 
-      // The `bookingSource` query parameter is only honoured by backends that
-      // know the field, so the split is enforced here as well — otherwise a
-      // booked meeting would show up in the Log Meeting list and vice versa.
-      //
-      // Meetings booked before the app started tagging them carry no
-      // bookingSource at all; those are recognised by their missing outcome,
-      // but only when this page proves outcomes are being returned.
-      final inferFromOutcome = canInferBookingSourceFromOutcome(activities);
-      final scoped = activities
-          .where((item) =>
-              resolveBookingSource(item, inferFromOutcome: inferFromOutcome) == expectedSource)
-          .toList();
+      if (isCreateMode) {
+        // Create Meetings mode — its own request, see [_fetchCreateMeetings].
+        final result = await _fetchCreateMeetings(
+          repository: repository,
+          departmentId: deptId,
+          page: pageToFetch,
+          ownerId: ownerQuery,
+          status: statusQuery,
+          createdDateRange: createdDateRangeQuery,
+        );
+        activities = result.rows;
+        loadedTotal = result.total;
+        // The request already asks for the booked sources only. This guard is
+        // here so that a row the API explicitly tags `manual` — a Log Meeting
+        // record — can never land in this list even if the filter is ignored.
+        // A row that carries no tag at all is kept: the endpoint was asked for
+        // booked meetings, and dropping it would blank the list on any
+        // deployment whose list response leaves `bookingSource` out.
+        scoped = activities
+            .where((item) =>
+                BookingSource.normalize(item['bookingSource'] ?? item['booking_source']) !=
+                BookingSource.manual)
+            .toList();
+      } else {
+        // Log Meetings mode: GET /api/activities?type=meeting&bookingSource=manual
+        debugPrint('[LOG MEETINGS API CALL]: GET /api/activities?page=1&limit=25&bookingSource=$expectedSource&sort=scheduled_at&order=desc&type=meeting&department_id=$deptId');
+        debugPrint('[LOG MEETINGS DEPARTMENT ID]: $deptId');
+
+        activities = await repository.getActivities(
+          type: 'meeting',
+          bookingSource: expectedSource,
+          page: 1,
+          limit: 25,
+          sort: 'scheduled_at',
+          order: 'desc',
+          departmentId: deptId,
+          ownerId: ownerQuery,
+          status: statusQuery,
+          createdDateRange: createdDateRangeQuery,
+          search: _searchQuery.trim().isNotEmpty ? _searchQuery.trim() : null,
+        );
+        scoped = activities;
+      }
+
       debugPrint(
         '[_loadMeetings]: mode=$_currentHeaderMode bookingSource=$expectedSource '
-        'returned=${activities.length} kept=${scoped.length} '
-        'inferFromOutcome=$inferFromOutcome',
+        'departmentId=$deptId returned=${activities.length} kept=${scoped.length}',
       );
-      if (!inferFromOutcome && activities.isNotEmpty) {
-        debugPrint(
-          '[_loadMeetings]: no meeting in this page carries an `outcome` field '
-          '— it looks absent from the list response, so untagged meetings are '
-          'left in the Log Meeting list.',
-        );
-      }
 
       loadedMeetings = scoped.map((item) {
         final title = item['title'] as String? ?? item['subject'] as String? ?? 'Meeting';
@@ -312,7 +442,11 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
         );
         final startTime = scheduledAt != null ? formatActivityDateTimeInput(scheduledAt) : '';
         final notes = item['notes'] as String? ?? item['description'] as String? ?? '';
-        final assignedTo = item['ownerName'] as String? ?? 'Admin User';
+        final assignedTo = item['ownerName'] as String? ??
+            // Only the booked rows need this: the Log Meeting response already
+            // carries `ownerName`, and its rows are read exactly as before.
+            (isCreateMode ? _bookedMeetingOwner(item) : null) ??
+            'Admin User';
 
         String? parsedContactId = (item['contactId'] ?? item['contact_id'] ?? item['contact']?['id'])?.toString();
         String? parsedCompanyId = (item['companyId'] ?? item['company_id'] ?? item['company']?['id'])?.toString();
@@ -343,10 +477,21 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
           contactId: parsedContactId,
           companyId: parsedCompanyId,
           dealId: parsedDealId,
-          bookingSource: expectedSource,
+          // The row's own source, so a scheduler-link booking is not rewritten
+          // as a direct one when it is opened for editing.
+          bookingSource:
+              BookingSource.normalize(item['bookingSource'] ?? item['booking_source']) ??
+                  expectedSource,
           rawMap: item,
         );
       }).toList();
+
+      // The id is the identity of a meeting: should a page ever repeat one,
+      // it is listed once rather than twice.
+      final seenIds = <String>{};
+      loadedMeetings = loadedMeetings
+          .where((m) => m.id == null || seenIds.add(m.id!))
+          .toList();
     } catch (e) {
       debugPrint('[_loadMeetings ERROR]: $e');
     } finally {
@@ -359,12 +504,24 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
               ..clear()
               ..addAll(loadedMeetings);
 
+            _currentPage = pageToFetch;
+            // In Log mode the footer keeps reading "1-n of n" off the loaded
+            // rows, exactly as it did before pagination existed here.
+            _totalMeetings = loadedTotal ?? loadedMeetings.length;
+
+            // A meeting that was just saved but is not in this page yet — the
+            // backend indexing a moment behind. Only ever pinned when it has a
+            // real id, so it can be matched against the reload and cannot be
+            // shown twice.
+            final pinnedId = ensureVisible?.id;
             if (ensureVisible != null &&
+                pinnedId != null &&
+                pinnedId.isNotEmpty &&
                 ensureVisible.bookingSource == expectedSource &&
-                !_meetings.any((m) => m.id != null && m.id == ensureVisible.id)) {
+                !_meetings.any((m) => m.id == pinnedId)) {
               debugPrint(
                 '[_loadMeetings]: reload did not return the meeting just saved '
-                '(${ensureVisible.id}) — keeping it at the top of the list.',
+                '($pinnedId) — keeping it at the top of the list.',
               );
               _meetings.insert(0, ensureVisible);
             }
@@ -497,7 +654,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
 
     if (selected != null) {
       setState(() => _selectedOwner = selected);
-      _loadMeetings();
+      _loadMeetings(page: 1);
     }
   }
 
@@ -579,14 +736,14 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
           _selectedDateRange = '${range.start.month}/${range.start.day} - ${range.end.month}/${range.end.day}';
           _customDateRange = range;
         });
-        _loadMeetings();
+        _loadMeetings(page: 1);
       }
     } else if (selected != null) {
       setState(() {
         _selectedDateRange = selected;
         _customDateRange = null;
       });
-      _loadMeetings();
+      _loadMeetings(page: 1);
     }
   }
 
@@ -649,7 +806,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
 
     if (selected != null) {
       setState(() => _selectedStatus = selected);
-      _loadMeetings();
+      _loadMeetings(page: 1);
     }
   }
 
@@ -787,6 +944,28 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
     return result;
   }
 
+  /// Which page to reload after [removed] rows were deleted from the one on
+  /// screen. Deleting the last rows of the last page would otherwise reload a
+  /// page that no longer exists and show an empty list.
+  int _pageAfterRemoving(int removed) {
+    if (_currentPage <= 1) return 1;
+    final left = _meetings.length - removed;
+    return left > 0 ? _currentPage : _currentPage - 1;
+  }
+
+  /// The "1-25 of 137" line under the list.
+  ///
+  /// [shownOnPage] is what is actually on screen — the pills narrow the loaded
+  /// page further in memory, and the label counts what the user can see rather
+  /// than what the page happened to contain.
+  String _pageRangeLabel(int shownOnPage) {
+    if (shownOnPage == 0) return '0-0 of ${_totalMeetings > 0 ? _totalMeetings : 0}';
+    final first = ((_currentPage - 1) * _pageSize) + 1;
+    final last = first + shownOnPage - 1;
+    final total = _totalMeetings >= last ? _totalMeetings : last;
+    return '$first-$last of $total';
+  }
+
   /// Reloads the list a meeting was just saved into and brings that meeting
   /// into view. A filter left over from before the save (a status, an owner, a
   /// search term) would hide a brand new row, so those are cleared when — and
@@ -806,17 +985,41 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
       });
     }
 
+    final savedId = saved.id;
     setState(() {
-      _selectedMeetingId = saved.id;
+      _selectedMeetingId = savedId;
       // Shown straight away; the reload below replaces it with the stored row.
-      if (saved.bookingSource == _expectedBookingSource &&
-          !_meetings.any((m) => m.id != null && m.id == saved.id)) {
+      // Only a meeting the backend gave an id to is shown this way — without
+      // one there is nothing to match against the reload, and an unmatched row
+      // is exactly what "appeared, then vanished" looked like.
+      if (savedId != null &&
+          savedId.isNotEmpty &&
+          saved.bookingSource == _expectedBookingSource &&
+          !_meetings.any((m) => m.id == savedId)) {
         _meetings.insert(0, saved);
       }
     });
 
     _pendingFocusId = saved.id;
+
+    // Straight back to the API — the saved row on screen is a placeholder
+    // until the list says the backend holds it.
+    //
+    // The Create Meeting list is ordered oldest-first, so the meeting that was
+    // just booked is on the *last* page. Reloading the page that happens to be
+    // open would show a list the new meeting is genuinely not part of, which
+    // is what made a saved meeting look like it had vanished. The first load
+    // brings back `meta.total`; the second opens the page that holds it.
     await _loadMeetings(ensureVisible: saved);
+    if (!mounted) return;
+
+    if (_expectedBookingSource == BookingSource.directBooking &&
+        _currentPage != _lastPage) {
+      debugPrint('[_showSavedMeeting]: the new meeting is on page $_lastPage '
+          'of $_lastPage — opening it.');
+      _pendingFocusId = saved.id;
+      await _loadMeetings(ensureVisible: saved, page: _lastPage);
+    }
   }
 
   @override
@@ -877,7 +1080,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                               _meetings.clear();
                               _selectedMeetingId = null;
                             });
-                            _loadMeetings();
+                            // Each list keeps its own paging; the new one
+                            // opens at its first page.
+                            _loadMeetings(page: 1);
                           }
                         },
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -941,6 +1146,39 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                   ),
 
                   const SizedBox(width: 8),
+
+                  if (_selectedForDelete.isNotEmpty) ...[
+                    ElevatedButton.icon(
+                      onPressed: _isDeleting ? null : _confirmAndDeleteSelectedMeetings,
+                      icon: _isDeleting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.delete_outline_rounded, size: 16, color: Colors.white),
+                      label: Text(
+                        'Delete (${_selectedForDelete.length})',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFEF4444),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
 
                   // Right Action Button
                   ElevatedButton.icon(
@@ -1157,54 +1395,25 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                                     ),
                                   ),
                                 ),
-                                if (_selectedOwner != 'All owners' || _selectedDateRange != 'All time' || _selectedStatus != 'All statuses') ...[
+                                if (_hasActiveFilters) ...[
                                   const SizedBox(width: 16),
-                                  InkWell(
-                                    onTap: () {
-                                      debugPrint('[MeetingsScreen] CLEAR — before: '
-                                          'owner=$_selectedOwner date=$_selectedDateRange '
-                                          'status=$_selectedStatus '
-                                          'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
-                                      setState(() {
-                                        _selectedOwner = 'All owners';
-                                        _selectedDateRange = 'All time';
-                                        _customDateRange = null;
-                                        _selectedStatus = 'All statuses';
-                                        _searchQuery = '';
-                                        _searchController.clear();
-                                      });
-                                      // Every filter parameter is now absent
-                                      // from the request, so this reloads the
-                                      // full unfiltered first page.
-                                      _loadMeetings();
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFEF2F2),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Clear',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: const Color(0xFFEF4444),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
+                                  _buildClearFiltersButton(),
                                 ],
                               ],
                             ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      // With the filter bar collapsed the pills are out of
+                      // sight, so Clear is offered here instead — otherwise a
+                      // search term or a filter set earlier could not be undone
+                      // without reopening the bar.
+                      if (!_showFilterBar && _hasActiveFilters) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: Row(
+                            children: [_buildClearFiltersButton()],
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -1268,9 +1477,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              filteredMeetings.isEmpty 
-                                  ? '0-0 of 0' 
-                                  : '1-${filteredMeetings.length} of ${filteredMeetings.length}',
+                              _pageRangeLabel(filteredMeetings.length),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -1280,7 +1487,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                             Row(
                               children: [
                                 TextButton.icon(
-                                  onPressed: null,
+                                  onPressed: _currentPage > 1 && !_isLoadingMeetings
+                                      ? () => _loadMeetings(page: _currentPage - 1)
+                                      : null,
                                   icon: const Icon(Icons.chevron_left_rounded, size: 16),
                                   label: Text(
                                     'Prev',
@@ -1296,7 +1505,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  '1/1',
+                                  '$_currentPage/$_lastPage',
                                   style: GoogleFonts.poppins(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
@@ -1305,7 +1514,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                                 ),
                                 const SizedBox(width: 8),
                                 TextButton(
-                                  onPressed: null,
+                                  onPressed: _currentPage < _lastPage && !_isLoadingMeetings
+                                      ? () => _loadMeetings(page: _currentPage + 1)
+                                      : null,
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -1417,6 +1628,56 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
     );
   }
 
+  /// Resets every selection on the screen and reloads the list the current
+  /// header mode belongs to — Create Meeting or Log Meeting — unfiltered.
+  Widget _buildClearFiltersButton() {
+    return InkWell(
+      onTap: () {
+        debugPrint('[MeetingsScreen] CLEAR — before: '
+            'mode=$_currentHeaderMode tab=$_selectedTab '
+            'owner=$_selectedOwner date=$_selectedDateRange '
+            'status=$_selectedStatus sort=$_selectedSort '
+            'search=${_searchQuery.isEmpty ? '-' : _searchQuery}');
+        setState(() {
+          _selectedTab = 0;
+          _selectedOwner = 'All owners';
+          _selectedDateRange = 'All time';
+          _customDateRange = null;
+          _selectedStatus = 'All statuses';
+          _selectedSort = 'created_newest';
+          _searchQuery = '';
+          _searchController.clear();
+        });
+        // Every filter parameter is now absent from the request, so this
+        // reloads the full unfiltered first page.
+        _loadMeetings(page: 1);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFFFCA5A5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
+            const SizedBox(width: 4),
+            Text(
+              'Clear',
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFFEF4444),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterPill(IconData icon, String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1443,8 +1704,134 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
     );
   }
 
+  Future<void> _confirmAndDeleteMeeting(MeetingModel meeting) async {
+    final meetingId = meeting.id;
+    if (meetingId == null || meetingId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot delete meeting without a valid ID'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'Delete Meeting',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          'Are you sure you want to delete "${meeting.title}"? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final result = await deleteActivities([meetingId]);
+
+    if (!mounted) return;
+
+    if (result.allSucceeded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Meeting deleted successfully'),
+          backgroundColor: Color(0xFF00A884),
+        ),
+      );
+      _loadMeetings(page: _pageAfterRemoving(1));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to delete meeting. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmAndDeleteSelectedMeetings() async {
+    final targets = _meetings.where((m) => m.id != null && _selectedForDelete.contains(m.id)).toList();
+    if (targets.isEmpty || _isDeleting) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          targets.length == 1 ? 'Delete meeting' : 'Delete ${targets.length} meetings',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          targets.length == 1
+              ? 'Are you sure you want to delete "${targets.single.title}"? This action cannot be undone.'
+              : 'Are you sure you want to delete these ${targets.length} meetings? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeleting = true);
+
+    final result = await deleteActivities(targets.map((m) => m.id!));
+    if (!mounted) return;
+
+    setState(() {
+      _isDeleting = false;
+      _selectedForDelete.removeWhere((id) => result.deleted.contains(id));
+    });
+
+    if (result.deleted.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.deleted.length == 1
+                ? 'Meeting deleted successfully'
+                : '${result.deleted.length} meetings deleted successfully',
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF00A884),
+        ),
+      );
+      _loadMeetings(page: _pageAfterRemoving(result.deleted.length));
+    }
+  }
+
   Widget _buildMeetingTile(MeetingModel meeting) {
     final bool isSelected = meeting.id != null && meeting.id == _selectedMeetingId;
+    final bool isChecked = meeting.id != null && _selectedForDelete.contains(meeting.id);
 
     return InkWell(
       // The key rides along with the selection so the selected row can always
@@ -1496,20 +1883,43 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
       borderRadius: BorderRadius.circular(10),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE6F4F1) : Colors.white,
+          color: isChecked
+              ? const Color(0xFFFEF2F2)
+              : (isSelected ? const Color(0xFFE6F4F1) : Colors.white),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0),
-            width: isSelected ? 1.5 : 1,
+            color: isChecked
+                ? const Color(0xFFFCA5A5)
+                : (isSelected ? const Color(0xFF00A884) : const Color(0xFFE2E8F0)),
+            width: isChecked || isSelected ? 1.5 : 1,
           ),
         ),
         child: Row(
           children: [
+            Transform.scale(
+              scale: 0.9,
+              child: Checkbox(
+                value: isChecked,
+                activeColor: const Color(0xFFEF4444),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                onChanged: (bool? val) {
+                  final id = meeting.id;
+                  if (id == null || id.isEmpty) return;
+                  setState(() {
+                    if (val == true) {
+                      _selectedForDelete.add(id);
+                    } else {
+                      _selectedForDelete.remove(id);
+                    }
+                  });
+                },
+              ),
+            ),
             Container(
-              width: 40,
-              height: 40,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: const Color(0xFFE6F4F1),
                 borderRadius: BorderRadius.circular(8),
@@ -1517,7 +1927,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
               child: const Icon(
                 Icons.videocam_outlined,
                 color: Color(0xFF0F766E),
-                size: 20,
+                size: 19,
               ),
             ),
             const SizedBox(width: 12),
@@ -1552,7 +1962,52 @@ class _MeetingsScreenState extends State<MeetingsScreen> with DepartmentAwareSta
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            PopupMenuButton<String>(
+              icon: const Icon(
+                Icons.more_vert_rounded,
+                color: Color(0xFF64748B),
+                size: 20,
+              ),
+              onSelected: (action) async {
+                if (action == 'edit') {
+                  final isCreate = _currentHeaderMode == 'create';
+                  final updated = await LogMeetingModal.show(
+                    context,
+                    existingMeeting: meeting,
+                    isCreateMode: isCreate,
+                    titleOverride: isCreate ? 'Edit Meeting' : 'Edit Meeting',
+                  );
+                  if (updated != null) {
+                    await _showSavedMeeting(updated);
+                  }
+                } else if (action == 'delete') {
+                  _confirmAndDeleteMeeting(meeting);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF334155)),
+                      const SizedBox(width: 8),
+                      Text('Edit', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF334155))),
+                    ],
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
+                      const SizedBox(width: 8),
+                      Text('Delete', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
             const Icon(
               Icons.chevron_right_rounded,
               color: Color(0xFFCBD5E1),

@@ -102,6 +102,26 @@ class CompanyProvider extends ChangeNotifier {
       );
     }
 
+    if (_currentSearch != null && _currentSearch!.trim().isNotEmpty) {
+      final q = _currentSearch!.trim().toLowerCase();
+      filtered = filtered.where((c) {
+        final name = c.name.toLowerCase();
+        final domain = (c.domain ?? '').toLowerCase();
+        final website = (c.websiteUrl ?? '').toLowerCase();
+        final phone = (c.phone ?? '').toLowerCase();
+        final industry = (c.industryName ?? '').toLowerCase();
+        final city = (c.city ?? '').toLowerCase();
+        final msp = (c.msp ?? '').toLowerCase();
+        return name.contains(q) ||
+            domain.contains(q) ||
+            website.contains(q) ||
+            phone.contains(q) ||
+            industry.contains(q) ||
+            city.contains(q) ||
+            msp.contains(q);
+      }).toList();
+    }
+
     // Apply Default Most Recent Sorting (newest first)
     filtered.sort((a, b) {
       final dateA = DateTime.tryParse(a.createdAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -146,6 +166,7 @@ class CompanyProvider extends ChangeNotifier {
       FilterValue.orNull(_selectedLifecycleStage) != null ||
       FilterValue.orNull(_selectedLeadStatus) != null ||
       _mspFilterValue != null ||
+      (_currentSearch != null && _currentSearch!.trim().isNotEmpty) ||
       !FilterDateRange.isUnset(_selectedCreateDate);
 
   /// The server's total for the current query.
@@ -484,27 +505,56 @@ class CompanyProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> deleteCompany(String id) async {
-    _isLoading = true;
+  Future<bool> deleteCompany(String id, {String? departmentId}) async {
     _error = null;
-    notifyListeners();
 
     try {
-      final success = await _repository.deleteCompany(id);
+      final targetDeptId = departmentId ?? _currentDepartmentId;
+      final success = await _repository.deleteCompany(id, departmentId: targetDeptId);
       if (success) {
         _companies.removeWhere((c) => c.id == id);
         _totalCount = (_totalCount - 1).clamp(0, 999999);
         if (_selectedCompany?.id == id) {
           _selectedCompany = null;
         }
+        notifyListeners();
       }
       return success;
     } catch (e) {
       _error = e.toString();
-      return false;
-    } finally {
-      _isLoading = false;
       notifyListeners();
+      return false;
     }
+  }
+
+  Future<int> deleteCompanies(List<String> ids, {String? departmentId}) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    final targetDeptId = departmentId ?? _currentDepartmentId;
+    int successCount = 0;
+
+    for (final id in ids) {
+      try {
+        final success = await _repository.deleteCompany(id, departmentId: targetDeptId);
+        if (success) {
+          _companies.removeWhere((c) => c.id == id);
+          _totalCount = (_totalCount - 1).clamp(0, 999999);
+          successCount++;
+        }
+      } catch (e) {
+        debugPrint('[CompanyProvider] deleteCompany $id failed: $e');
+        _error = e.toString();
+      }
+    }
+
+    if (_selectedCompany != null && ids.contains(_selectedCompany!.id)) {
+      _selectedCompany = null;
+    }
+
+    _isLoading = false;
+    notifyListeners();
+    return successCount;
   }
 }

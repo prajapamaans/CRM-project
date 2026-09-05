@@ -12,7 +12,7 @@ class DropdownSearchItem<T> {
   final String? subtext;
   final Color? dotColor;
 
-  DropdownSearchItem({
+  const DropdownSearchItem({
     required this.value,
     required this.label,
     this.subtext,

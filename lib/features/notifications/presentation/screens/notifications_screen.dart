@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/navigation/app_router.dart';
 import '../../../../core/navigation/route_names.dart';
 import '../../../../core/navigation/route_paths.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -479,6 +480,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   ///   - Otherwise: navigates to the global Activity screen (Calls, Meetings, Emails, Tasks) with highlight.
   /// - For Entity notifications (Deal, Contact, Company updates):
   ///   - Opens entity screen on Overview tab (initialTabIndex: 0).
+  /// Navigates to the main tab at [tabIndex].
+  ///
+  /// Setting the index on `NavigationProvider` is not enough on its own: under
+  /// the router the visible screen comes from the current location, and the
+  /// layout syncs the provider back to whatever that location says. Without
+  /// this the activity id was handed over correctly and the screen it was
+  /// meant for was never opened, so nothing was ever highlighted.
+  ///
+  /// `go` rather than `push`, so a tab replaces the current one instead of
+  /// stacking a second copy — the same move the sidebar and bottom bar make.
+  void _openTab(int tabIndex) {
+    final location = AppRouter.locationForTab(tabIndex);
+    if (location == null) return;
+    context.go(location);
+  }
+
   void _onNotificationTap(NotificationModel item) {
     if (!item.isRead) {
       context.read<NotificationProvider>().markAsRead(item.id);
@@ -546,16 +563,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       return;
     }
 
-    // 4. Global Activity screen navigation via NavigationProvider (Calls, Meetings, Emails, Tasks)
+    // 4. No record to open — the activity's own screen (Calls, Meetings,
+    // Emails, Tasks) with the row highlighted.
     final activityTypeToOpen = item.activityType ?? item.entityType ?? item.type;
     final lowerType = activityTypeToOpen.toLowerCase();
+    final navigation = context.read<NavigationProvider>();
     if (lowerType.contains('task') || lowerType.contains('note')) {
-      context.read<NavigationProvider>().selectScreen(11, activityId: targetActivityId);
-    } else {
-      context.read<NavigationProvider>().openActivity(
-            activityType: activityTypeToOpen,
-            activityId: targetActivityId,
-          );
+      navigation.selectScreen(11, activityId: targetActivityId);
+      _openTab(11);
+    } else if (navigation.openActivity(
+      activityType: activityTypeToOpen,
+      activityId: targetActivityId,
+    )) {
+      _openTab(navigation.selectedIndex);
     }
   }
 

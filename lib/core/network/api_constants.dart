@@ -25,6 +25,19 @@ class ApiConstants {
   static const String dealsStats = '/deals/stats';
   static const String dealsStages = '/deals/stages';
   static const String activities = '/activities';
+
+  /// Booking a meeting — the Create Meeting flow.
+  ///
+  /// Create-only, and separate from `/activities` on purpose: this is the
+  /// route that stamps `bookingSource=direct_booking`. The activities route
+  /// accepts a `bookingSource` in the body, answers 201, and stores `manual`
+  /// anyway. The saved row is an ordinary activity, so it is read, updated and
+  /// deleted through [activities] afterwards.
+  ///
+  /// Body: `title`, `scheduledAt`, `durationMinutes` (all required) and one of
+  /// `contactId` / `contactEmail`; `description`, `ownerId` and `location` are
+  /// optional. Anything else is ignored.
+  static const String meetings = '/meetings';
   static const String dashboard = '/dashboard';
   static const String activitiesStats = '/activities/stats';
   static const String activitiesDashboardUnified = '/activities/dashboard-unified';
@@ -36,7 +49,19 @@ class ApiConstants {
   static const String masterDropdowns = '/master-dropdowns';
   static const String mspOptions = '/msp-options';
   static const String emailTemplates = '/email-templates';
+
+  /// The folder/template listing — `GET`.
   static const String emailTemplatesList = '/email-templates/list';
+
+  /// Writing a template. The module namespaces its writes under `/template`
+  /// (singular): `POST /api/email-templates` is not a route at all, and
+  /// `/list` only answers `GET`. Updates are `PATCH`; `PUT` is not exposed.
+  static const String emailTemplateWrite = '/email-templates/template';
+  static String emailTemplateById(String id) => '/email-templates/template/$id';
+
+  /// Writing a folder — same singular naming as the template routes.
+  static const String emailTemplateFolderWrite = '/email-templates/folder';
+  static String emailTemplateFolderById(String id) => '/email-templates/folder/$id';
   static const String emailSignatures = '/email-signatures';
   static const String meetingSchedulers = '/meeting-schedulers';
   static const String sequences = '/sequences';

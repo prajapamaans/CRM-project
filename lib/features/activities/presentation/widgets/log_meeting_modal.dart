@@ -16,6 +16,7 @@ import '../../../../core/utils/meeting_booking_source.dart';
 import 'follow_up_task_section.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../contacts/presentation/providers/contact_provider.dart';
+import '../../../departments/presentation/providers/department_provider.dart';
 
 class MeetingModel {
   final String? id;
@@ -957,10 +958,36 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
       return;
     }
 
-    if (!scheduledAtDt.isAfter(DateTime.now())) {
+    // Only a new booking has to be in the future. A meeting being edited may
+    // already have happened, and rejecting its own stored time would make it
+    // impossible to correct anything else about it.
+    final existingId = widget.existingMeeting?.id;
+    final isEditingExisting = existingId != null && existingId.isNotEmpty;
+
+    if (!isEditingExisting && !scheduledAtDt.isAfter(DateTime.now())) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Pick a future date and time for the meeting.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final String? guestEmail = _useEmailInstead && _emailController.text.trim().isNotEmpty
+        ? _emailController.text.trim()
+        : null;
+    final String? bookingContactId = _selectedContactId ?? widget.contactId;
+
+    // Whoever the meeting is with. `POST /api/meetings` requires one of the
+    // two and rejects the booking without it, so the form says so plainly
+    // rather than letting the save come back as a validation error.
+    if (!isEditingExisting &&
+        guestEmail == null &&
+        (bookingContactId == null || bookingContactId.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pick a contact for this meeting, or enter an email address instead.'),
           backgroundColor: Colors.red,
         ),
       );
@@ -974,7 +1001,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     final durationMinutes = parseDurationMinutes(_selectedDuration);
 
     final List<Map<String, String>> assocList = [];
-    String? targetContactId = _selectedContactId ?? widget.contactId;
+    String? targetContactId = bookingContactId;
 
     if (targetContactId != null && targetContactId.isNotEmpty) {
       assocList.add({'objectId': targetContactId, 'objectType': 'contact'});
@@ -987,6 +1014,10 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
     }
 
     final isoScheduled = scheduledAtDt.toUtc().toIso8601String();
+
+    final String? deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    String? targetCompanyId = widget.companyId;
+    String? targetDealId = widget.dealId;
 
     final meetingData = {
       'title': title,
@@ -1014,10 +1045,22 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
       'owner_name': organizerName,
       'assignedTo': organizerName,
       'assigned_to': organizerName,
+      if (deptId != null && deptId.isNotEmpty) ...{
+        'departmentId': deptId,
+        'department_id': deptId,
+      },
       if (assocList.isNotEmpty) 'associations': assocList,
       if (targetContactId != null && targetContactId.isNotEmpty) ...{
         'contactId': targetContactId,
         'contact_id': targetContactId,
+      },
+      if (targetCompanyId != null && targetCompanyId.isNotEmpty) ...{
+        'companyId': targetCompanyId,
+        'company_id': targetCompanyId,
+      },
+      if (targetDealId != null && targetDealId.isNotEmpty) ...{
+        'dealId': targetDealId,
+        'deal_id': targetDealId,
       },
       if (_useEmailInstead && _emailController.text.trim().isNotEmpty) ...{
         'guestEmail': _emailController.text.trim(),
@@ -1026,10 +1069,45 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
       'createTeamsLink': _createTeamsLink,
     };
 
-    debugPrint('[CREATE MEETING POST ${ApiConstants.activities}]: ${jsonEncode(meetingData)}');
+    // What `POST /api/meetings` accepts, and nothing more — it ignores every
+    // other key, so sending the activities payload here would quietly drop
+    // half of it. `durationMinutes` is required and must be a number.
+    final bookingData = <String, dynamic>{
+      'title': title,
+      'scheduledAt': isoScheduled,
+      'durationMinutes': durationMinutes ?? 30,
+      if (guestEmail != null) 'contactEmail': guestEmail,
+      if (guestEmail == null && targetContactId != null && targetContactId.isNotEmpty)
+        'contactId': targetContactId,
+      if (fullNotes.isNotEmpty) 'description': fullNotes,
+      'ownerId': organizerId,
+    };
 
     try {
-      final res = await ApiService().post(ApiConstants.activities, data: meetingData);
+      // A *booked* meeting is created through `POST /api/meetings`, not
+      // `POST /api/activities`.
+      //
+      // `bookingSource` is not a writable field on the activities route: it
+      // accepts the key, answers 201, and stores `manual` regardless — which
+      // filed every meeting booked here as a logged one, so the Create Meeting
+      // list (which asks for the booked sources) could never show it. That is
+      // what made a new meeting appear once and then vanish. The meetings
+      // route is what stamps `direct_booking`.
+      //
+      // Editing stays on `PATCH /api/activities/:id`: the saved row *is* an
+      // activity, the meetings route is create-only, and a PATCH there leaves
+      // the stored booking source alone.
+      final Response res;
+      if (isEditingExisting) {
+        debugPrint('[CREATE MEETING PATCH ${ApiConstants.activities}/$existingId]: ${jsonEncode(meetingData)}');
+        res = await ApiService().patch(
+          '${ApiConstants.activities}/$existingId',
+          data: meetingData,
+        );
+      } else {
+        debugPrint('[CREATE MEETING POST ${ApiConstants.meetings}]: ${jsonEncode(bookingData)}');
+        res = await ApiService().post(ApiConstants.meetings, data: bookingData);
+      }
       debugPrint('[CREATE MEETING RESPONSE ${res.statusCode}]: ${res.data}');
 
       Map<String, dynamic> dataMap = {};
@@ -1044,7 +1122,7 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
         }
       }
 
-      final createdId = (dataMap['id'] ?? dataMap['_id'])?.toString();
+      final createdId = (dataMap['id'] ?? dataMap['_id'] ?? existingId)?.toString();
 
       // What the server actually kept. When it drops `bookingSource` the local
       // registry is what keeps this meeting out of the Log Meeting list, so
@@ -1057,10 +1135,20 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
         'status=${dataMap['status'] ?? '(not returned)'} '
         'scheduledAt=${savedScheduledAt ?? '(not returned)'}',
       );
-      if (BookingSource.normalize(savedBookingSource) != BookingSource.directBooking) {
+      if (createdId == null || createdId.isEmpty) {
+        // Without an id there is nothing to match the new meeting against when
+        // the list reloads, so the row cannot be confirmed as saved. The list
+        // still reloads and shows whatever the backend actually kept.
         debugPrint(
-          '[CREATE MEETING WARNING]: server did not echo '
-          'bookingSource=direct_booking — falling back to the local registry.',
+          '[CREATE MEETING WARNING]: the ${res.statusCode} response carried no id '
+          '(${res.data}) — the meeting cannot be confirmed as persisted.',
+        );
+      }
+      if (!BookingSource.isBooked(savedBookingSource)) {
+        debugPrint(
+          '[CREATE MEETING WARNING]: server did not echo a booked '
+          'bookingSource (direct_booking / scheduler_link) — falling back to '
+          'the local registry.',
         );
       }
       if (savedScheduledAt == null || DateTime.tryParse(savedScheduledAt.toString()) == null) {
@@ -1702,11 +1790,17 @@ class _LogMeetingModalState extends State<LogMeetingModal> {
                                       ? BookingSource.directBooking
                                       : BookingSource.manual);
 
+                              final String? activeDeptId = context.read<DepartmentProvider>().selectedDepartmentId;
+
                               final meetingData = {
                                 'title': title.isNotEmpty ? title : 'Meeting Activity',
                                 'type': 'meeting',
                                 'bookingSource': bookingSource,
                                 'booking_source': bookingSource,
+                                if (activeDeptId != null && activeDeptId.isNotEmpty) ...{
+                                  'departmentId': activeDeptId,
+                                  'department_id': activeDeptId,
+                                },
                                 'outcome': outcomeValue,
                                 'duration': _selectedDuration,
                                 if (durationMinutes != null) 'durationMinutes': durationMinutes,

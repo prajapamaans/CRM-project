@@ -85,7 +85,7 @@ class CompanyModel {
     }
 
     return CompanyModel(
-      id: json['id']?.toString() ?? '',
+      id: (json['id'] ?? json['_id'] ?? json['companyId'] ?? json['company_id'] ?? json['objectId'])?.toString() ?? '',
       name: json['name'] as String? ?? json['companyName'] as String? ?? json['company_name'] as String? ?? '',
       domain: json['domain'] as String?,
       websiteUrl: json['website'] as String? ?? json['websiteUrl'] as String? ?? json['website_url'] as String?,

@@ -53,7 +53,11 @@ String? activityAssigneeLabel(Map<String, dynamic> row) {
 
 /// The record the task hangs off — its contact, company or deal.
 String? activityRelatedRecordLabel(Map<String, dynamic> row) {
-  final contact = _text(row['contactName']) ?? _personName(row['contact']);
+  // `recipientName` is what the list response calls the contact on the other
+  // side of the activity; rows carry it instead of `contactName`.
+  final contact = _text(row['contactName']) ??
+      _text(row['recipientName']) ??
+      _personName(row['contact']);
   if (contact != null) return contact;
 
   final company = _text(row['companyName']) ??

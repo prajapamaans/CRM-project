@@ -15,8 +15,19 @@ class BookingSource {
   static const String manual = 'manual';
   static const String directBooking = 'direct_booking';
 
-  /// Maps the spellings the API (or an older build) may use onto the two
-  /// canonical values. Returns null when [raw] carries no usable value.
+  /// A slot someone booked through a shared scheduler link. It reaches the
+  /// same list as [directBooking] — from the user's side both are "a meeting
+  /// that was booked", and only the way it was booked differs.
+  static const String schedulerLink = 'scheduler_link';
+
+  /// The `bookingSource` value the Create Meeting list asks for: both of the
+  /// booked sources, comma separated, exactly as the endpoint accepts them.
+  /// Asking for [directBooking] alone is what hid every meeting booked through
+  /// a scheduler link.
+  static const String createMeetingSources = '$directBooking,$schedulerLink';
+
+  /// Maps the spellings the API (or an older build) may use onto the canonical
+  /// values. Returns null when [raw] carries no usable value.
   static String? normalize(dynamic raw) {
     if (raw == null) return null;
     final value = raw.toString().trim().toLowerCase().replaceAll(RegExp(r'[\s-]+'), '_');
@@ -24,10 +35,22 @@ class BookingSource {
     if (value == 'direct_booking' || value == 'directbooking' || value == 'direct') {
       return directBooking;
     }
+    if (value == 'scheduler_link' ||
+        value == 'schedulerlink' ||
+        value == 'scheduler' ||
+        value == 'meeting_scheduler') {
+      return schedulerLink;
+    }
     if (value == 'manual' || value == 'log' || value == 'logged' || value == 'manual_log') {
       return manual;
     }
     return null;
+  }
+
+  /// Whether [raw] is one of the sources the Create Meeting list shows.
+  static bool isBooked(dynamic raw) {
+    final value = normalize(raw);
+    return value == directBooking || value == schedulerLink;
   }
 }
 
@@ -138,6 +161,8 @@ String resolveBookingSource(
 }) {
   if (activity == null) return BookingSource.manual;
 
+  // What the API says wins: `GET /api/activities?bookingSource=direct_booking`
+  // tags every row it returns, so a stale local guess can never override it.
   final fromApi = BookingSource.normalize(
     activity['bookingSource'] ?? activity['booking_source'],
   );

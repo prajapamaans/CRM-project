@@ -4,6 +4,7 @@ import '../../features/companies/data/models/company_model.dart';
 class CompanyTile extends StatelessWidget {
   final CompanyModel company;
   final VoidCallback? onTap;
+  final VoidCallback? onDeleteTap;
   final bool isSelected;
   final bool showCheckbox;
   final ValueChanged<bool?>? onSelectionChanged;
@@ -12,6 +13,7 @@ class CompanyTile extends StatelessWidget {
     super.key,
     required this.company,
     this.onTap,
+    this.onDeleteTap,
     this.isSelected = false,
     this.showCheckbox = true,
     this.onSelectionChanged,
@@ -179,6 +181,21 @@ class CompanyTile extends StatelessWidget {
                 ],
               ),
             ),
+
+            if (onDeleteTap != null) ...[
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Color(0xFF94A3B8),
+                  size: 20,
+                ),
+                onPressed: onDeleteTap,
+                tooltip: 'Delete Company',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              const SizedBox(width: 8),
+            ],
 
             // 3. Trailing Chevron Icon
             const Icon(

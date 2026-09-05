@@ -381,14 +381,23 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.92,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        children: [
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: screenHeight * 0.9,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
           // 1. Dark Teal Top Header (Image 2 & 3)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -589,8 +598,10 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  ),
+);
+}
 
   /// -------------------------------------------------------------
   /// COMPOSE TAB VIEW (Image 2)
@@ -600,88 +611,89 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
       padding: const EdgeInsets.all(16),
       children: [
         // Meta Row: Private dropdown, Folder dropdown, Owner info
-        Row(
-          children: [
-            // Private Dropdown
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFFCBD5E1)),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: DropdownButton<String>(
-                value: _selectedPrivacy,
-                underline: const SizedBox(),
-                isDense: true,
-                style: GoogleFonts.poppins(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF334155),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [
+              // Private Dropdown
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                onChanged: (val) {
-                  if (val != null) setState(() => _selectedPrivacy = val);
-                },
-                items: const ['Private', 'Shared']
-                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                    .toList(),
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            // Folder Dropdown
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFFCBD5E1)),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.folder_outlined, size: 15, color: Color(0xFF64748B)),
-                  const SizedBox(width: 4),
-                  DropdownButton<String>(
-                    value: _selectedFolder,
-                    underline: const SizedBox(),
-                    isDense: true,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF334155),
-                    ),
-                    onChanged: (val) {
-                      if (val != null) setState(() => _selectedFolder = val);
-                    },
-                    items: const ['Root', 'Sales', 'Follow-ups']
-                        .map((f) => DropdownMenuItem(value: f, child: Text(f)))
-                        .toList(),
+                child: DropdownButton<String>(
+                  value: _selectedPrivacy,
+                  underline: const SizedBox(),
+                  isDense: true,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF334155),
                   ),
-                ],
+                  onChanged: (val) {
+                    if (val != null) setState(() => _selectedPrivacy = val);
+                  },
+                  items: const ['Private', 'Shared']
+                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                      .toList(),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
+              const SizedBox(width: 8),
 
-            // Owner Display
-            Expanded(
-              child: Row(
+              // Folder Dropdown
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.folder_outlined, size: 15, color: Color(0xFF64748B)),
+                    const SizedBox(width: 4),
+                    DropdownButton<String>(
+                      value: _selectedFolder,
+                      underline: const SizedBox(),
+                      isDense: true,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF334155),
+                      ),
+                      onChanged: (val) {
+                        if (val != null) setState(() => _selectedFolder = val);
+                      },
+                      items: const ['Root', 'Sales', 'Follow-ups']
+                          .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+                          .toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Owner Display
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.person_outline, size: 15, color: Color(0xFF64748B)),
                   const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      'Owner: $_ownerName',
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF475569),
-                      ),
+                  Text(
+                    'Owner: $_ownerName',
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF475569),
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 18),
 
@@ -770,9 +782,13 @@ class _CreateTemplateModalState extends State<CreateTemplateModal> {
               Expanded(
                 child: TextField(
                   controller: _subjectController,
+                  maxLines: 1,
+                  textInputAction: TextInputAction.next,
                   onChanged: (_) => setState(() {}),
                   style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF1E293B)),
                   decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     hintText: 'Enter email subject line',
                     hintStyle:
                         GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
@@ -1402,11 +1418,14 @@ class _InsertVariableModalState extends State<_InsertVariableModal> {
                                   color: const Color(0xFF1E293B),
                                 ),
                               ),
-                              Text(
-                                item.sample,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: const Color(0xFF94A3B8),
+                              Flexible(
+                                child: Text(
+                                  item.sample,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: const Color(0xFF94A3B8),
+                                  ),
                                 ),
                               ),
                             ],

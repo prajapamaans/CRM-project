@@ -17,9 +17,12 @@ import '../../../../core/utils/activity_task_fields.dart';
 import '../../../../core/utils/department_aware_state.dart';
 import '../../../../core/repositories/master_data_repository.dart';
 import '../../../../core/utils/filter_query_utils.dart';
+import '../../../../core/utils/list_scroll_utils.dart';
 import '../../../../core/utils/task_query_builder.dart';
 import '../../../../core/utils/task_status_filter.dart';
+import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
+import '../../../navigation/presentation/providers/navigation_provider.dart';
 import '../widgets/create_task_modal.dart';
 import '../../../companies/presentation/providers/company_provider.dart';
 import '../../../deals/presentation/providers/deal_provider.dart';
@@ -67,6 +70,17 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
   /// the highlight survives a reload of the list.
   String? _selectedTaskId;
 
+  /// A task another screen asked for — tapping its notification — applied once
+  /// the list has loaded. [_appliedFocusId] remembers which request has already
+  /// been honoured, so the same one is not re-applied on every rebuild.
+  String? _pendingFocusId;
+  String? _appliedFocusId;
+  bool _hasLoadedOnce = false;
+
+  /// Marks the highlighted row so it can be scrolled to once it is built.
+  final GlobalKey _selectedTileKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+
   // Filter dropdown state
   String _selectedCreateDate = 'Create date';
   String _selectedStatusFilter = 'Status';
@@ -112,7 +126,33 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Highlights the task another screen asked for and brings it into view.
+  ///
+  /// Does nothing until the list has loaded — [_fetchTasks] calls back in once
+  /// it has. A task that is not in the loaded page (deleted, on another page,
+  /// or hidden by the selected tab) leaves the screen as it is rather than
+  /// scrolling somewhere arbitrary.
+  Future<void> _applyPendingFocus() async {
+    final id = _pendingFocusId;
+    if (id == null || !_hasLoadedOnce || _isLoadingTasks) return;
+
+    _pendingFocusId = null;
+
+    if (!_tasks.any((t) => t.id == id)) {
+      debugPrint('[TasksScreen] task $id was asked for but is not in the loaded page');
+      return;
+    }
+    if (!mounted) return;
+
+    setState(() => _selectedTaskId = id);
+    await ensureListItemVisible(
+      controller: _scrollController,
+      itemKey: _selectedTileKey,
+    );
   }
 
   @override
@@ -128,6 +168,19 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
       (_) => _loadMasterDataAndFetchTasks(),
       onSwitchStarted: _clearDepartmentScopedData,
     );
+
+    // A task opened from elsewhere in the app — tapping its notification. The
+    // id arrives on `NavigationProvider`; the row is highlighted once the list
+    // holding it has loaded.
+    final requested = context.watch<NavigationProvider>().focusedActivityId;
+    if (requested != null && requested != _appliedFocusId) {
+      _appliedFocusId = requested;
+      _pendingFocusId = requested;
+      // Off the build phase: applying the focus calls setState.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyPendingFocus();
+      });
+    }
   }
 
   /// Drops everything on screen that belongs to one department.
@@ -219,11 +272,17 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
     await _fetchTasks(page: 1);
   }
 
+  /// The `sort` value for the selected sort option.
+  ///
+  /// These are activity column names as `/api/activities` spells them —
+  /// camelCase, and a task's due date is its `scheduledAt`. `created_at` and
+  /// `dueDate` are not columns on that table, so sorting by them left the
+  /// order up to whatever the backend falls back to.
   String _getSortField() {
     switch (_selectedSortOption) {
       case 'Due Date (Earliest)':
       case 'Due Date (Latest)':
-        return 'dueDate';
+        return 'scheduledAt';
       case 'A to Z':
       case 'Z to A':
         return 'title';
@@ -349,6 +408,8 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
     // The selected department, read at the moment the request is built. The
     // same value is checked again when the response lands.
     final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    // Read here, while the context is still safe to use, for the request log.
+    final loggedInUserId = context.read<AuthProvider>().currentUser?.id;
 
     // The All / Pending / Completed tab and the Status pill both set the same
     // field, so the tab wins while it is narrowing and the pill applies under
@@ -446,6 +507,24 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
         total = rawData.length;
       }
 
+      // One line per request, so a count that disagrees with the Web CRM can
+      // be settled by comparing the two requests rather than the two screens.
+      // `meta.total` is the count this screen shows: it is the total for the
+      // filters that were actually sent, so the All tab reports every task and
+      // the Completed tab reports the completed ones.
+      debugPrint('========== TASKS API ==========\n'
+          'Request URL       : ${ApiConstants.baseUrl}${ApiConstants.activities}\n'
+          'Query Parameters  : $queryParams\n'
+          'Status tab        : ${_statusTab.name} (status=${status ?? 'none'})\n'
+          'Department ID     : ${deptId.isEmpty ? '(from token)' : deptId}\n'
+          'Logged-in User ID : ${loggedInUserId ?? 'unknown'}\n'
+          'Response Status   : ${response.statusCode}\n'
+          'meta.total        : $total\n'
+          'meta.page         : $resPage\n'
+          'meta.limit        : $_pageSize\n'
+          'data.length       : ${records.length}\n'
+          '===============================');
+
       // Everything below comes from the row the API returned. Where a field is
       // missing the record says so — no placeholder person, date or status is
       // filled in on its behalf.
@@ -494,6 +573,10 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
         debugPrint('[TasksScreen] loaded ${loadedTasks.length} of $total task(s) '
             'for department $deptId (page $resPage)');
         _logStatusMismatch(loadedTasks);
+        // The list is populated now, so a task requested by a notification —
+        // including one requested before this load started — can be located.
+        _hasLoadedOnce = true;
+        _applyPendingFocus();
       }
     } catch (e) {
       debugPrint('[FETCH ${ApiConstants.activities} ERROR]: $e');
@@ -827,9 +910,12 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
                       final newTask = await CreateTaskModal.show(context);
                       if (newTask != null && mounted) {
                         setState(() {
+                          // Shown straight away, matched by id so a second save
+                          // of the same task cannot list it twice. The count is
+                          // deliberately left alone — it is `meta.total` from
+                          // the reload below, never a number incremented here.
                           _tasks.removeWhere((t) => t.id == newTask.id);
                           _tasks.insert(0, newTask);
-                          _totalTasks += 1;
                         });
                         _fetchTasks(resetPage: true);
                       }
@@ -1038,6 +1124,7 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
                                           ],
                                         )
                                       : ListView.builder(
+                                          controller: _scrollController,
                                           physics: const AlwaysScrollableScrollPhysics(
                                               parent: BouncingScrollPhysics()),
                                           padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1368,6 +1455,9 @@ class _TasksScreenState extends State<TasksScreen> with DepartmentAwareState {
         task.rawMap == null ? null : activityRelatedRecordLabel(task.rawMap!);
 
     return Container(
+      // The key rides along with the highlight so the highlighted row can
+      // always be scrolled to, however it came to be highlighted.
+      key: isSelected ? _selectedTileKey : null,
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: isTicked

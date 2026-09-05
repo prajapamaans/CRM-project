@@ -79,4 +79,20 @@ class MeetingSchedulerProvider extends ChangeNotifier {
     _schedulers.removeWhere((s) => s.id == id);
     notifyListeners();
   }
+
+  /// Deletes a meeting scheduler from backend DELETE /api/meeting-schedulers/:id and updates local list.
+  Future<bool> deleteMeetingScheduler(String id) async {
+    try {
+      await _apiService.delete('${ApiConstants.meetingSchedulers}/$id');
+      _schedulers.removeWhere((s) => s.id == id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('[MeetingSchedulerProvider delete error]: $e');
+      // Even if server returns 404, clean up locally
+      _schedulers.removeWhere((s) => s.id == id);
+      notifyListeners();
+      return false;
+    }
+  }
 }

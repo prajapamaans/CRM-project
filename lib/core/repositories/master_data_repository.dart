@@ -29,7 +29,30 @@ abstract class MasterDataRepository {
     String? search,
     String? bookingSource,
     String? createdDateRange,
+    String? startDate,
+    String? endDate,
     String? priority,
+    Map<String, dynamic>? headers,
+  });
+  Future<Map<String, dynamic>> getActivitiesWithMeta({
+    String? ownerId,
+    String? status,
+    int? limit,
+    String? type,
+    int? page,
+    String? contactId,
+    String? companyId,
+    String? dealId,
+    String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
+    String? bookingSource,
+    String? createdDateRange,
+    String? startDate,
+    String? endDate,
+    String? priority,
+    Map<String, dynamic>? headers,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -148,7 +171,10 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
     String? search,
     String? bookingSource,
     String? createdDateRange,
+    String? startDate,
+    String? endDate,
     String? priority,
+    Map<String, dynamic>? headers,
   }) async {
     try {
       return await _remoteDataSource.getActivities(
@@ -166,11 +192,62 @@ class MasterDataRepositoryImpl implements MasterDataRepository {
         search: search,
         bookingSource: bookingSource,
         createdDateRange: createdDateRange,
+        startDate: startDate,
+        endDate: endDate,
         priority: priority,
+        headers: headers,
       );
     } catch (e) {
       debugPrint('[GET /api/activities ERROR]: $e');
       return [];
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> getActivitiesWithMeta({
+    String? ownerId,
+    String? status,
+    int? limit,
+    String? type,
+    int? page,
+    String? contactId,
+    String? companyId,
+    String? dealId,
+    String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
+    String? bookingSource,
+    String? createdDateRange,
+    String? startDate,
+    String? endDate,
+    String? priority,
+    Map<String, dynamic>? headers,
+  }) async {
+    try {
+      return await _remoteDataSource.getActivitiesWithMeta(
+        ownerId: ownerId,
+        status: status,
+        limit: limit,
+        type: type,
+        page: page,
+        contactId: contactId,
+        companyId: companyId,
+        dealId: dealId,
+        departmentId: departmentId,
+        sort: sort,
+        order: order,
+        search: search,
+        bookingSource: bookingSource,
+        createdDateRange: createdDateRange,
+        startDate: startDate,
+        endDate: endDate,
+        priority: priority,
+        headers: headers,
+      );
+    } catch (e) {
+      debugPrint('[GET /api/activitiesERROR]: $e');
+      return {'data': <Map<String, dynamic>>[], 'total': 0, 'page': page ?? 1, 'limit': limit ?? 25};
     }
   }
 

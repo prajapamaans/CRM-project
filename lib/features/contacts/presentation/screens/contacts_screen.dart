@@ -87,20 +87,32 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (confirm != true || !mounted) return;
 
     final provider = context.read<ContactProvider>();
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
     final idsToDelete = List<String>.from(_selectedContactIds);
 
+    int successCount = 0;
     for (final id in idsToDelete) {
-      await provider.deleteContact(id);
+      final ok = await provider.deleteContact(id, departmentId: deptId);
+      if (ok) successCount++;
     }
 
     if (mounted) {
+      final err = provider.error;
       setState(() {
         _selectedContactIds.clear();
       });
+      _loadContactsForSegment(_selectedSegment);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$count contact${count > 1 ? 's' : ''} deleted successfully!', style: GoogleFonts.poppins()),
-          backgroundColor: const Color(0xFF00A884),
+          content: Text(
+            successCount > 0
+                ? '$successCount contact${successCount > 1 ? 's' : ''} deleted successfully!'
+                : (err != null && err.isNotEmpty
+                    ? 'Failed to delete contact: $err'
+                    : 'Failed to delete selected contact${count > 1 ? 's' : ''}'),
+            style: GoogleFonts.poppins(),
+          ),
+          backgroundColor: successCount > 0 ? const Color(0xFF00A884) : Colors.redAccent,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -164,6 +176,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       });
                     },
                     onClearTap: () {
+                      setState(() {
+                        _searchQuery = '';
+                      });
                       context.read<ContactProvider>().clearAllFilters();
                     },
                     onRefreshTap: () {

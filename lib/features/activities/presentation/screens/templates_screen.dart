@@ -56,13 +56,23 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    watchDepartmentChanges((deptId) {
-      setState(() {
-        _allFolders.clear();
-        _allTemplates.clear();
-      });
-      _loadTemplatesFromApi();
-    });
+    watchDepartmentChanges(
+      (_) => _loadTemplatesFromApi(),
+      // Wiped as soon as the switch starts, so the department being left does
+      // not stay on screen while its access token is swapped. The open folder
+      // goes with it: a folder id belongs to one department, and keeping it
+      // would leave the new one's templates hidden behind a folder that does
+      // not exist there.
+      onSwitchStarted: () {
+        if (!mounted) return;
+        setState(() {
+          _allFolders.clear();
+          _allTemplates.clear();
+          _selectedFolderId = null;
+          _selectedFolderName = 'Root';
+        });
+      },
+    );
   }
 
   Future<void> _loadSignaturesFromApi() async {
@@ -197,8 +207,8 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
           'sharedSetting':
               newTemplateModel.privacy.toLowerCase() == 'shared' ? 'shared' : 'private',
           'folderId': targetFolderId,
-          if (deptId.isNotEmpty) 'departmentId': deptId,
-          if (deptId.isNotEmpty) 'department_id': deptId,
+          'departmentId': deptId,
+          'department_id': deptId,
         });
       } catch (e) {
         // The save failed, so the row that was added optimistically is taken
@@ -265,8 +275,8 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
                     ? 'shared'
                     : 'private',
             'folderId': template.folderId,
-            if (deptId.isNotEmpty) 'departmentId': deptId,
-            if (deptId.isNotEmpty) 'department_id': deptId,
+            'departmentId': deptId,
+            'department_id': deptId,
           });
           await _loadTemplatesFromApi();
         } catch (e) {
@@ -298,6 +308,9 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
 
   void _showNewFolderDialog() {
     final folderController = TextEditingController();
+    // Taken before the dialog opens: the dialog's own context is gone by the
+    // time the save answers, so the failure message has nowhere to go.
+    final messenger = ScaffoldMessenger.of(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -331,13 +344,24 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
                 Navigator.of(context).pop();
                 try {
                   final ds = MasterDataRemoteDataSourceImpl();
+                  final deptId = currentDepartmentId();
                   await ds.createEmailTemplateFolder({
                     'name': name,
                     'parentId': _selectedFolderId,
+                    'departmentId': deptId,
+                    'department_id': deptId,
                   });
                   await _loadTemplatesFromApi();
                 } catch (e) {
+                  // A folder that was not created must say so, rather than
+                  // leaving the user looking for one that never existed.
                   debugPrint('[Create folder error]: $e');
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Could not create folder "$name". ${_saveFailureReason(e)}'),
+                      backgroundColor: const Color(0xFFEF4444),
+                    ),
+                  );
                 }
               }
             },
@@ -510,47 +534,72 @@ class _TemplatesScreenState extends State<TemplatesScreen> with DepartmentAwareS
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Message templates',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF1E293B),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${currentTemplates.length} template${currentTemplates.length == 1 ? '' : 's'} in this folder',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: const Color(0xFF64748B),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          'Message templates',
-                          style: GoogleFonts.poppins(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF1E293B),
+                        OutlinedButton.icon(
+                          onPressed: _showNewFolderDialog,
+                          icon: const Icon(Icons.create_new_folder_outlined, size: 16, color: Color(0xFF475569)),
+                          label: Text(
+                            'Folder',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF475569),
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFFCBD5E1)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${currentTemplates.length} template${currentTemplates.length == 1 ? '' : 's'} in this folder',
-                          style: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: const Color(0xFF64748B),
+                        const SizedBox(width: 6),
+                        ElevatedButton.icon(
+                          onPressed: _createNewTemplate,
+                          icon: const Icon(Icons.add, size: 16, color: Colors.white),
+                          label: Text(
+                            'New',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF7A59),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                       ],
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: _createNewTemplate,
-                      icon: const Icon(Icons.add, size: 18, color: Colors.white),
-                      label: Text(
-                        'New',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF7A59),
-                        elevation: 0,
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
                     ),
                   ],
                 ),

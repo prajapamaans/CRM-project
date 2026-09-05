@@ -101,7 +101,7 @@ class _FakeContactRepository implements ContactRepository {
   Future<ContactModel> updateContact(String id, Map<String, dynamic> data) async =>
       throw UnimplementedError();
   @override
-  Future<bool> deleteContact(String id) async => throw UnimplementedError();
+  Future<bool> deleteContact(String id, {String? departmentId}) async => throw UnimplementedError();
 }
 
 /// Waits for the fire-and-forget fetch a filter change kicks off.

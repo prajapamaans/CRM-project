@@ -142,12 +142,13 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
       child: Row(
         children: [
           SizedBox(
-            width: 60,
+            width: 75,
             child: Text(
               label,
               style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: controller,
@@ -901,12 +902,13 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 60,
+                              width: 75,
                               child: Text(
                                 'From',
                                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
                               ),
                             ),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 widget.fromEmail,
@@ -962,12 +964,13 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 60,
+                              width: 75,
                               child: Text(
                                 'To',
                                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
                               ),
                             ),
+                            const SizedBox(width: 8),
                             if (_displayToName.isNotEmpty) ...[
                               Flexible(
                                 child: Container(
@@ -1070,20 +1073,25 @@ class _CreateEmailModalState extends State<CreateEmailModal> {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 62,
+                              width: 75,
                               child: Text(
                                 'Subject',
                                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF64748B)),
                               ),
                             ),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 controller: _subjectController,
+                                maxLines: 1,
+                                textInputAction: TextInputAction.next,
                                 style: GoogleFonts.poppins(fontSize: 14, color: const Color(0xFF1E293B)),
-                                decoration: const InputDecoration(
-                                  hintText: '',
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  hintText: 'Type subject...',
+                                  hintStyle: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF94A3B8)),
                                   border: InputBorder.none,
-                                  contentPadding: EdgeInsets.zero,
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
                                 ),
                               ),
                             ),

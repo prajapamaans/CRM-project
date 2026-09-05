@@ -33,6 +33,7 @@ class SearchAndFilterBar extends StatefulWidget {
   /// row holds only the search and filter controls.
   final bool showSegments;
   final bool filterBeforeSearch;
+  final String? countText;
 
   const SearchAndFilterBar({
     super.key,
@@ -56,6 +57,7 @@ class SearchAndFilterBar extends StatefulWidget {
     this.mineLabel,
     this.showSegments = true,
     this.filterBeforeSearch = false,
+    this.countText,
   });
 
   @override
@@ -91,7 +93,8 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
 
   @override
   Widget build(BuildContext context) {
-    final active = widget.isFilterActive || widget.isFilterExpanded;
+    final hasSearch = _searchController.text.trim().isNotEmpty;
+    final active = widget.isFilterActive || widget.isFilterExpanded || hasSearch;
 
     final filterButton = GestureDetector(
       onTap: () {
@@ -105,22 +108,28 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: active ? const Color(0xFFE6F4F1) : Colors.white,
+          color: (widget.isFilterActive || widget.isFilterExpanded)
+              ? const Color(0xFFE6F4F1)
+              : Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: active ? const Color(0xFF00A884) : const Color(0xFFD1D5DB),
-            width: active ? 1.5 : 1,
+            color: (widget.isFilterActive || widget.isFilterExpanded)
+                ? const Color(0xFF00A884)
+                : const Color(0xFFD1D5DB),
+            width: (widget.isFilterActive || widget.isFilterExpanded) ? 1.5 : 1,
           ),
         ),
         child: Icon(
           Icons.tune_rounded,
           size: 20,
-          color: active ? const Color(0xFF00A884) : const Color(0xFF4B5563),
+          color: (widget.isFilterActive || widget.isFilterExpanded)
+              ? const Color(0xFF00A884)
+              : const Color(0xFF4B5563),
         ),
       ),
     );
 
-    final clearButton = (active || widget.isFilterActive || widget.isFilterExpanded)
+    final clearButton = active
         ? InkWell(
             onTap: _handleClear,
             borderRadius: BorderRadius.circular(8),
@@ -152,7 +161,10 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
       ),
       child: TextField(
         controller: _searchController,
-        onChanged: widget.onSearchChanged,
+        onChanged: (val) {
+          setState(() {});
+          widget.onSearchChanged?.call(val);
+        },
         style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
         decoration: InputDecoration(
           hintText: widget.searchHint,
@@ -165,6 +177,20 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
             color: Color(0xFF9CA3AF),
             size: 20,
           ),
+          suffixIcon: _searchController.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                  onPressed: () {
+                    _searchController.clear();
+                    widget.onSearchChanged?.call('');
+                    setState(() {});
+                  },
+                )
+              : null,
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 11),
         ),
@@ -190,6 +216,7 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
         if (widget.showSegments) ...[
           const SizedBox(height: 10),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Flexible(
                 child: SingleChildScrollView(
@@ -212,6 +239,18 @@ class _SearchAndFilterBarState extends State<SearchAndFilterBar> {
                   ),
                 ),
               ),
+              if (widget.countText != null && widget.countText!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8.0),
+                  child: Text(
+                    widget.countText!,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF64748B),
+                    ),
+                  ),
+                ),
             ],
           ),
         ],

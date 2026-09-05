@@ -279,7 +279,7 @@ class MeetingScheduler {
       organizationId: json['organizationId']?.toString(),
       ownerId: json['ownerId']?.toString(),
       name: nameVal,
-      slug: slugVal.startsWith('/') ? slugVal : '/$slugVal',
+      slug: slugVal.replaceAll(RegExp(r'^/+|/+$'), ''),
       eventTitle: json['eventTitle']?.toString(),
       location: json['location']?.toString(),
       videoconferenceLink: json['videoconferenceLink']?.toString(),

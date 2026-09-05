@@ -43,7 +43,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _lastDepartmentId;
   Future<List<Map<String, dynamic>>>? _meetingsBookedFuture;
   bool _isGeneratingBingoAi = false;
-  DateTime _customSelectedDate = DateTime.now().subtract(const Duration(days: 5));
+  DateTime _customSelectedDate = DateTime.now();
 
   String _formatDateSubtitle(DateTime date) {
     final months = [
@@ -77,11 +77,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
-    if (picked != null) {
-      setState(() {
-        _customSelectedDate = picked;
-      });
-    }
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      _customSelectedDate = picked;
+    });
+
+    // The chosen day is fetched from the backend rather than looked for in
+    // what is already on screen: the card shows that day's tasks, and only
+    // that day's, however far back it is.
+    final ownerId = _selectedPillIndex == 1 ? context.read<AuthProvider>().currentUser?.id : null;
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    await context.read<DashboardProvider>().fetchTasksForDate(
+          picked,
+          ownerId: ownerId,
+          departmentId: deptId,
+        );
   }
 
   /// The department the user is working in, whichever of them it is.
@@ -406,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           endDate: range['endDate'],
           subtitleLabel: _performanceSubtitleLabel,
           teamMembers: teamMembers,
+          customTaskDate: _customSelectedDate,
           reportUsers: reportUsers,
         );
       }
@@ -437,6 +449,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           endDate: range['endDate'],
           subtitleLabel: _performanceSubtitleLabel,
           teamMembers: auth.teamMembers,
+          customTaskDate: _customSelectedDate,
           reportUsers: master.reportsUsers,
         );
   }
@@ -808,14 +821,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () async {
-            final ownerId = _selectedPillIndex == 1 ? currentUser?.id : null;
-            final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
-            await context.read<DashboardProvider>().loadDashboardData(
-              ownerId: ownerId,
-              departmentId: deptId,
-            );
-          },
+          // Refreshing keeps what the user has selected — the time filter, the
+          // My Work / Team pill and the custom date. Calling the provider
+          // directly here dropped all three, so a pull-to-refresh silently
+          // reset the Dashboard to its defaults.
+          onRefresh: _loadDashboard,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: EdgeInsets.all(isDesktop ? AppSpacing.lg : AppSpacing.md),

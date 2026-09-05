@@ -12,6 +12,7 @@ import '../../../../core/providers/master_data_provider.dart';
 import '../../../authentication/presentation/providers/auth_provider.dart';
 import '../../../departments/presentation/providers/department_provider.dart';
 import '../providers/company_provider.dart';
+import '../../data/models/company_model.dart';
 import '../widgets/company_inline_filter_section.dart';
 import '../widgets/create_company_modal.dart';
 
@@ -28,6 +29,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   int _selectedSegment = 0; // 0 for All, 1 for Mine
   bool _isFilterExpanded = false;
   final Set<String> _selectedCompanyIds = {};
+  bool _isDeleting = false;
 
   @override
   void initState() {
@@ -59,7 +61,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   }
 
   Future<void> _confirmDeleteSelectedCompanies() async {
-    if (_selectedCompanyIds.isEmpty) return;
+    if (_selectedCompanyIds.isEmpty || _isDeleting) return;
     final count = _selectedCompanyIds.length;
 
     final confirm = await showDialog<bool>(
@@ -86,24 +88,108 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
 
     if (confirm != true || !mounted) return;
 
-    final provider = context.read<CompanyProvider>();
-    final idsToDelete = List<String>.from(_selectedCompanyIds);
+    setState(() {
+      _isDeleting = true;
+    });
 
-    for (final id in idsToDelete) {
-      await provider.deleteCompany(id);
+    try {
+      final provider = context.read<CompanyProvider>();
+      final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+      final idsToDelete = List<String>.from(_selectedCompanyIds);
+
+      final successCount = await provider.deleteCompanies(idsToDelete, departmentId: deptId);
+
+      if (mounted) {
+        setState(() {
+          _selectedCompanyIds.clear();
+          _isDeleting = false;
+        });
+        _loadCompaniesForSegment(_selectedSegment);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              successCount > 0
+                  ? '$successCount compan${successCount > 1 ? 'ies' : 'y'} deleted successfully!'
+                  : (provider.error != null && provider.error!.isNotEmpty
+                      ? 'Failed to delete company: ${provider.error}'
+                      : 'Failed to delete selected compan${count > 1 ? 'ies' : 'y'}'),
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: successCount > 0 ? const Color(0xFF00A884) : Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting companies: $e', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
+  }
+
+  Future<void> _confirmDeleteSingleCompany(CompanyModel company) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Company', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to delete ${company.name}? This action cannot be undone.',
+          style: GoogleFonts.poppins(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: const Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    final deptId = context.read<DepartmentProvider>().selectedDepartmentId;
+    final success = await context.read<CompanyProvider>().deleteCompany(company.id, departmentId: deptId);
 
     if (mounted) {
-      setState(() {
-        _selectedCompanyIds.clear();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$count compan${count > 1 ? 'ies' : 'y'} deleted successfully!', style: GoogleFonts.poppins()),
-          backgroundColor: const Color(0xFF00A884),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (success) {
+        setState(() {
+          _selectedCompanyIds.remove(company.id);
+        });
+        _loadCompaniesForSegment(_selectedSegment);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Company deleted successfully!', style: GoogleFonts.poppins()),
+            backgroundColor: const Color(0xFF00A884),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        final err = context.read<CompanyProvider>().error;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              err != null && err.isNotEmpty ? err : 'Failed to delete company',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -164,6 +250,9 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                       });
                     },
                     onClearTap: () {
+                      setState(() {
+                        _searchQuery = '';
+                      });
                       context.read<CompanyProvider>().clearAllFilters();
                     },
                     onRefreshTap: () {
@@ -246,21 +335,33 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                   ),
                   const Spacer(),
                   if (_selectedCompanyIds.isNotEmpty) ...[
-                    ElevatedButton.icon(
-                      onPressed: _confirmDeleteSelectedCompanies,
-                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white),
-                      label: Text(
-                        'Delete (${_selectedCompanyIds.length})',
-                        style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
+                    _isDeleting
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Padding(
+                              padding: EdgeInsets.all(4.0),
+                              child: CircularProgressIndicator(
+                                color: Colors.redAccent,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          )
+                        : ElevatedButton.icon(
+                            onPressed: _confirmDeleteSelectedCompanies,
+                            icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white),
+                            label: Text(
+                              'Delete (${_selectedCompanyIds.length})',
+                              style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
                   ] else
                     Text(
                       companyProvider.isLoading && companies.isEmpty
@@ -406,6 +507,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                                 company: company,
                                 isSelected: isSelected,
                                 showCheckbox: true,
+                                onDeleteTap: () => _confirmDeleteSingleCompany(company),
                                 onSelectionChanged: (val) {
                                   setState(() {
                                     if (val == true) {

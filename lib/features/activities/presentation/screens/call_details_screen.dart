@@ -6,6 +6,7 @@ import '../../../../core/widgets/record_loading_scaffold.dart';
 import '../../../../core/network/api_constants.dart';
 import '../../../../core/network/api_service.dart';
 import '../widgets/log_call_modal.dart';
+import '../../../../core/widgets/record_association_sheet.dart';
 
 class CallDetailsScreen extends StatefulWidget {
   final CallModel? call;
@@ -201,6 +202,96 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
           );
         }
         Navigator.of(context).pop(true);
+      }
+    }
+  }
+
+  Future<void> _handleChangeAssociation() async {
+    final rawMap = _currentCall.rawMap ?? {};
+    final contactId = _currentCall.contactId ?? rawMap['contactId']?.toString() ?? rawMap['contact_id']?.toString();
+    final companyId = _currentCall.companyId ?? rawMap['companyId']?.toString() ?? rawMap['company_id']?.toString();
+    final dealId = _currentCall.dealId ?? rawMap['dealId']?.toString() ?? rawMap['deal_id']?.toString();
+
+    final initialAssoc = <String, List<Map<String, String>>>{
+      'Companies': companyId != null && companyId.isNotEmpty ? [{'id': companyId, 'name': 'Associated Company'}] : [],
+      'Contacts': contactId != null && contactId.isNotEmpty ? [{'id': contactId, 'name': 'Associated Contact'}] : [],
+      'Deals': dealId != null && dealId.isNotEmpty ? [{'id': dealId, 'name': 'Associated Deal'}] : [],
+    };
+
+    final result = await RecordAssociationSheet.show(
+      context,
+      initialAssociations: initialAssoc,
+    );
+
+    if (result != null) {
+      String? newContactId;
+      String? newCompanyId;
+      String? newDealId;
+
+      if (result['Contacts'] != null && result['Contacts']!.isNotEmpty) {
+        newContactId = result['Contacts']!.first['id'];
+      }
+      if (result['Companies'] != null && result['Companies']!.isNotEmpty) {
+        newCompanyId = result['Companies']!.first['id'];
+      }
+      if (result['Deals'] != null && result['Deals']!.isNotEmpty) {
+        newDealId = result['Deals']!.first['id'];
+      }
+
+      final callId = _currentCall.id ?? rawMap['id']?.toString() ?? rawMap['_id']?.toString();
+      if (callId != null && callId.isNotEmpty) {
+        try {
+          await ApiService().patch(
+            '${ApiConstants.activities}/$callId',
+            data: {
+              'contactId': newContactId,
+              'companyId': newCompanyId,
+              'dealId': newDealId,
+            },
+          );
+          _isEdited = true;
+          if (mounted) {
+            setState(() {
+              _currentCall = CallModel(
+                id: _currentCall.id,
+                title: _currentCall.title,
+                outcome: _currentCall.outcome,
+                duration: _currentCall.duration,
+                startTime: _currentCall.startTime,
+                notes: _currentCall.notes,
+                assignedTo: _currentCall.assignedTo,
+                priority: _currentCall.priority,
+                status: _currentCall.status,
+                type: _currentCall.type,
+                contactId: newContactId,
+                companyId: newCompanyId,
+                dealId: newDealId,
+                rawMap: {
+                  ...?_currentCall.rawMap,
+                  'contactId': newContactId,
+                  'companyId': newCompanyId,
+                  'dealId': newDealId,
+                },
+              );
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Associations updated successfully'),
+                backgroundColor: Color(0xFF00A884),
+              ),
+            );
+          }
+        } catch (e) {
+          debugPrint('[UPDATE CALL ASSOCIATION ERROR]: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to update associations: $e'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+        }
       }
     }
   }
@@ -560,7 +651,9 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'This call is currently unassigned and not associated with any contact, company, or deal.',
+                                    (_currentCall.contactId != null || _currentCall.companyId != null || _currentCall.dealId != null)
+                                        ? 'Associated with: ${[_currentCall.contactId != null ? "Contact" : null, _currentCall.companyId != null ? "Company" : null, _currentCall.dealId != null ? "Deal" : null].whereType<String>().join(", ")}'
+                                        : 'This call is currently unassigned and not associated with any contact, company, or deal.',
                                     style: GoogleFonts.poppins(
                                       fontSize: 12.5,
                                       color: const Color(0xFF64748B),
@@ -568,12 +661,14 @@ class _CallDetailsScreenState extends State<CallDetailsScreen> {
                                   ),
                                   const SizedBox(height: 14),
                                   InkWell(
-                                    onTap: () {},
+                                    onTap: _handleChangeAssociation,
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          'Add association',
+                                          (_currentCall.contactId != null || _currentCall.companyId != null || _currentCall.dealId != null)
+                                              ? 'Edit association'
+                                              : 'Add association',
                                           style: GoogleFonts.poppins(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600,

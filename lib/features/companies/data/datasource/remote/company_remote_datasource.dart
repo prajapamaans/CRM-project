@@ -39,7 +39,7 @@ abstract class CompanyRemoteDataSource {
 
   Future<CompanyModel> updateCompany(String id, Map<String, dynamic> companyData);
 
-  Future<bool> deleteCompany(String id);
+  Future<bool> deleteCompany(String id, {String? departmentId});
 }
 
 class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
@@ -260,12 +260,52 @@ class CompanyRemoteDataSourceImpl implements CompanyRemoteDataSource {
   }
 
   @override
-  Future<bool> deleteCompany(String id) async {
-    final response = await _apiService.delete(
-      '${ApiConstants.companies}/$id',
-    );
+  Future<bool> deleteCompany(String id, {String? departmentId}) async {
+    if (id.isEmpty) {
+      debugPrint('[DELETE COMPANY ERROR]: Cannot delete company with empty ID');
+      return false;
+    }
 
-    debugPrint('[DELETE /api/companies/$id SUCCESS]: ${response.statusCode}');
-    return response.statusCode == 200 || response.statusCode == 204;
+    final queryParams = <String, dynamic>{};
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParams['department_id'] = departmentId;
+    }
+
+    debugPrint('[DELETE /api/companies/$id] departmentId: $departmentId');
+
+    dynamic response;
+    try {
+      // 1. Primary standard REST attempt: DELETE /api/companies/:id without query parameters
+      // (AuthInterceptor attaches X-Department-Id / department_id headers)
+      response = await _apiService.delete('${ApiConstants.companies}/$id');
+    } catch (e) {
+      debugPrint('[DELETE /api/companies/$id primary error, trying with query params]: $e');
+      try {
+        // 2. Secondary attempt: DELETE /api/companies/:id with department_id query parameter
+        response = await _apiService.delete(
+          '${ApiConstants.companies}/$id',
+          queryParameters: queryParams.isNotEmpty ? queryParams : null,
+        );
+      } catch (e2) {
+        debugPrint('[DELETE /api/companies/$id query param error, trying fallback]: $e2');
+        try {
+          // 3. Fallback attempt: DELETE /api/companies?id=:id
+          final fallbackParams = <String, dynamic>{'id': id};
+          if (departmentId != null && departmentId.isNotEmpty) {
+            fallbackParams['department_id'] = departmentId;
+          }
+          response = await _apiService.delete(
+            ApiConstants.companies,
+            queryParameters: fallbackParams,
+          );
+        } catch (_) {
+          rethrow;
+        }
+      }
+    }
+
+    final statusCode = response?.statusCode ?? 0;
+    debugPrint('[DELETE /api/companies/$id] status: $statusCode');
+    return statusCode >= 200 && statusCode < 300;
   }
 }

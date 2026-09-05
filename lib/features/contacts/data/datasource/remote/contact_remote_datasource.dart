@@ -39,7 +39,7 @@ abstract class ContactRemoteDataSource {
 
   Future<ContactModel> updateContact(String id, Map<String, dynamic> contactData);
 
-  Future<bool> deleteContact(String id);
+  Future<bool> deleteContact(String id, {String? departmentId});
 }
 
 class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
@@ -256,12 +256,46 @@ class ContactRemoteDataSourceImpl implements ContactRemoteDataSource {
   }
 
   @override
-  Future<bool> deleteContact(String id) async {
-    final response = await _apiService.delete(
-      '${ApiConstants.contacts}/$id',
-    );
+  Future<bool> deleteContact(String id, {String? departmentId}) async {
+    if (id.isEmpty) {
+      debugPrint('[DELETE CONTACT ERROR]: Cannot delete contact with empty ID');
+      return false;
+    }
 
-    debugPrint('[DELETE /api/contacts/$id SUCCESS]: ${response.statusCode}');
-    return response.statusCode == 200 || response.statusCode == 204;
+    final queryParams = <String, dynamic>{};
+    if (departmentId != null && departmentId.isNotEmpty) {
+      queryParams['department_id'] = departmentId;
+    }
+
+    dynamic response;
+    try {
+      response = await _apiService.delete(
+        '${ApiConstants.contacts}/$id',
+        queryParameters: queryParams.isNotEmpty ? queryParams : null,
+      );
+    } catch (e) {
+      debugPrint('[DELETE /api/contacts/$id primary error, trying path without params]: $e');
+      try {
+        response = await _apiService.delete('${ApiConstants.contacts}/$id');
+      } catch (e2) {
+        debugPrint('[DELETE /api/contacts/$id query param error, trying fallback]: $e2');
+        try {
+          final fallbackParams = <String, dynamic>{'id': id};
+          if (departmentId != null && departmentId.isNotEmpty) {
+            fallbackParams['department_id'] = departmentId;
+          }
+          response = await _apiService.delete(
+            ApiConstants.contacts,
+            queryParameters: fallbackParams,
+          );
+        } catch (_) {
+          rethrow;
+        }
+      }
+    }
+
+    final statusCode = response.statusCode ?? 0;
+    debugPrint('[DELETE /api/contacts/$id SUCCESS]: $statusCode');
+    return statusCode >= 200 && statusCode < 300;
   }
 }

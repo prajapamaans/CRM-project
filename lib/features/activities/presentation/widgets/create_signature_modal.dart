@@ -431,12 +431,15 @@ class _CreateSignatureModalState extends State<CreateSignatureModal> {
                               children: [
                                 Text(
                                   item['label']!,
-                                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+                                  style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w500),
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  item['value']!,
-                                  style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF94A3B8)),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    item['value']!,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(fontSize: 11.5, color: const Color(0xFF94A3B8)),
+                                  ),
                                 ),
                               ],
                             ),

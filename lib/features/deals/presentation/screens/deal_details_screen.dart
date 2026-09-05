@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/navigation/route_names.dart';
@@ -26,6 +27,8 @@ import '../../../activities/presentation/widgets/log_meeting_modal.dart';
 import '../../../activities/presentation/widgets/task_activity_card_details.dart';
 import '../../data/models/deal_model.dart';
 import '../../data/repositories/deal_repository.dart';
+import '../../../contacts/data/repositories/contact_repository.dart';
+import '../../../companies/data/repositories/company_repository.dart';
 import '../providers/deal_provider.dart';
 import '../../../navigation/presentation/providers/navigation_provider.dart';
 
@@ -186,6 +189,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   final GlobalKey _highlightedActivityKey = GlobalKey();
   final ScrollController _activitiesScrollController = ScrollController();
   bool _hasScrolledToHighlight = false;
+
+  /// Clears the highlight once it has done its job. See
+  /// [_startHighlightFadeOut].
+  Timer? _highlightTimer;
   String _lastActivityDateStr = '--';
 
   @override
@@ -203,9 +210,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     _amountController = TextEditingController(
       text: d != null && d.amount > 0 ? d.amount.toStringAsFixed(0) : '',
     );
-    _closeDateController = TextEditingController(
-      text: d?.date ?? '',
-    );
+    _closeDateController = TextEditingController(text: d?.date ?? '');
     _probabilityController = TextEditingController(
       text: d != null && d.probability > 0 ? '${d.probability}%' : '0%',
     );
@@ -254,11 +259,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
       if (mounted) {
         setState(() {
-          if (dealModel.title.isNotEmpty) _nameController.text = dealModel.title;
-          if (dealModel.amount > 0) _amountController.text = dealModel.amount.toStringAsFixed(0);
-          if (dealModel.stage.isNotEmpty) _dealStage = _normalizeStage(dealModel.stage);
-          if (dealModel.companyName != null) _companyController.text = dealModel.companyName!;
-          if (dealModel.ownerName != null) _ownerController.text = dealModel.ownerName!;
+          if (dealModel.title.isNotEmpty)
+            _nameController.text = dealModel.title;
+          if (dealModel.amount > 0)
+            _amountController.text = dealModel.amount.toStringAsFixed(0);
+          if (dealModel.stage.isNotEmpty)
+            _dealStage = _normalizeStage(dealModel.stage);
+          if (dealModel.companyName != null)
+            _companyController.text = dealModel.companyName!;
+          if (dealModel.ownerName != null)
+            _ownerController.text = dealModel.ownerName!;
 
           // Populate associations returned from GET /api/deals/:id
           _associatedCompanies.clear();
@@ -288,7 +298,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
             }
           }
 
-          if (dealModel.associatedDeals != null && dealModel.associatedDeals!.isNotEmpty) {
+          if (dealModel.associatedDeals != null &&
+              dealModel.associatedDeals!.isNotEmpty) {
             _associatedDeals.clear();
             _associatedDeals.addAll(dealModel.associatedDeals!);
           }
@@ -297,13 +308,15 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           // this the Associate MSP card came up empty on every visit.
           _associatedMsps
             ..clear()
-            ..addAll(MspFieldUtils.namesFrom(dealModel.msp).map(
-              (name) => {
-                'id': name,
-                'name': name,
-                'subtext': 'Managed Service Provider',
-              },
-            ));
+            ..addAll(
+              MspFieldUtils.namesFrom(dealModel.msp).map(
+                (name) => {
+                  'id': name,
+                  'name': name,
+                  'subtext': 'Managed Service Provider',
+                },
+              ),
+            );
         });
       }
     } catch (e) {
@@ -335,8 +348,12 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     final search = _searchActivitiesController.text.trim().toLowerCase();
 
     return _activities.where((act) {
-      final type = (act['type'] ?? act['activityType'] ?? '').toString().toUpperCase();
-      final fieldKey = (act['fieldKey'] ?? act['field_key'] ?? '').toString().toLowerCase();
+      final type = (act['type'] ?? act['activityType'] ?? '')
+          .toString()
+          .toUpperCase();
+      final fieldKey = (act['fieldKey'] ?? act['field_key'] ?? '')
+          .toString()
+          .toLowerCase();
 
       // 1. Sub-tab filter
       if (_selectedActivitySubTab == 1) {
@@ -344,42 +361,61 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         if (!type.contains('NOTE') && !fieldKey.contains('note')) return false;
       } else if (_selectedActivitySubTab == 2) {
         // Emails
-        if (!type.contains('EMAIL') && !fieldKey.contains('email')) return false;
+        if (!type.contains('EMAIL') && !fieldKey.contains('email'))
+          return false;
       } else if (_selectedActivitySubTab == 3) {
         // Calls
         if (!type.contains('CALL') && !fieldKey.contains('call')) return false;
       } else if (_selectedActivitySubTab == 4) {
         // Tasks
-        if (!type.contains('TASK') && !type.contains('TO-DO') && !type.contains('TO_DO') && !fieldKey.contains('task')) return false;
+        if (!type.contains('TASK') &&
+            !type.contains('TO-DO') &&
+            !type.contains('TO_DO') &&
+            !fieldKey.contains('task'))
+          return false;
       } else if (_selectedActivitySubTab == 5) {
         // Meetings
-        if (!type.contains('MEETING') && !fieldKey.contains('meeting')) return false;
+        if (!type.contains('MEETING') && !fieldKey.contains('meeting'))
+          return false;
       }
 
       // 2. Search query filter
       if (search.isNotEmpty) {
-        final title = (act['title'] ?? act['notes'] ?? act['type'] ?? '').toString().toLowerCase();
+        final title = (act['title'] ?? act['notes'] ?? act['type'] ?? '')
+            .toString()
+            .toLowerCase();
         final notes = (act['notes'] ?? '').toString().toLowerCase();
-        final ownerName = (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '').toString().toLowerCase();
-        if (!title.contains(search) && !notes.contains(search) && !ownerName.contains(search) && !type.toLowerCase().contains(search)) {
+        final ownerName =
+            (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '')
+                .toString()
+                .toLowerCase();
+        if (!title.contains(search) &&
+            !notes.contains(search) &&
+            !ownerName.contains(search) &&
+            !type.toLowerCase().contains(search)) {
           return false;
         }
       }
 
       // 3. Assignee Filter
       if (_selectedAssigneeFilter != 'Activity assigned to') {
-        final ownerName = (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '').toString();
+        final ownerName =
+            (act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? '')
+                .toString();
         if (_selectedAssigneeFilter == 'Unassigned') {
           if (ownerName.isNotEmpty && ownerName != 'Unassigned') return false;
         } else {
-          if (!ownerName.toLowerCase().contains(_selectedAssigneeFilter.toLowerCase())) {
+          if (!ownerName.toLowerCase().contains(
+            _selectedAssigneeFilter.toLowerCase(),
+          )) {
             return false;
           }
         }
       }
 
       // 4. Date Filter
-      final rawDateStr = act['createdAt'] ?? act['scheduledAt'] ?? act['date'] ?? '';
+      final rawDateStr =
+          act['createdAt'] ?? act['scheduledAt'] ?? act['date'] ?? '';
       if (rawDateStr.toString().isNotEmpty) {
         DateTime? dt;
         try {
@@ -394,21 +430,30 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           if (_selectedDateFilter == 'Today') {
             if (dt.isBefore(todayStart)) return false;
           } else if (_selectedDateFilter == 'Yesterday') {
-            if (dt.isBefore(yesterdayStart) || dt.isAfter(todayStart)) return false;
+            if (dt.isBefore(yesterdayStart) || dt.isAfter(todayStart))
+              return false;
           } else if (_selectedDateFilter == 'This week') {
-            final startOfWeek = todayStart.subtract(Duration(days: now.weekday - 1));
+            final startOfWeek = todayStart.subtract(
+              Duration(days: now.weekday - 1),
+            );
             if (dt.isBefore(startOfWeek)) return false;
           } else if (_selectedDateFilter == 'Last week') {
-            final startOfThisWeek = todayStart.subtract(Duration(days: now.weekday - 1));
-            final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
-            if (dt.isBefore(startOfLastWeek) || dt.isAfter(startOfThisWeek)) return false;
+            final startOfThisWeek = todayStart.subtract(
+              Duration(days: now.weekday - 1),
+            );
+            final startOfLastWeek = startOfThisWeek.subtract(
+              const Duration(days: 7),
+            );
+            if (dt.isBefore(startOfLastWeek) || dt.isAfter(startOfThisWeek))
+              return false;
           } else if (_selectedDateFilter == 'This month') {
             final startOfMonth = DateTime(now.year, now.month, 1);
             if (dt.isBefore(startOfMonth)) return false;
           } else if (_selectedDateFilter == 'Last month') {
             final startOfThisMonth = DateTime(now.year, now.month, 1);
             final startOfLastMonth = DateTime(now.year, now.month - 1, 1);
-            if (dt.isBefore(startOfLastMonth) || dt.isAfter(startOfThisMonth)) return false;
+            if (dt.isBefore(startOfLastMonth) || dt.isAfter(startOfThisMonth))
+              return false;
           } else if (_selectedDateFilter == 'This year') {
             final startOfYear = DateTime(now.year, 1, 1);
             if (dt.isBefore(startOfYear)) return false;
@@ -440,8 +485,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       if (rawAssoc['Companies'] is List) {
         for (final item in rawAssoc['Companies']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-            final name = (item['name'] ?? item['title'])?.toString() ?? 'Company';
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
+            final name =
+                (item['name'] ?? item['title'])?.toString() ?? 'Company';
             if (id != null && id.isNotEmpty) {
               if (!result['Companies']!.any((x) => x['id'] == id)) {
                 result['Companies']!.add({'id': id, 'name': name});
@@ -453,8 +500,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       if (rawAssoc['Contacts'] is List) {
         for (final item in rawAssoc['Contacts']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
-            final name = (item['name'] ?? item['title'])?.toString() ?? 'Contact';
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
+            final name =
+                (item['name'] ?? item['title'])?.toString() ?? 'Contact';
             if (id != null && id.isNotEmpty) {
               if (!result['Contacts']!.any((x) => x['id'] == id)) {
                 result['Contacts']!.add({'id': id, 'name': name});
@@ -466,7 +515,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       if (rawAssoc['Deals'] is List) {
         for (final item in rawAssoc['Deals']) {
           if (item is Map) {
-            final id = (item['id'] ?? item['_id'] ?? item['objectId'])?.toString();
+            final id = (item['id'] ?? item['_id'] ?? item['objectId'])
+                ?.toString();
             final name = (item['name'] ?? item['title'])?.toString() ?? 'Deal';
             if (id != null && id.isNotEmpty) {
               if (!result['Deals']!.any((x) => x['id'] == id)) {
@@ -479,8 +529,11 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     } else if (rawAssoc is List) {
       for (final item in rawAssoc) {
         if (item is Map) {
-          final id = (item['objectId'] ?? item['id'] ?? item['_id'])?.toString();
-          final type = (item['objectType'] ?? item['type'])?.toString().toLowerCase();
+          final id = (item['objectId'] ?? item['id'] ?? item['_id'])
+              ?.toString();
+          final type = (item['objectType'] ?? item['type'])
+              ?.toString()
+              .toLowerCase();
           final name = (item['name'] ?? item['title'])?.toString();
           if (id != null && id.isNotEmpty) {
             if (type == 'company' || type == 'companies') {
@@ -501,21 +554,60 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       }
     }
 
-    final cId = (act['companyId'] ?? act['company_id'] ?? (act['company'] is Map ? act['company']['id'] : null) ?? defaultCompId)?.toString();
-    final cName = (act['companyName'] ?? act['company_name'] ?? (act['company'] is Map ? act['company']['name'] : null) ?? defaultCompName ?? 'Company').toString();
-    if (cId != null && cId.isNotEmpty && !result['Companies']!.any((x) => x['id'] == cId)) {
+    final cId =
+        (act['companyId'] ??
+                act['company_id'] ??
+                (act['company'] is Map ? act['company']['id'] : null) ??
+                defaultCompId)
+            ?.toString();
+    final cName =
+        (act['companyName'] ??
+                act['company_name'] ??
+                (act['company'] is Map ? act['company']['name'] : null) ??
+                defaultCompName ??
+                'Company')
+            .toString();
+    if (cId != null &&
+        cId.isNotEmpty &&
+        !result['Companies']!.any((x) => x['id'] == cId)) {
       result['Companies']!.add({'id': cId, 'name': cName});
     }
 
-    final cntId = (act['contactId'] ?? act['contact_id'] ?? (act['contact'] is Map ? act['contact']['id'] : null) ?? defaultContactId)?.toString();
-    final cntName = (act['contactName'] ?? act['contact_name'] ?? (act['contact'] is Map ? act['contact']['name'] : null) ?? defaultContactName ?? 'Contact').toString();
-    if (cntId != null && cntId.isNotEmpty && !result['Contacts']!.any((x) => x['id'] == cntId)) {
+    final cntId =
+        (act['contactId'] ??
+                act['contact_id'] ??
+                (act['contact'] is Map ? act['contact']['id'] : null) ??
+                defaultContactId)
+            ?.toString();
+    final cntName =
+        (act['contactName'] ??
+                act['contact_name'] ??
+                (act['contact'] is Map ? act['contact']['name'] : null) ??
+                defaultContactName ??
+                'Contact')
+            .toString();
+    if (cntId != null &&
+        cntId.isNotEmpty &&
+        !result['Contacts']!.any((x) => x['id'] == cntId)) {
       result['Contacts']!.add({'id': cntId, 'name': cntName});
     }
 
-    final dId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null) ?? defaultDealId)?.toString();
-    final dName = (act['dealName'] ?? act['deal_name'] ?? (act['deal'] is Map ? act['deal']['name'] : null) ?? defaultDealName ?? 'Deal').toString();
-    if (dId != null && dId.isNotEmpty && !result['Deals']!.any((x) => x['id'] == dId)) {
+    final dId =
+        (act['dealId'] ??
+                act['deal_id'] ??
+                (act['deal'] is Map ? act['deal']['id'] : null) ??
+                defaultDealId)
+            ?.toString();
+    final dName =
+        (act['dealName'] ??
+                act['deal_name'] ??
+                (act['deal'] is Map ? act['deal']['name'] : null) ??
+                defaultDealName ??
+                'Deal')
+            .toString();
+    if (dId != null &&
+        dId.isNotEmpty &&
+        !result['Deals']!.any((x) => x['id'] == dId)) {
       result['Deals']!.add({'id': dId, 'name': dName});
     }
 
@@ -542,21 +634,43 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       final allActivitiesList = results[2];
 
       final associatedList = allActivitiesList.where((act) {
-        final dId = (act['dealId'] ?? act['deal_id'] ?? (act['deal'] is Map ? act['deal']['id'] : null))?.toString();
+        final dId =
+            (act['dealId'] ??
+                    act['deal_id'] ??
+                    (act['deal'] is Map ? act['deal']['id'] : null))
+                ?.toString();
         if (dId == dealId) return true;
-        if (ActivityAssociationStorage.isAssociatedWithEntity(act, 'deal', dealId)) return true;
+        if (ActivityAssociationStorage.isAssociatedWithEntity(
+          act,
+          'deal',
+          dealId,
+        ))
+          return true;
         if (act['associations'] is Map) {
           final dls = (act['associations'] as Map)['Deals'];
           if (dls is List) {
-            return dls.any((item) => (item is Map ? item['id']?.toString() : item?.toString()) == dealId);
+            return dls.any(
+              (item) =>
+                  (item is Map ? item['id']?.toString() : item?.toString()) ==
+                  dealId,
+            );
           }
         } else if (act['associations'] is List) {
-          return (act['associations'] as List).any((item) => item is Map && (item['objectId']?.toString() == dealId || item['id']?.toString() == dealId));
+          return (act['associations'] as List).any(
+            (item) =>
+                item is Map &&
+                (item['objectId']?.toString() == dealId ||
+                    item['id']?.toString() == dealId),
+          );
         }
         return false;
       }).toList();
 
-      final combined = <Map<String, dynamic>>[...activitiesList, ...timelineList, ...associatedList];
+      final combined = <Map<String, dynamic>>[
+        ...activitiesList,
+        ...timelineList,
+        ...associatedList,
+      ];
       final seenIds = <String>{};
       final uniqueList = <Map<String, dynamic>>[];
       for (final item in combined) {
@@ -577,21 +691,22 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         return dtB.compareTo(dtA);
       });
 
-        String updatedLastDate = '--';
-        if (uniqueList.isNotEmpty) {
-          final dt = parseActivityDateTime(uniqueList.first);
-          if (dt.millisecondsSinceEpoch > 0) {
-            final local = dt.toLocal();
-            updatedLastDate = '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-          }
+      String updatedLastDate = '--';
+      if (uniqueList.isNotEmpty) {
+        final dt = parseActivityDateTime(uniqueList.first);
+        if (dt.millisecondsSinceEpoch > 0) {
+          final local = dt.toLocal();
+          updatedLastDate =
+              '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
         }
+      }
 
-        if (mounted) {
-          setState(() {
-            _activities = uniqueList;
-            _lastActivityDateStr = updatedLastDate;
-          });
-        }
+      if (mounted) {
+        setState(() {
+          _activities = uniqueList;
+          _lastActivityDateStr = updatedLastDate;
+        });
+      }
     } catch (e) {
       debugPrint('[DealDetailsScreen _fetchActivities ERROR]: $e');
     } finally {
@@ -611,7 +726,8 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   Future<void> _scrollToHighlightedActivity() async {
     final id = _highlightedActivityId;
     if (id == null || _hasScrolledToHighlight) return;
-    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id)) return;
+    if (!_activities.any((a) => (a['id'] ?? a['_id'])?.toString() == id))
+      return;
 
     // Only counts as done once it actually scrolled — if the Activities tab
     // was not built yet, the next load tries again.
@@ -619,10 +735,26 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       controller: _activitiesScrollController,
       itemKey: _highlightedActivityKey,
     );
+    if (_hasScrolledToHighlight) _startHighlightFadeOut(id);
+  }
+
+  /// Clears the highlight a few seconds after the row has been found.
+  ///
+  /// The highlight is there to point the activity out after arriving from a
+  /// notification, not to mark it permanently — once it has been seen the row
+  /// goes back to looking like every other one. A highlight the user has since
+  /// moved by tapping another row is left alone.
+  void _startHighlightFadeOut(String id) {
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted || _highlightedActivityId != id) return;
+      setState(() => _highlightedActivityId = null);
+    });
   }
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _activitiesScrollController.dispose();
     _tabController.dispose();
     _nameController.dispose();
@@ -664,7 +796,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   String get _formattedLastActivityDate {
-    return formatLastActivityDateFromList(_activities, fallback: _lastActivityDateStr);
+    return formatLastActivityDateFromList(
+      _activities,
+      fallback: _lastActivityDateStr,
+    );
   }
 
   /// Matches a stored stage onto the org's stage list. An unrecognised value is
@@ -674,9 +809,11 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     final value = rawStage.trim();
     if (value.isEmpty) return _dealStages.isNotEmpty ? _dealStages.first : '';
 
-    final idx = _dealStages.indexWhere((s) =>
-        s.trim().toLowerCase() == value.toLowerCase() ||
-        s.trim().replaceAll(' ', '_').toLowerCase() == value.toLowerCase());
+    final idx = _dealStages.indexWhere(
+      (s) =>
+          s.trim().toLowerCase() == value.toLowerCase() ||
+          s.trim().replaceAll(' ', '_').toLowerCase() == value.toLowerCase(),
+    );
     return idx >= 0 ? _dealStages[idx] : value;
   }
 
@@ -689,7 +826,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       final probabilities = <String, int>{};
 
       for (final stage in stages) {
-        final name = (stage['name'] ?? stage['label'] ?? stage['value'])?.toString().trim();
+        final name = (stage['name'] ?? stage['label'] ?? stage['value'])
+            ?.toString()
+            .trim();
         if (name == null || name.isEmpty || names.contains(name)) continue;
         names.add(name);
         final probability = (stage['probability'] as num?)?.toInt();
@@ -753,7 +892,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     final closeDateStr = _closeDateController.text.trim();
     final companyStr = _companyController.text.trim();
     final ownerStr = _ownerController.text.trim();
-    final probNum = int.tryParse(_probabilityController.text.replaceAll('%', '').trim()) ?? 20;
+    final probNum =
+        int.tryParse(_probabilityController.text.replaceAll('%', '').trim()) ??
+        20;
 
     final payload = <String, dynamic>{
       'title': titleStr.isNotEmpty ? titleStr : 'Deal',
@@ -763,10 +904,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
       'pipeline': pipelineStr,
       'stage': _dealStage,
       'probability': probNum,
-      if (amountNum != null) ...{
-        'amount': amountNum,
-        'value': amountNum,
-      },
+      if (amountNum != null) ...{'amount': amountNum, 'value': amountNum},
       if (closeDateStr.isNotEmpty) ...{
         'closeDate': closeDateStr,
         'close_date': closeDateStr,
@@ -777,10 +915,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         'company': companyStr,
         'companyName': companyStr,
       },
-      if (ownerStr.isNotEmpty) ...{
-        'owner': ownerStr,
-        'ownerName': ownerStr,
-      },
+      if (ownerStr.isNotEmpty) ...{'owner': ownerStr, 'ownerName': ownerStr},
       if (_lastActivityDateStr.isNotEmpty && _lastActivityDateStr != '--') ...{
         'lastContacted': _lastActivityDateStr,
         'lastActivityDate': _lastActivityDateStr,
@@ -796,12 +931,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     if (mounted) {
       final updatedDeal = context.read<DealProvider>().selectedDeal;
       if (updatedDeal != null) {
-        if (updatedDeal.title.isNotEmpty) _nameController.text = updatedDeal.title;
-        if (updatedDeal.amount > 0) _amountController.text = updatedDeal.amount.toStringAsFixed(0);
-        if (updatedDeal.stage.isNotEmpty) _dealStage = _normalizeStage(updatedDeal.stage);
-        if (updatedDeal.date.isNotEmpty) _closeDateController.text = updatedDeal.date;
-        if (updatedDeal.company.isNotEmpty) _companyController.text = updatedDeal.company;
-        if (updatedDeal.owner.isNotEmpty) _ownerController.text = updatedDeal.owner;
+        if (updatedDeal.title.isNotEmpty)
+          _nameController.text = updatedDeal.title;
+        if (updatedDeal.amount > 0)
+          _amountController.text = updatedDeal.amount.toStringAsFixed(0);
+        if (updatedDeal.stage.isNotEmpty)
+          _dealStage = _normalizeStage(updatedDeal.stage);
+        if (updatedDeal.date.isNotEmpty)
+          _closeDateController.text = updatedDeal.date;
+        if (updatedDeal.company.isNotEmpty)
+          _companyController.text = updatedDeal.company;
+        if (updatedDeal.owner.isNotEmpty)
+          _ownerController.text = updatedDeal.owner;
       }
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1104,7 +1245,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                           color: const Color(0xFFE6F4F1),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                              color: const Color(0xFF64D2B7), width: 1),
+                            color: const Color(0xFF64D2B7),
+                            width: 1,
+                          ),
                         ),
                         child: Center(
                           child: Text(
@@ -1175,7 +1318,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFE6F4F1),
                                 borderRadius: BorderRadius.circular(4),
@@ -1252,7 +1397,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     itemBuilder: (context) => _dealStages.map((s) {
-                      final isSelected = s.trim().toLowerCase() == _dealStage.trim().toLowerCase();
+                      final isSelected =
+                          s.trim().toLowerCase() ==
+                          _dealStage.trim().toLowerCase();
                       return PopupMenuItem(
                         value: s,
                         child: Row(
@@ -1262,14 +1409,20 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 s,
                                 style: GoogleFonts.poppins(
                                   fontSize: 13,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
                                   color: const Color(0xFF334155),
                                 ),
                               ),
                             ),
                             // Shows which stage the deal is currently in.
                             if (isSelected)
-                              const Icon(Icons.check_rounded, size: 16, color: Color(0xFF00A884)),
+                              const Icon(
+                                Icons.check_rounded,
+                                size: 16,
+                                color: Color(0xFF00A884),
+                              ),
                           ],
                         ),
                       );
@@ -1302,13 +1455,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               Row(
                 children: List.generate(_dealStages.length, (index) {
                   final int currentStageIndex = _dealStages.indexWhere(
-                    (s) => s.trim().toLowerCase() == _dealStage.trim().toLowerCase(),
+                    (s) =>
+                        s.trim().toLowerCase() ==
+                        _dealStage.trim().toLowerCase(),
                   );
                   final bool isCompleted =
                       currentStageIndex >= 0 && index <= currentStageIndex;
                   return Expanded(
                     child: InkWell(
-                      onTap: () => _updateStageAndProbability(_dealStages[index]),
+                      onTap: () =>
+                          _updateStageAndProbability(_dealStages[index]),
                       child: Container(
                         height: 24,
                         margin: const EdgeInsets.only(right: 6),
@@ -1480,9 +1636,21 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               const SizedBox(height: 16),
               _buildAboutField('Deal Owner', 'owner', _ownerController),
               _buildAboutField('Amount', 'amount', _amountController),
-              _buildAboutField('Last Contacted', 'lastContacted', TextEditingController(text: _lastActivityDateStr)),
-              _buildAboutField('Last Activity Date', 'lastActivityDate', TextEditingController(text: _lastActivityDateStr)),
-              _buildAboutField('Deal Type', 'dealType', TextEditingController(text: '--')),
+              _buildAboutField(
+                'Last Contacted',
+                'lastContacted',
+                TextEditingController(text: _lastActivityDateStr),
+              ),
+              _buildAboutField(
+                'Last Activity Date',
+                'lastActivityDate',
+                TextEditingController(text: _lastActivityDateStr),
+              ),
+              _buildAboutField(
+                'Deal Type',
+                'dealType',
+                TextEditingController(text: '--'),
+              ),
               _buildAboutField(
                 'Priority',
                 'priority',
@@ -1495,11 +1663,31 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   _saveDealChanges();
                 },
               ),
-              _buildAboutField('Record Source', 'recordSource', TextEditingController(text: '--')),
-              _buildAboutField('Forecast Probability', 'probability', _probabilityController),
-              _buildAboutField('Comments', 'comments', TextEditingController(text: '--')),
-              _buildAboutField('Apidel Revenue', 'apidelRevenue', TextEditingController(text: '--')),
-              _buildAboutField('Client Type', 'clientType', TextEditingController(text: '--')),
+              _buildAboutField(
+                'Record Source',
+                'recordSource',
+                TextEditingController(text: '--'),
+              ),
+              _buildAboutField(
+                'Forecast Probability',
+                'probability',
+                _probabilityController,
+              ),
+              _buildAboutField(
+                'Comments',
+                'comments',
+                TextEditingController(text: '--'),
+              ),
+              _buildAboutField(
+                'Apidel Revenue',
+                'apidelRevenue',
+                TextEditingController(text: '--'),
+              ),
+              _buildAboutField(
+                'Client Type',
+                'clientType',
+                TextEditingController(text: '--'),
+              ),
             ],
           ),
         ),
@@ -1514,17 +1702,28 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete Activity', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to delete this activity?', style: GoogleFonts.poppins()),
+        title: Text(
+          'Delete Activity',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Are you sure you want to delete this activity?',
+          style: GoogleFonts.poppins(),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Cancel', style: GoogleFonts.poppins()),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.white)),
+            child: Text(
+              'Delete',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -1561,10 +1760,20 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
   Future<void> _editActivityModal(Map<String, dynamic> act) async {
     final actId = (act['id'] ?? act['_id'] ?? '').toString();
-    final type = (act['type'] ?? act['activityType'] ?? '').toString().toLowerCase();
-    final rawNotes = act['notes'] ?? act['content'] ?? act['body'] ?? act['description'] ?? '';
+    final type = (act['type'] ?? act['activityType'] ?? '')
+        .toString()
+        .toLowerCase();
+    final rawNotes =
+        act['notes'] ??
+        act['content'] ??
+        act['body'] ??
+        act['description'] ??
+        '';
     final notesText = parseActivityDescription(rawNotes);
-    final rawTitle = act['title'] ?? act['subject'] ?? (notesText.isNotEmpty ? notesText : 'Activity');
+    final rawTitle =
+        act['title'] ??
+        act['subject'] ??
+        (notesText.isNotEmpty ? notesText : 'Activity');
     final titleText = parseActivityDescription(rawTitle);
 
     dynamic result;
@@ -1574,10 +1783,17 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         taskToEdit: TaskModel(
           id: actId,
           title: titleText,
-          dueDate: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['dueDate'] ?? act['due_date'] ?? '').toString(),
+          dueDate:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['dueDate'] ??
+                      act['due_date'] ??
+                      '')
+                  .toString(),
           priority: (act['priority'] ?? 'Medium').toString(),
           status: (act['status'] ?? 'PENDING').toString(),
-          assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User').toString(),
+          assignedTo: (act['ownerName'] ?? act['assignedTo'] ?? 'Admin User')
+              .toString(),
           notes: notesText,
           queue: (act['queue'] ?? 'None').toString(),
           rawMap: act,
@@ -1606,8 +1822,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Connected').toString(),
-          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
-          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
+          duration:
+              (act['durationMinutes'] ??
+                      act['duration_minutes'] ??
+                      act['duration'] ??
+                      '')
+                  .toString(),
+          startTime:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['startTime'] ??
+                      '')
+                  .toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1621,8 +1847,18 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           id: actId,
           title: titleText,
           outcome: (act['outcome'] ?? 'Completed').toString(),
-          duration: (act['durationMinutes'] ?? act['duration_minutes'] ?? act['duration'] ?? '').toString(),
-          startTime: (act['scheduledAt'] ?? act['scheduled_at'] ?? act['startTime'] ?? '').toString(),
+          duration:
+              (act['durationMinutes'] ??
+                      act['duration_minutes'] ??
+                      act['duration'] ??
+                      '')
+                  .toString(),
+          startTime:
+              (act['scheduledAt'] ??
+                      act['scheduled_at'] ??
+                      act['startTime'] ??
+                      '')
+                  .toString(),
           notes: notesText,
           rawMap: act,
         ),
@@ -1675,7 +1911,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         margin: const EdgeInsets.only(right: 4),
                         decoration: BoxDecoration(
                           border: Border(
@@ -1691,8 +1929,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                           _activitySubTabs[index],
                           style: GoogleFonts.poppins(
                             fontSize: 13,
-                            fontWeight:
-                                isSelected ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w600,
                             color: isSelected
                                 ? const Color(0xFF1E293B)
                                 : const Color(0xFF64748B),
@@ -1780,17 +2019,26 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 'Unassigned',
                               ];
                               for (final u in _userList) {
-                                final name = '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'.trim();
-                                if (name.isNotEmpty && !options.contains(name)) {
+                                final name =
+                                    '${u['firstName'] ?? u['first_name'] ?? ''} ${u['lastName'] ?? u['last_name'] ?? ''}'
+                                        .trim();
+                                if (name.isNotEmpty &&
+                                    !options.contains(name)) {
                                   options.add(name);
                                 }
                               }
                               return options
-                                  .map((s) => PopupMenuItem(
-                                        value: s,
-                                        child: Text(s,
-                                            style: GoogleFonts.poppins(fontSize: 13)),
-                                      ))
+                                  .map(
+                                    (s) => PopupMenuItem(
+                                      value: s,
+                                      child: Text(
+                                        s,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  )
                                   .toList();
                             },
                             child: Row(
@@ -1827,7 +2075,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _isActivitiesCollapsed ? 'Expand all ' : 'Collapse all ',
+                          _isActivitiesCollapsed
+                              ? 'Expand all '
+                              : 'Collapse all ',
                           style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -1858,29 +2108,36 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                       final modalType = tabName == 'Notes'
                           ? 'Note'
                           : (tabName == 'Emails'
-                              ? 'Email'
-                              : (tabName == 'Calls'
-                                  ? 'Call'
-                                  : (tabName == 'Tasks' ? 'Task' : 'Meeting')));
+                                ? 'Email'
+                                : (tabName == 'Calls'
+                                      ? 'Call'
+                                      : (tabName == 'Tasks'
+                                            ? 'Task'
+                                            : 'Meeting')));
                       _openActivityModal(modalType);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2B3A4A),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       elevation: 0,
                     ),
                     child: Text(
                       _selectedActivitySubTab == 1
                           ? 'Create Note'
                           : (_selectedActivitySubTab == 2
-                              ? 'Create Email'
-                              : (_selectedActivitySubTab == 3
-                                  ? 'Create Call'
-                                  : (_selectedActivitySubTab == 4
-                                      ? 'Create Task'
-                                      : 'Create Meeting'))),
+                                ? 'Create Email'
+                                : (_selectedActivitySubTab == 3
+                                      ? 'Create Call'
+                                      : (_selectedActivitySubTab == 4
+                                            ? 'Create Task'
+                                            : 'Create Meeting'))),
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -1898,7 +2155,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
-                      child: CircularProgressIndicator(color: Color(0xFF00A884)),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF00A884),
+                      ),
                     ),
                   )
                 else if (_filteredActivities.isEmpty)
@@ -1935,22 +2194,69 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   ),
                   const SizedBox(height: 12),
                   ..._filteredActivities.map((act) {
-                    final type = (act['type'] ?? 'activity').toString().toUpperCase();
+                    final type = (act['type'] ?? 'activity')
+                        .toString()
+                        .toUpperCase();
                     final title = act['title'] ?? act['notes'] ?? 'Activity';
-                    final ownerName = act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
-                    final createdAt = act['createdAt'] ?? act['scheduledAt'] ?? '';
+                    final ownerName =
+                        act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
+                    final createdAt =
+                        act['createdAt'] ?? act['scheduledAt'] ?? '';
 
                     IconData actIcon = Icons.task_alt_rounded;
                     if (type.contains('CALL')) actIcon = Icons.phone_outlined;
-                    if (type.contains('MEETING')) actIcon = Icons.videocam_outlined;
-                    if (type.contains('NOTE')) actIcon = Icons.description_outlined;
-                    if (type.contains('EMAIL')) actIcon = Icons.mail_outline_rounded;
+                    if (type.contains('MEETING'))
+                      actIcon = Icons.videocam_outlined;
+                    if (type.contains('NOTE'))
+                      actIcon = Icons.description_outlined;
+                    if (type.contains('EMAIL'))
+                      actIcon = Icons.mail_outline_rounded;
 
-                    final bool isTask = type.contains('TASK') || act['type']?.toString().toLowerCase() == 'task';
-                    final String statusVal = (act['status'] ?? 'PENDING').toString().toUpperCase();
+                    final bool isTask =
+                        type.contains('TASK') ||
+                        act['type']?.toString().toLowerCase() == 'task';
+                    final String statusVal = (act['status'] ?? 'PENDING')
+                        .toString()
+                        .toUpperCase();
                     final bool isTaskCompleted = statusVal == 'COMPLETED';
-                    final String actId = (act['id'] ?? act['_id'] ?? '${type}_${title}_$createdAt').toString();
-                    final bool isExpanded = _expandedActivityIds.contains(actId);
+                    final String actId =
+                        (act['id'] ??
+                                act['_id'] ??
+                                '${type}_${title}_$createdAt')
+                            .toString();
+                    // Only show edit/delete 3-dots when the activity has a real server-assigned ID.
+                    final bool hasRealId =
+                        (act['id'] ?? act['_id']) != null &&
+                        (act['id'] ?? act['_id']).toString().isNotEmpty;
+                    final String typeUpper = (act['type'] ?? '')
+                        .toString()
+                        .toUpperCase();
+                    final String rawTitleUpper =
+                        (act['title'] ?? act['type'] ?? '')
+                            .toString()
+                            .toUpperCase();
+                    final bool isSystemActivity =
+                        typeUpper.contains('PROPERTY') ||
+                        typeUpper.contains('LIFECYCLE') ||
+                        typeUpper.contains('STAGE_CHANGE') ||
+                        typeUpper.contains('STAGE_CHANGED') ||
+                        typeUpper.contains('CONTACT_CREATED') ||
+                        typeUpper.contains('COMPANY_CREATED') ||
+                        typeUpper.contains('DEAL_CREATED') ||
+                        typeUpper.contains('RECORD_CREATED') ||
+                        rawTitleUpper.contains('PROPERTY_CHANGE') ||
+                        rawTitleUpper.contains('PROPERTY_CHANGED') ||
+                        rawTitleUpper.contains('LIFECYCLE_STAGE') ||
+                        rawTitleUpper.contains('STAGE_CHANGE') ||
+                        rawTitleUpper.contains('STAGE_CHANGED') ||
+                        rawTitleUpper.contains('CONTACT_CREATED') ||
+                        rawTitleUpper.contains('COMPANY_CREATED') ||
+                        rawTitleUpper.contains('DEAL_CREATED') ||
+                        rawTitleUpper.contains('RECORD_CREATED');
+                    final bool canEditOrDelete = hasRealId && !isSystemActivity;
+                    final bool isExpanded = _expandedActivityIds.contains(
+                      actId,
+                    );
                     final bool isHighlighted = actId == _highlightedActivityId;
 
                     return InkWell(
@@ -1973,7 +2279,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: isHighlighted ? const Color(0xFFE6F4F1) : Colors.white,
+                          color: isHighlighted
+                              ? const Color(0xFFE6F4F1)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: isExpanded || isHighlighted
@@ -1996,18 +2304,26 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                         // PATCH just the changed field: PUT is not a
                                         // route, and echoing the whole activity back
                                         // failed validation, so the toggle never stuck.
-                                        final newStatus = newValue == true ? 'completed' : 'pending';
+                                        final newStatus = newValue == true
+                                            ? 'completed'
+                                            : 'pending';
                                         try {
                                           await ApiService().patch(
                                             '${ApiConstants.activities}/$actId',
                                             data: {'status': newStatus},
                                           );
                                         } catch (e) {
-                                          debugPrint('[UPDATE ACTIVITY STATUS ERROR]: $e');
+                                          debugPrint(
+                                            '[UPDATE ACTIVITY STATUS ERROR]: $e',
+                                          );
                                           if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
                                               SnackBar(
-                                                content: Text('Failed to update task status: $e'),
+                                                content: Text(
+                                                  'Failed to update task status: $e',
+                                                ),
                                                 backgroundColor: Colors.red,
                                               ),
                                             );
@@ -2099,30 +2415,71 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                   ),
                                   if (isExpanded) ...[
                                     const SizedBox(height: 10),
-                                    const Divider(color: Color(0xFFE2E8F0), height: 1),
+                                    const Divider(
+                                      color: Color(0xFFE2E8F0),
+                                      height: 1,
+                                    ),
                                     const SizedBox(height: 10),
                                     if (isTask)
                                       TaskActivityCardDetails(
                                         activity: act,
                                         onManageAssociations: () async {
-                                          final initialAssoc = _extractAssociations(
-                                            act,
-                                            defaultDealId: _recordId,
-                                            defaultDealName: widget.deal?.title,
-                                          );
+                                          final initialAssoc =
+                                              _extractAssociations(
+                                                act,
+                                                defaultDealId: _recordId,
+                                                defaultDealName:
+                                                    widget.deal?.title,
+                                              );
 
-                                          final result = await RecordAssociationSheet.show(
-                                            context,
-                                            initialAssociations: initialAssoc,
-                                          );
+                                          final result =
+                                              await RecordAssociationSheet.show(
+                                                context,
+                                                initialAssociations:
+                                                    initialAssoc,
+                                              );
                                           if (result != null) {
-                                            final actId = (act['id'] ?? act['_id'])?.toString();
-                                            final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
-                                            final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
-                                            final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
-                                            final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
-                                            final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
-                                            final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+                                            final actId =
+                                                (act['id'] ?? act['_id'])
+                                                    ?.toString();
+                                            final newCompId =
+                                                result['Companies']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Companies']!
+                                                      .first['id']
+                                                : null;
+                                            final newCompName =
+                                                result['Companies']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Companies']!
+                                                      .first['name']
+                                                : null;
+                                            final newCntId =
+                                                result['Contacts']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Contacts']!
+                                                      .first['id']
+                                                : null;
+                                            final newCntName =
+                                                result['Contacts']
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? result['Contacts']!
+                                                      .first['name']
+                                                : null;
+                                            final newDealId =
+                                                result['Deals']?.isNotEmpty ==
+                                                    true
+                                                ? result['Deals']!.first['id']
+                                                : null;
+                                            final newDealName =
+                                                result['Deals']?.isNotEmpty ==
+                                                    true
+                                                ? result['Deals']!.first['name']
+                                                : null;
 
                                             setState(() {
                                               act['associations'] = result;
@@ -2137,54 +2494,112 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                               act['dealName'] = newDealName;
                                             });
 
-                                            if (actId != null && actId.isNotEmpty) {
-                                              await ActivityAssociationStorage.saveAssociations(actId, result);
+                                            if (actId != null &&
+                                                actId.isNotEmpty) {
+                                              await ActivityAssociationStorage.saveAssociations(
+                                                actId,
+                                                result,
+                                              );
                                               try {
                                                 final api = ApiService();
-                                                final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                                final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                                final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                                final compIds =
+                                                    result['Companies']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
+                                                final cntIds =
+                                                    result['Contacts']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
+                                                final dealIds =
+                                                    result['Deals']
+                                                        ?.map((e) => e['id'])
+                                                        .whereType<String>()
+                                                        .toList() ??
+                                                    [];
 
-                                                final List<Map<String, String>> assocList = [];
+                                                final List<Map<String, String>>
+                                                assocList = [];
                                                 for (final id in compIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'company'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'company',
+                                                  });
                                                 }
                                                 for (final id in cntIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'contact'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'contact',
+                                                  });
                                                 }
                                                 for (final id in dealIds) {
-                                                  assocList.add({'objectId': id, 'objectType': 'deal'});
+                                                  assocList.add({
+                                                    'objectId': id,
+                                                    'objectType': 'deal',
+                                                  });
                                                 }
 
-                                                final updatePayload = Map<String, dynamic>.from(act);
-                                                updatePayload['companyId'] = newCompId;
-                                                updatePayload['company_id'] = newCompId;
-                                                updatePayload['companyIds'] = compIds;
-                                                updatePayload['company_ids'] = compIds;
-                                                updatePayload['contactId'] = newCntId;
-                                                updatePayload['contact_id'] = newCntId;
-                                                updatePayload['contactIds'] = cntIds;
-                                                updatePayload['contact_ids'] = cntIds;
-                                                updatePayload['dealId'] = newDealId;
-                                                updatePayload['deal_id'] = newDealId;
-                                                updatePayload['dealIds'] = dealIds;
-                                                updatePayload['deal_ids'] = dealIds;
-                                                updatePayload['associations'] = result;
-                                                updatePayload['associationsList'] = assocList;
-                                                updatePayload['associations_list'] = assocList;
+                                                final updatePayload =
+                                                    Map<String, dynamic>.from(
+                                                      act,
+                                                    );
+                                                updatePayload['companyId'] =
+                                                    newCompId;
+                                                updatePayload['company_id'] =
+                                                    newCompId;
+                                                updatePayload['companyIds'] =
+                                                    compIds;
+                                                updatePayload['company_ids'] =
+                                                    compIds;
+                                                updatePayload['contactId'] =
+                                                    newCntId;
+                                                updatePayload['contact_id'] =
+                                                    newCntId;
+                                                updatePayload['contactIds'] =
+                                                    cntIds;
+                                                updatePayload['contact_ids'] =
+                                                    cntIds;
+                                                updatePayload['dealId'] =
+                                                    newDealId;
+                                                updatePayload['deal_id'] =
+                                                    newDealId;
+                                                updatePayload['dealIds'] =
+                                                    dealIds;
+                                                updatePayload['deal_ids'] =
+                                                    dealIds;
+                                                updatePayload['associations'] =
+                                                    result;
+                                                updatePayload['associationsList'] =
+                                                    assocList;
+                                                updatePayload['associations_list'] =
+                                                    assocList;
 
-                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
+                                                await api.patch(
+                                                  '${ApiConstants.activities}/$actId',
+                                                  data: updatePayload,
+                                                );
                                                 if (context.mounted) {
-                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
                                                     const SnackBar(
-                                                      content: Text('Associations updated successfully'),
-                                                      duration: Duration(seconds: 1),
+                                                      content: Text(
+                                                        'Associations updated successfully',
+                                                      ),
+                                                      duration: Duration(
+                                                        seconds: 1,
+                                                      ),
                                                     ),
                                                   );
                                                 }
                                                 await _fetchActivities();
                                               } catch (e) {
-                                                debugPrint('[Update Association Error]: $e');
+                                                debugPrint(
+                                                  '[Update Association Error]: $e',
+                                                );
                                               }
                                             }
                                           }
@@ -2196,11 +2611,19 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF8FAFC),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: const Color(0xFFE2E8F0),
+                                          ),
                                         ),
                                         child: Text(
-                                          parseActivityDescription(act['description'] ?? act['notes'] ?? title),
+                                          parseActivityDescription(
+                                            act['description'] ??
+                                                act['notes'] ??
+                                                title,
+                                          ),
                                           style: GoogleFonts.poppins(
                                             fontSize: 13,
                                             color: const Color(0xFF334155),
@@ -2209,114 +2632,211 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                       ),
                                     const SizedBox(height: 10),
                                     InkWell(
-                                       onTap: () async {
-                                         final initialAssoc = _extractAssociations(
-                                           act,
-                                           defaultDealId: _recordId,
-                                           defaultDealName: widget.deal?.title,
-                                         );
+                                      onTap: () async {
+                                        final initialAssoc =
+                                            _extractAssociations(
+                                              act,
+                                              defaultDealId: _recordId,
+                                              defaultDealName:
+                                                  widget.deal?.title,
+                                            );
 
-                                         final result = await RecordAssociationSheet.show(
-                                           context,
-                                           initialAssociations: initialAssoc,
-                                         );
-                                         if (result != null) {
-                                           final actId = (act['id'] ?? act['_id'])?.toString();
-                                           final newCompId = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['id'] : null;
-                                           final newCompName = result['Companies']?.isNotEmpty == true ? result['Companies']!.first['name'] : null;
-                                           final newCntId = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['id'] : null;
-                                           final newCntName = result['Contacts']?.isNotEmpty == true ? result['Contacts']!.first['name'] : null;
-                                           final newDealId = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['id'] : null;
-                                           final newDealName = result['Deals']?.isNotEmpty == true ? result['Deals']!.first['name'] : null;
+                                        final result =
+                                            await RecordAssociationSheet.show(
+                                              context,
+                                              initialAssociations: initialAssoc,
+                                            );
+                                        if (result != null) {
+                                          final actId =
+                                              (act['id'] ?? act['_id'])
+                                                  ?.toString();
+                                          final newCompId =
+                                              result['Companies']?.isNotEmpty ==
+                                                  true
+                                              ? result['Companies']!.first['id']
+                                              : null;
+                                          final newCompName =
+                                              result['Companies']?.isNotEmpty ==
+                                                  true
+                                              ? result['Companies']!
+                                                    .first['name']
+                                              : null;
+                                          final newCntId =
+                                              result['Contacts']?.isNotEmpty ==
+                                                  true
+                                              ? result['Contacts']!.first['id']
+                                              : null;
+                                          final newCntName =
+                                              result['Contacts']?.isNotEmpty ==
+                                                  true
+                                              ? result['Contacts']!
+                                                    .first['name']
+                                              : null;
+                                          final newDealId =
+                                              result['Deals']?.isNotEmpty ==
+                                                  true
+                                              ? result['Deals']!.first['id']
+                                              : null;
+                                          final newDealName =
+                                              result['Deals']?.isNotEmpty ==
+                                                  true
+                                              ? result['Deals']!.first['name']
+                                              : null;
 
-                                           setState(() {
-                                             act['associations'] = result;
-                                             act['companyId'] = newCompId;
-                                             act['company_id'] = newCompId;
-                                             act['companyName'] = newCompName;
-                                             act['contactId'] = newCntId;
-                                             act['contact_id'] = newCntId;
-                                             act['contactName'] = newCntName;
-                                             act['dealId'] = newDealId;
-                                             act['deal_id'] = newDealId;
-                                             act['dealName'] = newDealName;
-                                           });
+                                          setState(() {
+                                            act['associations'] = result;
+                                            act['companyId'] = newCompId;
+                                            act['company_id'] = newCompId;
+                                            act['companyName'] = newCompName;
+                                            act['contactId'] = newCntId;
+                                            act['contact_id'] = newCntId;
+                                            act['contactName'] = newCntName;
+                                            act['dealId'] = newDealId;
+                                            act['deal_id'] = newDealId;
+                                            act['dealName'] = newDealName;
+                                          });
 
-                                           if (actId != null && actId.isNotEmpty) {
-                                             await ActivityAssociationStorage.saveAssociations(actId, result);
-                                             try {
-                                               final api = ApiService();
-                                               final compIds = result['Companies']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                               final cntIds = result['Contacts']?.map((e) => e['id']).whereType<String>().toList() ?? [];
-                                               final dealIds = result['Deals']?.map((e) => e['id']).whereType<String>().toList() ?? [];
+                                          if (actId != null &&
+                                              actId.isNotEmpty) {
+                                            await ActivityAssociationStorage.saveAssociations(
+                                              actId,
+                                              result,
+                                            );
+                                            try {
+                                              final api = ApiService();
+                                              final compIds =
+                                                  result['Companies']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
+                                              final cntIds =
+                                                  result['Contacts']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
+                                              final dealIds =
+                                                  result['Deals']
+                                                      ?.map((e) => e['id'])
+                                                      .whereType<String>()
+                                                      .toList() ??
+                                                  [];
 
-                                               final List<Map<String, String>> assocList = [];
-                                               for (final id in compIds) {
-                                                 assocList.add({'objectId': id, 'objectType': 'company'});
-                                               }
-                                               for (final id in cntIds) {
-                                                 assocList.add({'objectId': id, 'objectType': 'contact'});
-                                               }
-                                               for (final id in dealIds) {
-                                                 assocList.add({'objectId': id, 'objectType': 'deal'});
-                                               }
+                                              final List<Map<String, String>>
+                                              assocList = [];
+                                              for (final id in compIds) {
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'company',
+                                                });
+                                              }
+                                              for (final id in cntIds) {
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'contact',
+                                                });
+                                              }
+                                              for (final id in dealIds) {
+                                                assocList.add({
+                                                  'objectId': id,
+                                                  'objectType': 'deal',
+                                                });
+                                              }
 
-                                                final updatePayload = Map<String, dynamic>.from(act);
-                                                updatePayload['companyId'] = newCompId;
-                                                updatePayload['company_id'] = newCompId;
-                                                updatePayload['companyIds'] = compIds;
-                                                updatePayload['company_ids'] = compIds;
-                                                updatePayload['contactId'] = newCntId;
-                                                updatePayload['contact_id'] = newCntId;
-                                                updatePayload['contactIds'] = cntIds;
-                                                updatePayload['contact_ids'] = cntIds;
-                                                updatePayload['dealId'] = newDealId;
-                                                updatePayload['deal_id'] = newDealId;
-                                                updatePayload['dealIds'] = dealIds;
-                                                updatePayload['deal_ids'] = dealIds;
-                                                updatePayload['associations'] = result;
-                                                updatePayload['associationsList'] = assocList;
-                                                updatePayload['associations_list'] = assocList;
+                                              final updatePayload =
+                                                  Map<String, dynamic>.from(
+                                                    act,
+                                                  );
+                                              updatePayload['companyId'] =
+                                                  newCompId;
+                                              updatePayload['company_id'] =
+                                                  newCompId;
+                                              updatePayload['companyIds'] =
+                                                  compIds;
+                                              updatePayload['company_ids'] =
+                                                  compIds;
+                                              updatePayload['contactId'] =
+                                                  newCntId;
+                                              updatePayload['contact_id'] =
+                                                  newCntId;
+                                              updatePayload['contactIds'] =
+                                                  cntIds;
+                                              updatePayload['contact_ids'] =
+                                                  cntIds;
+                                              updatePayload['dealId'] =
+                                                  newDealId;
+                                              updatePayload['deal_id'] =
+                                                  newDealId;
+                                              updatePayload['dealIds'] =
+                                                  dealIds;
+                                              updatePayload['deal_ids'] =
+                                                  dealIds;
+                                              updatePayload['associations'] =
+                                                  result;
+                                              updatePayload['associationsList'] =
+                                                  assocList;
+                                              updatePayload['associations_list'] =
+                                                  assocList;
 
-                                                // PATCH /api/activities/:id is the
-                                                // documented update route.
-                                                await api.patch('${ApiConstants.activities}/$actId', data: updatePayload);
-                                               if (context.mounted) {
-                                                 ScaffoldMessenger.of(context).showSnackBar(
-                                                   const SnackBar(
-                                                     content: Text('Associations updated successfully'),
-                                                     duration: Duration(seconds: 1),
-                                                   ),
-                                                 );
-                                               }
-                                               await _fetchActivities();
-                                             } catch (e) {
-                                               debugPrint('[Update Association Error]: $e');
-                                             }
-                                           }
-                                         }
-                                       },
-                                       child: Row(
-                                         mainAxisSize: MainAxisSize.min,
-                                         children: [
-                                           Builder(
-                                             builder: (context) {
-                                               final assocMap = _extractAssociations(
-                                                 act,
-                                                 defaultDealId: _recordId,
-                                                 defaultDealName: widget.deal?.title,
-                                               );
-                                               final cnt = assocMap['Companies']!.length + assocMap['Contacts']!.length + assocMap['Deals']!.length;
-                                               return Text(
-                                                 '$cnt association${cnt == 1 ? '' : 's'} ',
-                                                 style: GoogleFonts.poppins(
-                                                   fontSize: 12,
-                                                   fontWeight: FontWeight.w600,
-                                                   color: const Color(0xFF00A884),
-                                                 ),
-                                               );
-                                             },
-                                           ),
+                                              // PATCH /api/activities/:id is the
+                                              // documented update route.
+                                              await api.patch(
+                                                '${ApiConstants.activities}/$actId',
+                                                data: updatePayload,
+                                              );
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Associations updated successfully',
+                                                    ),
+                                                    duration: Duration(
+                                                      seconds: 1,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              await _fetchActivities();
+                                            } catch (e) {
+                                              debugPrint(
+                                                '[Update Association Error]: $e',
+                                              );
+                                            }
+                                          }
+                                        }
+                                      },
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Builder(
+                                            builder: (context) {
+                                              final assocMap =
+                                                  _extractAssociations(
+                                                    act,
+                                                    defaultDealId: _recordId,
+                                                    defaultDealName:
+                                                        widget.deal?.title,
+                                                  );
+                                              final cnt =
+                                                  assocMap['Companies']!
+                                                      .length +
+                                                  assocMap['Contacts']!.length +
+                                                  assocMap['Deals']!.length;
+                                              return Text(
+                                                '$cnt association${cnt == 1 ? '' : 's'} ',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: const Color(
+                                                    0xFF00A884,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
                                           const Icon(
                                             Icons.keyboard_arrow_down_rounded,
                                             size: 16,
@@ -2329,43 +2849,67 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 ],
                               ),
                             ),
-                            PopupMenuButton<String>(
-                              icon: const Icon(
-                                Icons.more_vert_rounded,
-                                color: Color(0xFF94A3B8),
-                                size: 20,
+                            // Only show edit/delete menu when this activity
+                            // has a real backend ID and is not an immutable system event.
+                            if (canEditOrDelete)
+                              PopupMenuButton<String>(
+                                icon: const Icon(
+                                  Icons.more_vert_rounded,
+                                  color: Color(0xFF94A3B8),
+                                  size: 20,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                itemBuilder: (context) => [
+                                  PopupMenuItem<String>(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.edit_outlined,
+                                          size: 16,
+                                          color: Color(0xFF00A884),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Edit Activity',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem<String>(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 16,
+                                          color: Color(0xFFEF4444),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Delete Activity',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            color: const Color(0xFFEF4444),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                onSelected: (action) {
+                                  if (action == 'delete') {
+                                    _confirmAndDeleteActivity(act);
+                                  } else if (action == 'edit') {
+                                    _editActivityModal(act);
+                                  }
+                                },
                               ),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              itemBuilder: (context) => [
-                                PopupMenuItem<String>(
-                                  value: 'edit',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF00A884)),
-                                      const SizedBox(width: 8),
-                                      Text('Edit Activity', style: GoogleFonts.poppins(fontSize: 13)),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'delete',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
-                                      const SizedBox(width: 8),
-                                      Text('Delete Activity', style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFEF4444))),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onSelected: (action) {
-                                if (action == 'delete') {
-                                  _confirmAndDeleteActivity(act);
-                                } else if (action == 'edit') {
-                                  _editActivityModal(act);
-                                }
-                              },
-                            ),
                           ],
                         ),
                       ),
@@ -2381,13 +2925,21 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
   }
 
   void _showActivityDetailsModal(Map<String, dynamic> act) {
-    final type = (act['type'] ?? act['activityType'] ?? 'Activity').toString().toUpperCase();
+    final type = (act['type'] ?? act['activityType'] ?? 'Activity')
+        .toString()
+        .toUpperCase();
     final title = act['title'] ?? act['notes'] ?? act['type'] ?? 'Activity';
-    final ownerName = act['creatorName'] ?? act['ownerName'] ?? act['assignedTo'] ?? 'Admin User';
-    final description = act['description'] ?? act['notes'] ?? act['message'] ?? '';
+    final ownerName =
+        act['creatorName'] ??
+        act['ownerName'] ??
+        act['assignedTo'] ??
+        'Admin User';
+    final description =
+        act['description'] ?? act['notes'] ?? act['message'] ?? '';
     final status = act['status'] ?? 'Completed';
     final priority = act['priority'] ?? 'Normal';
-    final rawDate = act['createdAt'] ?? act['scheduledAt'] ?? act['activityDate'] ?? '';
+    final rawDate =
+        act['createdAt'] ?? act['scheduledAt'] ?? act['activityDate'] ?? '';
 
     String formattedDate = '';
     if (rawDate.toString().isNotEmpty) {
@@ -2396,8 +2948,22 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
         final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
         final ampm = dt.hour >= 12 ? 'PM' : 'AM';
         final min = dt.minute.toString().padLeft(2, '0');
-        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        formattedDate = '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm';
+        final months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        formattedDate =
+            '${months[dt.month - 1]} ${dt.day}, ${dt.year} at $h:$min $ampm';
       } catch (_) {
         formattedDate = rawDate.toString();
       }
@@ -2413,73 +2979,76 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           elevation: 6,
           child: Padding(
             padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title.toString(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF1E293B),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title.toString(),
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF1E293B),
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Color(0xFF64748B)),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-              const Divider(color: Color(0xFFE2E8F0)),
-              const SizedBox(height: 10),
-              _buildDetailRow('Type', type),
-              _buildDetailRow('Assigned / Created By', ownerName.toString()),
-              if (formattedDate.isNotEmpty) _buildDetailRow('Date', formattedDate),
-              _buildDetailRow('Status', status.toString()),
-              if (act['priority'] != null) _buildDetailRow('Priority', priority.toString()),
-              if (act['outcome'] != null) _buildDetailRow('Outcome', act['outcome'].toString()),
-              if (description.toString().isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Details / Changes:',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF475569),
-                  ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Text(
-                    description.toString(),
+                const Divider(color: Color(0xFFE2E8F0)),
+                const SizedBox(height: 10),
+                _buildDetailRow('Type', type),
+                _buildDetailRow('Assigned / Created By', ownerName.toString()),
+                if (formattedDate.isNotEmpty)
+                  _buildDetailRow('Date', formattedDate),
+                _buildDetailRow('Status', status.toString()),
+                if (act['priority'] != null)
+                  _buildDetailRow('Priority', priority.toString()),
+                if (act['outcome'] != null)
+                  _buildDetailRow('Outcome', act['outcome'].toString()),
+                if (description.toString().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Details / Changes:',
                     style: GoogleFonts.poppins(
                       fontSize: 13,
-                      color: const Color(0xFF334155),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF475569),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Text(
+                      description.toString(),
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: const Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
               ],
-              const SizedBox(height: 16),
-            ],
+            ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -2605,18 +3174,23 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                               const SizedBox(height: 4),
                               Container(
                                 height: 36,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                      color: const Color(0xFF00A884)),
+                                    color: const Color(0xFF00A884),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: TextField(
                                         controller: _startDateController,
-                                        style: GoogleFonts.poppins(fontSize: 12),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                        ),
                                         decoration: const InputDecoration(
                                           hintText: 'dd-mm-',
                                           border: InputBorder.none,
@@ -2649,18 +3223,23 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                               const SizedBox(height: 4),
                               Container(
                                 height: 36,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                      color: const Color(0xFFCBD5E1)),
+                                    color: const Color(0xFFCBD5E1),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: TextField(
                                         controller: _endDateController,
-                                        style: GoogleFonts.poppins(fontSize: 12),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                        ),
                                         decoration: const InputDecoration(
                                           hintText: 'dd-mm-',
                                           border: InputBorder.none,
@@ -2756,8 +3335,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                     ],
                   ),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE11D48),
                       borderRadius: BorderRadius.circular(4),
@@ -2829,8 +3410,11 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                             color: Color(0xFFE11D48),
                           ),
                         )
-                      : const Icon(Icons.auto_awesome,
-                          color: Color(0xFFE11D48), size: 16),
+                      : const Icon(
+                          Icons.auto_awesome,
+                          color: Color(0xFFE11D48),
+                          size: 16,
+                        ),
                   label: Text(
                     _isLoadingAiSummary ? 'Summarizing...' : 'Summarize',
                     style: GoogleFonts.poppins(
@@ -2859,8 +3443,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           buttonText: 'Create company',
           entityType: 'company',
           associatedItems: _associatedCompanies,
+          onItemAction: (action, item) => _syncCompanyAssociations(
+            removedItem: action == 'remove' ? item : null,
+          ),
           onPressed: () async {
-            final res = await AddAssociationModal.show(context, entityType: 'company');
+            final res = await AddAssociationModal.show(
+              context,
+              entityType: 'company',
+            );
             if (res != null && res['action'] == 'add_existing') {
               final selected = res['selected'] as List;
               setState(() {
@@ -2871,6 +3461,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   }
                 }
               });
+              _syncCompanyAssociations();
             }
           },
         ),
@@ -2882,8 +3473,14 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           buttonText: 'Create contact',
           entityType: 'contact',
           associatedItems: _associatedContacts,
+          onItemAction: (action, item) => _syncContactAssociations(
+            removedItem: action == 'remove' ? item : null,
+          ),
           onPressed: () async {
-            final res = await AddAssociationModal.show(context, entityType: 'contact');
+            final res = await AddAssociationModal.show(
+              context,
+              entityType: 'contact',
+            );
             if (res != null && res['action'] == 'add_existing') {
               final selected = res['selected'] as List;
               setState(() {
@@ -2894,6 +3491,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   }
                 }
               });
+              _syncContactAssociations();
             }
           },
         ),
@@ -2917,11 +3515,15 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
             );
             if (res != null) {
               setState(() {
-                _associatedMsps = res.map((m) => {
-                  'id': m,
-                  'name': m,
-                  'subtext': 'Managed Service Provider',
-                }).toList();
+                _associatedMsps = res
+                    .map(
+                      (m) => {
+                        'id': m,
+                        'name': m,
+                        'subtext': 'Managed Service Provider',
+                      },
+                    )
+                    .toList();
               });
 
               final dealId = _recordId;
@@ -2980,6 +3582,110 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     context.pushNamed(routeName, pathParameters: {RoutePaths.idParam: id});
   }
 
+  Future<void> _syncCompanyAssociations({
+    Map<String, dynamic>? removedItem,
+  }) async {
+    final dealId = _recordId;
+    if (dealId == null || dealId.isEmpty) return;
+    try {
+      final companyIds = _associatedCompanies
+          .map((c) => c['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final primaryComp = _associatedCompanies.firstWhere(
+        (c) => c['isPrimary'] == true || c['primary'] == true,
+        orElse: () =>
+            _associatedCompanies.isNotEmpty ? _associatedCompanies.first : {},
+      );
+      final primaryCompId = primaryComp['id']?.toString();
+
+      // 1. Update Deal record
+      await DealRepositoryImpl().updateDeal(dealId, {
+        'companyId': primaryCompId,
+        'company_id': primaryCompId,
+        'companyIds': companyIds,
+        'company_ids': companyIds,
+        'associatedCompanies': _associatedCompanies,
+        'associated_companies': _associatedCompanies,
+      });
+
+      // 2. Update primary Company record on backend for two-way association
+      if (primaryCompId != null && primaryCompId.isNotEmpty) {
+        try {
+          await CompanyRepositoryImpl().updateCompany(primaryCompId, {
+            'dealIds': [dealId],
+            'deal_ids': [dealId],
+          });
+        } catch (_) {}
+      }
+
+      // 3. If company was removed, disassociate deal from that company
+      if (removedItem != null) {
+        final remId = removedItem['id']?.toString();
+        if (remId != null && remId.isNotEmpty) {
+          try {
+            await CompanyRepositoryImpl().updateCompany(remId, {
+              'dealIds': [],
+              'deal_ids': [],
+            });
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      debugPrint('[DealDetailsScreen _syncCompanyAssociations ERROR]: $e');
+    }
+  }
+
+  Future<void> _syncContactAssociations({
+    Map<String, dynamic>? removedItem,
+  }) async {
+    final dealId = _recordId;
+    if (dealId == null || dealId.isEmpty) return;
+    try {
+      final contactIds = _associatedContacts
+          .map((c) => c['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      // 1. Update Deal record
+      await DealRepositoryImpl().updateDeal(dealId, {
+        'contactIds': contactIds,
+        'contact_ids': contactIds,
+        'associatedContacts': _associatedContacts,
+        'associated_contacts': _associatedContacts,
+      });
+
+      // 2. Update Contact records on backend to link deal
+      final contactRepo = ContactRepositoryImpl();
+      for (final c in _associatedContacts) {
+        final cId = c['id']?.toString();
+        if (cId != null && cId.isNotEmpty) {
+          try {
+            await contactRepo.updateContact(cId, {
+              'dealIds': [dealId],
+              'deal_ids': [dealId],
+            });
+          } catch (_) {}
+        }
+      }
+
+      // 3. If contact was removed, un-link deal from that contact
+      if (removedItem != null) {
+        final remId = removedItem['id']?.toString();
+        if (remId != null && remId.isNotEmpty) {
+          try {
+            await contactRepo.updateContact(remId, {
+              'dealIds': [],
+              'deal_ids': [],
+            });
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      debugPrint('[DealDetailsScreen _syncContactAssociations ERROR]: $e');
+    }
+  }
+
   Widget _buildAssociationCard({
     required String title,
     required String description,
@@ -2989,6 +3695,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
     bool isTeal = false,
     String? topActionText,
     VoidCallback? onPressed,
+    Function(String action, Map<String, dynamic> item)? onItemAction,
   }) {
     final bool hasItems = associatedItems.isNotEmpty;
 
@@ -3019,7 +3726,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   if (hasItems) ...[
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF1F5F9),
                         borderRadius: BorderRadius.circular(10),
@@ -3064,12 +3774,24 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               children: associatedItems.asMap().entries.map((entry) {
                 final index = entry.key;
                 final item = entry.value;
-                final name = (item['name'] ?? item['title'] ?? item['company_name'] ?? item['contact_name'] ?? '').toString();
-                final subtext = (item['subtext'] ?? item['email'] ?? item['domain'] ?? '').toString();
+                final name =
+                    (item['name'] ??
+                            item['title'] ??
+                            item['company_name'] ??
+                            item['contact_name'] ??
+                            '')
+                        .toString();
+                final subtext =
+                    (item['subtext'] ?? item['email'] ?? item['domain'] ?? '')
+                        .toString();
                 final initialLetter = name.isNotEmpty ? name[0] : 'W';
-                final isPrimary = item['isPrimary'] == true ||
+                final isPrimary =
+                    item['isPrimary'] == true ||
                     item['primary'] == true ||
-                    (!associatedItems.any((i) => i['isPrimary'] == true || i['primary'] == true) && index == 0);
+                    (!associatedItems.any(
+                          (i) => i['isPrimary'] == true || i['primary'] == true,
+                        ) &&
+                        index == 0);
 
                 return Container(
                   margin: const EdgeInsets.only(top: 8),
@@ -3108,7 +3830,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                               children: [
                                 Flexible(
                                   child: InkWell(
-                                    onTap: () => _navigateToEntityDetails(entityType, item),
+                                    onTap: () => _navigateToEntityDetails(
+                                      entityType,
+                                      item,
+                                    ),
                                     child: Text(
                                       name,
                                       style: GoogleFonts.poppins(
@@ -3123,11 +3848,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                                 if (isPrimary) ...[
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFEFF6FF),
                                       borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                                      border: Border.all(
+                                        color: const Color(0xFFBFDBFE),
+                                      ),
                                     ),
                                     child: Text(
                                       'PRIMARY',
@@ -3174,10 +3904,16 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                               item['isPrimary'] = true;
                               item['primary'] = true;
                             });
+                            if (onItemAction != null) {
+                              onItemAction('primary', item);
+                            }
                           } else if (value == 'remove') {
                             setState(() {
                               associatedItems.remove(item);
                             });
+                            if (onItemAction != null) {
+                              onItemAction('remove', item);
+                            }
                           }
                         },
                         itemBuilder: (context) => [
@@ -3259,11 +3995,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
             ),
-            child: Icon(
-              icon,
-              size: 18,
-              color: const Color(0xFF475569),
-            ),
+            child: Icon(icon, size: 18, color: const Color(0xFF475569)),
           ),
           const SizedBox(height: 6),
           Text(
@@ -3280,19 +4012,42 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
 
   void _openActivityModal(String type) async {
     final dealId = _recordId;
-    final name = widget.deal?.title.isNotEmpty == true ? widget.deal!.title : 'xyzzzz';
+    final name = widget.deal?.title.isNotEmpty == true
+        ? widget.deal!.title
+        : 'xyzzzz';
     dynamic result;
 
     if (type == 'Task') {
-      result = await CreateTaskModal.show(context, dealId: dealId, associatedRecordName: name);
+      result = await CreateTaskModal.show(
+        context,
+        dealId: dealId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Note') {
-      result = await CreateNoteModal.show(context, dealId: dealId, associatedRecordName: name);
+      result = await CreateNoteModal.show(
+        context,
+        dealId: dealId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Email') {
-      result = await CreateEmailModal.show(context, dealId: dealId, associatedRecordName: name);
+      result = await CreateEmailModal.show(
+        context,
+        dealId: dealId,
+        associatedRecordName: name,
+      );
     } else if (type == 'Call') {
-      result = await LogCallModal.show(context, dealId: dealId, associatedRecordName: name, activityType: type);
+      result = await LogCallModal.show(
+        context,
+        dealId: dealId,
+        associatedRecordName: name,
+        activityType: type,
+      );
     } else if (type == 'Meeting') {
-      result = await LogMeetingModal.show(context, dealId: dealId, associatedRecordName: name);
+      result = await LogMeetingModal.show(
+        context,
+        dealId: dealId,
+        associatedRecordName: name,
+      );
     }
 
     if (mounted && result != null && result != false) {
@@ -3363,7 +4118,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
           _selectedActivitySubTab = 5;
         }
         if (newActMap.isNotEmpty) {
-          _activities.removeWhere((item) => item['id']?.toString() == newActMap['id']?.toString());
+          _activities.removeWhere(
+            (item) => item['id']?.toString() == newActMap['id']?.toString(),
+          );
           _activities.insert(0, newActMap);
         }
         _tabController.animateTo(1); // Switch to Activities tab
@@ -3442,7 +4199,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                   )
                   .toList(),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(8),
@@ -3479,7 +4239,9 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF00A884), width: 1.5),
+                        color: const Color(0xFF00A884),
+                        width: 1.5,
+                      ),
                     ),
                     child: TextField(
                       controller: controller,
@@ -3489,8 +4251,10 @@ class _DealDetailsScreenState extends State<DealDetailsScreen>
                         color: const Color(0xFF1E293B),
                       ),
                       decoration: const InputDecoration(
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         border: InputBorder.none,
                       ),
                     ),

@@ -68,7 +68,7 @@ class ContactModel {
     }
 
     return ContactModel(
-      id: json['id'] as String? ?? '',
+      id: (json['id'] ?? json['_id'] ?? json['contactId'] ?? json['contact_id'] ?? json['objectId'])?.toString() ?? '',
       firstName: json['firstName'] as String? ?? json['first_name'] as String?,
       lastName: json['lastName'] as String? ?? json['last_name'] as String?,
       email: json['email'] as String? ?? '',

@@ -34,7 +34,30 @@ abstract class MasterDataRemoteDataSource {
     String? search,
     String? bookingSource,
     String? createdDateRange,
+    String? startDate,
+    String? endDate,
     String? priority,
+    Map<String, dynamic>? headers,
+  });
+  Future<Map<String, dynamic>> getActivitiesWithMeta({
+    String? ownerId,
+    String? status,
+    int? limit,
+    String? type,
+    int? page,
+    String? contactId,
+    String? companyId,
+    String? dealId,
+    String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
+    String? bookingSource,
+    String? createdDateRange,
+    String? startDate,
+    String? endDate,
+    String? priority,
+    Map<String, dynamic>? headers,
   });
   Future<List<Map<String, dynamic>>> getUnifiedTimeline({
     String? contactId,
@@ -288,7 +311,54 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     String? search,
     String? bookingSource,
     String? createdDateRange,
+    String? startDate,
+    String? endDate,
     String? priority,
+    Map<String, dynamic>? headers,
+  }) async {
+    final res = await getActivitiesWithMeta(
+      ownerId: ownerId,
+      status: status,
+      limit: limit,
+      type: type,
+      page: page,
+      contactId: contactId,
+      companyId: companyId,
+      dealId: dealId,
+      departmentId: departmentId,
+      sort: sort,
+      order: order,
+      search: search,
+      bookingSource: bookingSource,
+      createdDateRange: createdDateRange,
+      startDate: startDate,
+      endDate: endDate,
+      priority: priority,
+      headers: headers,
+    );
+    return (res['data'] as List).whereType<Map<String, dynamic>>().toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>> getActivitiesWithMeta({
+    String? ownerId,
+    String? status,
+    int? limit,
+    String? type,
+    int? page,
+    String? contactId,
+    String? companyId,
+    String? dealId,
+    String? departmentId,
+    String? sort,
+    String? order,
+    String? search,
+    String? bookingSource,
+    String? createdDateRange,
+    String? startDate,
+    String? endDate,
+    String? priority,
+    Map<String, dynamic>? headers,
   }) async {
     final queryParameters = <String, dynamic>{};
     if (ownerId != null && ownerId.isNotEmpty) {
@@ -310,6 +380,12 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
       queryParameters['createdDateRange'] = createdDateRange;
       queryParameters['created_date_range'] = createdDateRange;
     }
+    // `startDate`/`endDate` narrow the list by `scheduledAt`. They are read as
+    // timestamps, so a caller asking for a single day must send that day's
+    // bounds in full — a bare `endDate=2026-09-03` is that day's midnight and
+    // would exclude the whole day.
+    if (startDate != null && startDate.isNotEmpty) queryParameters['startDate'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParameters['endDate'] = endDate;
     if (priority != null && priority.isNotEmpty) queryParameters['priority'] = priority;
     if (contactId != null && contactId.isNotEmpty) {
       queryParameters['contactId'] = contactId;
@@ -331,14 +407,23 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     final response = await _apiService.get(
       ApiConstants.activities,
       queryParameters: queryParameters,
+      options: headers == null || headers.isEmpty ? null : Options(headers: headers),
     );
 
     final dynamic rawData = response.data;
     List<dynamic> list = [];
+    int total = 0;
 
     if (rawData is List) {
       list = rawData;
+      total = list.length;
     } else if (rawData is Map<String, dynamic>) {
+      if (rawData['meta'] is Map<String, dynamic>) {
+        final meta = rawData['meta'] as Map<String, dynamic>;
+        total = (meta['total'] ?? meta['totalCount'] ?? meta['count']) as int? ?? 0;
+      } else if (rawData['total'] is num) {
+        total = (rawData['total'] as num).toInt();
+      }
       if (rawData['data'] is List) {
         list = rawData['data'] as List;
       } else if (rawData['activities'] is List) {
@@ -348,33 +433,17 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
       }
     }
 
-    final String? firstRecordDeptId = list.isNotEmpty && list.first is Map
-        ? (list.first['departmentId'] ?? list.first['department_id'] ?? list.first['department']?['id'])?.toString()
-        : null;
-
-    debugPrint('========== DEPARTMENT DATA COMPARISON ==========');
-    debugPrint('DEPARTMENT REQUESTED: $departmentId');
-    debugPrint('REQUEST URL: ${ApiConstants.activities}?type=$type&department_id=$departmentId');
-    debugPrint('HTTP STATUS: ${response.statusCode}');
-    debugPrint('RECORD COUNT: ${list.length}');
-    debugPrint('FIRST RECORD DEPT ID: $firstRecordDeptId');
-    if (list.isNotEmpty) {
-      final sampleIds = list.map((item) => item['id'] ?? item['_id']).take(5).toList();
-      final sampleTitles = list.map((item) => item['title'] ?? item['subject'] ?? item['name']).take(5).toList();
-      debugPrint('FIRST 5 RECORD IDS: $sampleIds');
-      debugPrint('FIRST 5 RECORD TITLES: $sampleTitles');
-      if (list.first is Map) {
-        final firstMap = list.first as Map<String, dynamic>;
-        debugPrint('RAW JSON KEYS IN FIRST RECORD: ${firstMap.keys.toList()}');
-        debugPrint('DEPARTMENT FIELD IN RECORD: departmentId=${firstMap['departmentId']}, department_id=${firstMap['department_id']}, department=${firstMap['department']}');
-      }
-    }
-    debugPrint('===============================================');
-
-    return list
+    final items = list
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+
+    return {
+      'data': items,
+      'total': total > 0 ? total : items.length,
+      'page': page ?? 1,
+      'limit': limit ?? 25,
+    };
   }
 
   @override
@@ -520,33 +589,29 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
   @override
   Future<Map<String, dynamic>> createEmailTemplate(Map<String, dynamic> data) async {
     final payload = _templateWritePayload(data);
-    debugPrint('[POST ${ApiConstants.emailTemplates}] payload=$payload');
+    final String? deptId = (data['departmentId'] ?? data['department_id'])?.toString();
+    final queryParameters = <String, dynamic>{};
+    if (deptId != null && deptId.isNotEmpty) {
+      queryParameters['departmentId'] = deptId;
+      queryParameters['department_id'] = deptId;
+    }
+    debugPrint('[POST ${ApiConstants.emailTemplateWrite}] payload=$payload, queryParams=$queryParameters');
 
     try {
       final response = await _apiService.post(
-        ApiConstants.emailTemplates,
+        ApiConstants.emailTemplateWrite,
         data: payload,
+        queryParameters: queryParameters.isNotEmpty ? queryParameters : null,
+        options: deptId != null && deptId.isNotEmpty
+            ? Options(headers: {'departmentId': deptId, 'department_id': deptId})
+            : null,
       );
-      debugPrint('[POST ${ApiConstants.emailTemplates} SUCCESS]: ${response.data}');
+      debugPrint('[POST ${ApiConstants.emailTemplateWrite} SUCCESS]: ${response.data}');
       return _templateWriteResult(response.data);
     } on NetworkException catch (e) {
-      // A rejected template — a validation error, a permission problem — is
-      // reported with what the server said. Only a missing route is worth
-      // retrying elsewhere; posting a rejected body to the listing path was
-      // just a second failure with a worse message.
-      if (e.statusCode != 404 && e.statusCode != 405) {
-        debugPrint('[POST ${ApiConstants.emailTemplates} REJECTED ${e.statusCode}]: '
-            '${e.message} — ${e.data}');
-        rethrow;
-      }
-      debugPrint('[POST ${ApiConstants.emailTemplates} unsupported (${e.statusCode}), '
-          'retrying on ${ApiConstants.emailTemplatesList}]');
-      final response = await _apiService.post(
-        ApiConstants.emailTemplatesList,
-        data: payload,
-      );
-      debugPrint('[POST ${ApiConstants.emailTemplatesList} SUCCESS]: ${response.data}');
-      return _templateWriteResult(response.data);
+      debugPrint('[POST ${ApiConstants.emailTemplateWrite} REJECTED ${e.statusCode}]: '
+          '${e.message} — ${e.data}');
+      rethrow;
     }
   }
 
@@ -566,10 +631,16 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     return payload;
   }
 
+  /// The saved record out of a template write.
+  ///
+  /// The module answers `{ "success": true, "template": { ... } }` — the row
+  /// is under `template` (or `folder`), not the `data` the rest of the API
+  /// uses, so without this the caller reads a map with no `id` in it.
   Map<String, dynamic> _templateWriteResult(dynamic rawData) {
     if (rawData is Map<String, dynamic>) {
-      if (rawData['data'] is Map<String, dynamic>) {
-        return rawData['data'] as Map<String, dynamic>;
+      for (final key in const ['template', 'folder', 'data']) {
+        final wrapped = rawData[key];
+        if (wrapped is Map<String, dynamic>) return wrapped;
       }
       return rawData;
     }
@@ -578,31 +649,17 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
 
   @override
   Future<Map<String, dynamic>> createEmailTemplateFolder(Map<String, dynamic> data) async {
-    try {
-      final response = await _apiService.post(
-        '${ApiConstants.emailTemplates}/folders',
-        data: data,
-      );
-      debugPrint('[POST ${ApiConstants.emailTemplates}/folders SUCCESS]: ${response.data}');
-      final dynamic rawData = response.data;
-      if (rawData is Map<String, dynamic>) {
-        return rawData;
-      }
-      return {};
-    } catch (e) {
-      debugPrint('[POST ${ApiConstants.emailTemplates}/folders error, fallback]: $e');
-      try {
-        final response = await _apiService.post(
-          '${ApiConstants.emailTemplatesList}/folders',
-          data: data,
-        );
-        final dynamic rawData = response.data;
-        if (rawData is Map<String, dynamic>) {
-          return rawData;
-        }
-      } catch (_) {}
-      return {};
-    }
+    final payload = _templateWritePayload(data);
+    debugPrint('[POST ${ApiConstants.emailTemplateFolderWrite}] payload=$payload');
+
+    // Errors are propagated rather than swallowed into an empty map: a folder
+    // that was not created must not be reported to the screen as if it were.
+    final response = await _apiService.post(
+      ApiConstants.emailTemplateFolderWrite,
+      data: payload,
+    );
+    debugPrint('[POST ${ApiConstants.emailTemplateFolderWrite} SUCCESS]: ${response.data}');
+    return _templateWriteResult(response.data);
   }
 
   @override
@@ -610,25 +667,16 @@ class MasterDataRemoteDataSourceImpl implements MasterDataRemoteDataSource {
     // Same sanitising as create: the id belongs in the path, and a null folder
     // is an absent key rather than a null value.
     final payload = _templateWritePayload(data)..remove('id');
-    final path = '${ApiConstants.emailTemplates}/$id';
-    debugPrint('[PUT $path] payload=$payload');
+    final path = ApiConstants.emailTemplateById(id);
+    debugPrint('[PATCH $path] payload=$payload');
 
     try {
-      final response = await _apiService.put(path, data: payload);
-      debugPrint('[PUT $path SUCCESS]: ${response.data}');
+      final response = await _apiService.patch(path, data: payload);
+      debugPrint('[PATCH $path SUCCESS]: ${response.data}');
       return _templateWriteResult(response.data);
     } on NetworkException catch (e) {
-      if (e.statusCode != 404 && e.statusCode != 405) {
-        debugPrint('[PUT $path REJECTED ${e.statusCode}]: ${e.message} — ${e.data}');
-        rethrow;
-      }
-      debugPrint('[PUT $path unsupported (${e.statusCode}), retrying on the list path]');
-      final response = await _apiService.put(
-        '${ApiConstants.emailTemplatesList}/$id',
-        data: payload,
-      );
-      debugPrint('[PUT ${ApiConstants.emailTemplatesList}/$id SUCCESS]: ${response.data}');
-      return _templateWriteResult(response.data);
+      debugPrint('[PATCH $path REJECTED ${e.statusCode}]: ${e.message} — ${e.data}');
+      rethrow;
     }
   }
 

@@ -25,7 +25,7 @@ abstract class CompanyRepository {
 
   Future<CompanyModel> updateCompany(String id, Map<String, dynamic> companyData);
 
-  Future<bool> deleteCompany(String id);
+  Future<bool> deleteCompany(String id, {String? departmentId});
 }
 
 class CompanyRepositoryImpl implements CompanyRepository {
@@ -111,9 +111,9 @@ class CompanyRepositoryImpl implements CompanyRepository {
   }
 
   @override
-  Future<bool> deleteCompany(String id) async {
+  Future<bool> deleteCompany(String id, {String? departmentId}) async {
     try {
-      return await _remoteDataSource.deleteCompany(id);
+      return await _remoteDataSource.deleteCompany(id, departmentId: departmentId);
     } catch (e) {
       debugPrint('[DELETE /api/companies/$id ERROR]: $e');
       if (e is DioException) {
